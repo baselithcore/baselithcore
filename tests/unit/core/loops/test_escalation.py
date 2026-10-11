@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.loops.engineered import LoopOutcome
-from core.loops.escalation import build_default_escalation
+from baselith.core.loops.engineered import LoopOutcome
+from baselith.core.loops.escalation import build_default_escalation
 
 pytestmark = [pytest.mark.unit]
 

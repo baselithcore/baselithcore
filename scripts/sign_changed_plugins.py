@@ -4,11 +4,11 @@
 Two callers:
 
 * the ``sign-changed-plugins`` pre-commit hook runs it with no arguments, and
-  it re-signs every plugin under ``plugins/`` whose hashed files appear in the
+  it re-signs every plugin under ``baselith/plugins/`` whose hashed files appear in the
   staged change set, staging the rewritten manifests so one commit carries both
   the source change and the matching digest;
 * a human (or another tool) runs ``python scripts/sign_changed_plugins.py
-  plugins/<name>`` — or ``--all`` — to re-sign a tree on demand. In that mode
+  baselith/plugins/<name>`` — or ``--all`` — to re-sign a tree on demand. In that mode
   the git index is never touched.
 
 What gets written
@@ -60,7 +60,7 @@ except ImportError:
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PLUGINS_DIR = ROOT / "plugins"
+PLUGINS_DIR = ROOT / "baselith" / "plugins"
 
 #: Environment variable holding the hex Ed25519 private key. Matches the
 #: default of ``scripts/sign_plugin_ed25519.py`` so one key serves both tools.
@@ -69,18 +69,18 @@ SIGNING_KEY_ENV = "BASELITH_PLUGIN_SIGNING_KEY"
 
 
 def _load_core_module(name: str) -> ModuleType:
-    """Direct-load a ``core/plugins`` module without importing the package.
+    """Direct-load a ``baselith/core/plugins`` module without importing the package.
 
-    ``core.plugins.__init__`` pulls in pydantic/structlog and the whole config
+    ``baselith.core.plugins.__init__`` pulls in pydantic/structlog and the whole config
     stack, which is far too much for a pre-commit hook. Both modules loaded
     this way (``integrity``, ``signing``) are stdlib-only at import time by
-    design — see the note at the top of ``core/plugins/integrity.py``.
+    design — see the note at the top of ``baselith/core/plugins/integrity.py``.
     """
     spec = importlib.util.spec_from_file_location(
-        f"_plugin_signer_{name}", ROOT / "core" / "plugins" / f"{name}.py"
+        f"_plugin_signer_{name}", ROOT / "baselith" / "core" / "plugins" / f"{name}.py"
     )
     if spec is None or spec.loader is None:
-        print(f"Could not load core/plugins/{name}.py", file=sys.stderr)
+        print(f"Could not load baselith/core/plugins/{name}.py", file=sys.stderr)
         sys.exit(1)
     module = importlib.util.module_from_spec(spec)
     # Register before executing: ``dataclasses`` with ``slots=True`` resolves
@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Re-sign every plugin under plugins/ (never touches the git index).",
+        help="Re-sign every plugin under baselith/plugins/ (never touches the git index).",
     )
     args = parser.parse_args(argv)
 

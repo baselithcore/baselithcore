@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from core.agent import Agent, AgentOutputValidationError, AgentResult
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.agent import Agent, AgentOutputValidationError, AgentResult
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class CityInfo(BaseModel):

@@ -9,7 +9,7 @@ Tests for task prioritization:
 
 from datetime import UTC, datetime, timedelta
 
-from core.prioritization import (
+from baselith.core.prioritization import (
     DependencyGraph,
     PriorityQueue,
     Task,
@@ -335,7 +335,7 @@ class TestTaskPrioritizerConfig:
 
     def test_config_injection(self):
         """Test leveraging PrioritizationConfig."""
-        from core.config.prioritization import PrioritizationConfig
+        from baselith.core.config.prioritization import PrioritizationConfig
 
         config = PrioritizationConfig(
             WEIGHT_URGENCY=0.5,

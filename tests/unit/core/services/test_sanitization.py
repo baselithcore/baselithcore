@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from core.services.sanitization import (
+from baselith.core.services.sanitization import (
     InputSanitizer,
     sanitize_html,
     sanitize_identifier,

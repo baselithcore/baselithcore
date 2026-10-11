@@ -5,7 +5,7 @@
 degradation: every RLS policy then matches the ``default`` tenant's rows, so a
 background job with no tenant bound reads and writes another tenant's data
 while the database believes isolation is enforced. Out-of-request callers now
-have to say so, via :func:`core.db.connection.system_tenant_scope`.
+have to say so, via :func:`baselith.core.db.connection.system_tenant_scope`.
 """
 
 from contextlib import contextmanager
@@ -13,14 +13,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core import context as core_context
-from core.context import (
+from baselith.core import context as core_context
+from baselith.core.context import (
     TenantContextError,
     get_current_tenant_id,
     reset_tenant_context,
     set_tenant_context,
 )
-from core.db import connection as db_connection
+from baselith.core.db import connection as db_connection
 
 
 @contextmanager
@@ -114,7 +114,7 @@ def test_system_tenant_id_is_exported():
 
 async def test_schema_init_runs_under_the_system_tenant(monkeypatch):
     """Migrations are the canonical out-of-request DB work."""
-    from core.db import schema
+    from baselith.core.db import schema
 
     observed: list[str] = []
 
@@ -133,8 +133,8 @@ async def test_schema_init_runs_under_the_system_tenant(monkeypatch):
 
 async def test_postgres_bootstrap_runs_under_the_system_tenant(monkeypatch):
     """``initialize_postgres`` builds the storage layer before any request."""
-    from core import storage as storage_module
-    from core.bootstrap import lazy_init
+    from baselith.core import storage as storage_module
+    from baselith.core.bootstrap import lazy_init
 
     observed: list[str] = []
 
@@ -161,10 +161,10 @@ async def test_vectorstore_bootstrap_runs_under_the_system_tenant(monkeypatch):
 
     Unscoped, the ``TenantContextError`` was rewrapped as ``VectorStoreError``
     by ``VectorStoreService.create_collection`` and sailed past the
-    ``except ImportError`` in ``core.api.lifespan``, so a deployment running
+    ``except ImportError`` in ``baselith.core.api.lifespan``, so a deployment running
     ``DB_RLS_ENABLED=true`` with ``VECTORSTORE_PROVIDER=pgvector`` did not boot.
     """
-    from core.bootstrap import lazy_init
+    from baselith.core.bootstrap import lazy_init
 
     observed: list[str] = []
 
@@ -173,7 +173,7 @@ async def test_vectorstore_bootstrap_runs_under_the_system_tenant(monkeypatch):
             observed.append(get_current_tenant_id())
 
     monkeypatch.setattr(
-        "core.services.vectorstore.get_vectorstore_service", lambda: _Service()
+        "baselith.core.services.vectorstore.get_vectorstore_service", lambda: _Service()
     )
 
     with no_tenant():
@@ -183,14 +183,14 @@ async def test_vectorstore_bootstrap_runs_under_the_system_tenant(monkeypatch):
 
 
 async def test_vectorstore_bootstrap_restores_the_previous_tenant(monkeypatch):
-    from core.bootstrap import lazy_init
+    from baselith.core.bootstrap import lazy_init
 
     class _Service:
         async def create_collection(self, *args, **kwargs) -> None:
             return None
 
     monkeypatch.setattr(
-        "core.services.vectorstore.get_vectorstore_service", lambda: _Service()
+        "baselith.core.services.vectorstore.get_vectorstore_service", lambda: _Service()
     )
 
     with no_tenant():
@@ -199,22 +199,22 @@ async def test_vectorstore_bootstrap_restores_the_previous_tenant(monkeypatch):
 
 
 class TestTenantIsBound:
-    """``core.context.tenant_is_bound`` is the public form of the question.
+    """``baselith.core.context.tenant_is_bound`` is the public form of the question.
 
-    The RLS check used to reach into ``core.context._tenant_context`` because
+    The RLS check used to reach into ``baselith.core.context._tenant_context`` because
     ``get_current_tenant_id`` conflates "unbound" with the ``"default"``
     fallback unless ``strict_tenant_isolation`` happens to be on — an unrelated
     switch that RLS must not depend on.
     """
 
     def test_false_when_nothing_is_bound(self):
-        from core.context import tenant_is_bound
+        from baselith.core.context import tenant_is_bound
 
         with no_tenant():
             assert tenant_is_bound() is False
 
     def test_true_when_a_tenant_is_bound(self):
-        from core.context import tenant_is_bound
+        from baselith.core.context import tenant_is_bound
 
         token = set_tenant_context("acme")
         try:
@@ -223,7 +223,7 @@ class TestTenantIsBound:
             reset_tenant_context(token)
 
     def test_true_inside_the_system_scope(self):
-        from core.context import tenant_is_bound
+        from baselith.core.context import tenant_is_bound
 
         with no_tenant(), db_connection.system_tenant_scope():
             assert tenant_is_bound() is True

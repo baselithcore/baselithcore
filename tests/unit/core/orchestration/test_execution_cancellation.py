@@ -14,11 +14,11 @@ import asyncio
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_FAILED,
     InMemoryCheckpointStore,
 )
-from core.orchestration.mixins.execution import ExecutionMixin
+from baselith.core.orchestration.mixins.execution import ExecutionMixin
 
 pytestmark = [pytest.mark.unit]
 

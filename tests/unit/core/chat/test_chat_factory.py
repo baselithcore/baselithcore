@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.chat.dependencies import ChatDependencyConfig
-from core.chat.factory import (
+from baselith.core.chat.dependencies import ChatDependencyConfig
+from baselith.core.chat.factory import (
     _invoke_service_factory,
     _split_import_path,
     chat_service_factory,
@@ -15,8 +15,8 @@ from core.chat.factory import (
 )
 
 
-@patch("core.chat.factory.create_default_dependencies")
-@patch("core.chat.factory.ChatService")
+@patch("baselith.core.chat.factory.create_default_dependencies")
+@patch("baselith.core.chat.factory.ChatService")
 def test_chat_service_factory(mock_service, mock_deps):
     service = chat_service_factory()
     mock_deps.assert_called_once()
@@ -24,8 +24,8 @@ def test_chat_service_factory(mock_service, mock_deps):
     assert service == mock_service.return_value
 
 
-@patch("core.chat.factory.create_default_dependencies")
-@patch("core.chat.factory.ChatService")
+@patch("baselith.core.chat.factory.create_default_dependencies")
+@patch("baselith.core.chat.factory.ChatService")
 def test_create_chat_service_from_config(mock_service, mock_deps):
     config = ChatDependencyConfig()
     service = create_chat_service_from_config(config)
@@ -52,9 +52,9 @@ def test_load_chat_dependency_config_invalid(tmp_path):
         load_chat_dependency_config(config_file)
 
 
-@patch("core.chat.factory._load_config_from_path")
-@patch("core.chat.factory._load_factory")
-@patch("core.chat.factory._invoke_service_factory")
+@patch("baselith.core.chat.factory._load_config_from_path")
+@patch("baselith.core.chat.factory._load_factory")
+@patch("baselith.core.chat.factory._invoke_service_factory")
 def test_resolve_chat_service(mock_invoke, mock_load_factory, mock_load_config):
     mock_load_factory.return_value = MagicMock()
     mock_load_config.return_value = MagicMock()
@@ -93,7 +93,7 @@ def test_invoke_service_factory():
 
 
 def test_invoke_dependencies_factory():
-    from core.chat.factory import _invoke_dependencies_factory
+    from baselith.core.chat.factory import _invoke_dependencies_factory
 
     mock_factory = MagicMock()
     config = MagicMock()
@@ -116,12 +116,12 @@ def test_invoke_dependencies_factory():
 
 
 def test_chat_service_proxy_is_lazy():
-    from core.chat import service as chat_service_module
+    from baselith.core.chat import service as chat_service_module
 
     original_service = chat_service_module._chat_service
     try:
         chat_service_module._chat_service = None
-        with patch("core.chat.service.ChatService") as mock_service_cls:
+        with patch("baselith.core.chat.service.ChatService") as mock_service_cls:
             proxy = chat_service_module.chat_service
             assert chat_service_module._chat_service is None
             _ = proxy.handle_chat_async
@@ -131,9 +131,9 @@ def test_chat_service_proxy_is_lazy():
         chat_service_module._chat_service = original_service
 
 
-@patch("core.chat.factory.get_chat_config")
+@patch("baselith.core.chat.factory.get_chat_config")
 def test_load_config_from_path_env(mock_get_config, tmp_path):
-    from core.chat.factory import _load_config_from_path
+    from baselith.core.chat.factory import _load_config_from_path
 
     # Case 1: Path given
     path = tmp_path / "explicit.json"
@@ -149,10 +149,10 @@ def test_load_config_from_path_env(mock_get_config, tmp_path):
         _load_config_from_path(Path("missing.json"))
 
 
-@patch("core.chat.factory.import_module")
-@patch("core.chat.factory.get_chat_config")
+@patch("baselith.core.chat.factory.import_module")
+@patch("baselith.core.chat.factory.get_chat_config")
 def test_load_factory_dynamic(mock_get_config, mock_import):
-    from core.chat.factory import _load_factory
+    from baselith.core.chat.factory import _load_factory
 
     # Default fallback
     mock_get_config.return_value.service_factory = None

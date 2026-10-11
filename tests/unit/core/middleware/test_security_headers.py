@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.middleware.security import SecurityHeadersMiddleware
+from baselith.core.middleware.security import SecurityHeadersMiddleware
 
 
 async def _run_security_headers_middleware(

@@ -6,7 +6,7 @@ Tests for the peer registry, registration health tracking and discovery.
 
 import time
 
-from core.a2a import (
+from baselith.core.a2a import (
     AgentCard,
     AgentDiscovery,
     AgentRegistration,

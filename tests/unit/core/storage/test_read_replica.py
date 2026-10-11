@@ -1,9 +1,9 @@
-"""Tests for opt-in read-replica routing in core.db.connection."""
+"""Tests for opt-in read-replica routing in baselith.core.db.connection."""
 
 import pytest
 
-from core.config.storage import StorageConfig
-from core.db import connection as conn
+from baselith.core.config.storage import StorageConfig
+from baselith.core.db import connection as conn
 
 
 class TestReplicaConfig:

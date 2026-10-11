@@ -1,6 +1,6 @@
 """Tests for the orchestration enforcement chokepoint.
 
-Verifies that ``core.orchestration.enforcement`` actually enforces the loop
+Verifies that ``baselith.core.orchestration.enforcement`` actually enforces the loop
 budget, agent contract, and autonomy approval primitives that
 ``ExecutionMixin`` places on the context — and that it is a strict no-op when a
 primitive is absent (backward compatibility).
@@ -10,22 +10,22 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     ApprovalRequiredError,
     AutonomyLevel,
     AutonomyPolicy,
 )
-from core.orchestration.contract import (
+from baselith.core.orchestration.contract import (
     AgentContract,
     Capabilities,
     ContractValidator,
     ContractViolationError,
 )
-from core.orchestration.enforcement import (
+from baselith.core.orchestration.enforcement import (
     enforce_iteration,
     enforce_tool_invocation,
 )
-from core.orchestration.limits import (
+from baselith.core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
     LoopLimits,
@@ -143,7 +143,7 @@ class _RecordingSink:
 
 @pytest.fixture
 def audit_sink(monkeypatch):
-    from core.observability import audit as audit_module
+    from baselith.core.observability import audit as audit_module
 
     sink = _RecordingSink()
     logger = audit_module.AuditLogger(sinks=[sink])
@@ -158,7 +158,7 @@ async def test_tool_invocation_emits_audit_event(audit_sink) -> None:
         "read_only",
         args={"q": "x"},
     )
-    from core.observability.audit import AuditEventType
+    from baselith.core.observability.audit import AuditEventType
 
     invoke = [
         e for e in audit_sink.events if e.event_type == AuditEventType.TOOL_INVOKE
@@ -176,7 +176,7 @@ async def test_blocked_tool_emits_blocked_audit(audit_sink) -> None:
     ctx = {"contract_validator": _contract(forbidden=["delete_db"])}
     with pytest.raises(ContractViolationError):
         await enforce_tool_invocation(ctx, "delete_db")
-    from core.observability.audit import AuditEventType
+    from baselith.core.observability.audit import AuditEventType
 
     blocked = [
         e for e in audit_sink.events if e.event_type == AuditEventType.TOOL_BLOCKED
@@ -187,7 +187,7 @@ async def test_blocked_tool_emits_blocked_audit(audit_sink) -> None:
 
 
 async def test_pre_hook_dispatched_and_can_block(audit_sink) -> None:
-    from core.orchestration.hooks import ToolHookRegistry
+    from baselith.core.orchestration.hooks import ToolHookRegistry
 
     registry = ToolHookRegistry()
     seen = []
@@ -208,7 +208,7 @@ async def test_pre_hook_dispatched_and_can_block(audit_sink) -> None:
 
 
 async def test_rate_limiter_enforced_from_context(audit_sink) -> None:
-    from core.orchestration.rate_limit import (
+    from baselith.core.orchestration.rate_limit import (
         ToolRateLimiter,
         ToolRateLimitExceededError,
     )

@@ -1,13 +1,13 @@
 """
-Tests for core.reflection.agent module.
+Tests for baselith.core.reflection.agent module.
 """
 
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from core.reflection.agent import ReflectionAgent
-from core.reflection.protocols import EvaluationResult, QualityLevel
+from baselith.core.reflection.agent import ReflectionAgent
+from baselith.core.reflection.protocols import EvaluationResult, QualityLevel
 
 
 class TestReflectionAgentInit:

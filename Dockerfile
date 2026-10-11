@@ -55,7 +55,7 @@ ARG RERANKER_MODEL="cross-encoder/ms-marco-MiniLM-L-6-v2"
 # `local` (default): torch, sentence-transformers and the pre-cached models,
 # for plugins that still run a model in-process. `remote`: none of them —
 # embedding and reranking come from the core inference services (TEI over
-# HTTP, core.services.inference), so the API image carries no ML runtime. Any
+# HTTP, baselith.core.services.inference), so the API image carries no ML runtime. Any
 # plugin listed in configs/inprocess_ml_allowlist.yaml needs `local`.
 ARG ML_RUNTIME="local"
 
@@ -110,15 +110,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #     binaries — `tesseract` and poppler's `pdftoppm` — and no stage here
 #     installs either. Verified on the built image: `pytesseract
 #     .get_tesseract_version()` raises TesseractNotFoundError and `command -v
-#     pdftoppm` finds nothing. plugins/document_sources/ocr_backends.py catches
+#     pdftoppm` finds nothing. baselith/plugins/document_sources/ocr_backends.py catches
 #     that and degrades, so nothing crashed; the packages were simply ~10MB of
 #     a capability the image can never deliver. An operator who needs OCR
 #     derives an image that apt-installs tesseract-ocr + poppler-utils and adds
 #     the extra back.
 #   * `computer_use` (pyautogui, mss). Both need an X11 display. In this
 #     headless server image `import pyautogui` raises KeyError: 'DISPLAY' and
-#     mss raises "Cannot connect to display". The import guards in
-#     plugins/baselithbot/computer_use/ already treat them as optional.
+#     mss raises "Cannot connect to display". Nothing in this repo
+#     imports them.
 #
 # The `grep -v` drops the CUDA runtime, triton and the CUDA Python bindings.
 # They are dependencies of the PyPI torch wheel, which is what uv.lock
@@ -250,9 +250,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # --- The spaCy pipeline ---
 # spaCy and its compiled stack (thinc, blis, its slice of numpy) are ~160MB of
-# this image, and without a MODEL they buy nothing: core/config/processing.py
+# this image, and without a MODEL they buy nothing: baselith/core/config/processing.py
 # ships `enable_spacy_documents: bool = Field(default=True)` with
-# `spacy_model="en_core_web_sm"`, and core/nlp/spacy_utils.py catches the
+# `spacy_model="en_core_web_sm"`, and baselith/core/nlp/spacy_utils.py catches the
 # resulting OSError and falls back to `spacy.blank()` — a sentencizer, no NER,
 # no tagger, no lemmatiser. Verified on the built image before this step
 # existed: `spacy.load("en_core_web_sm")` raised E050.
@@ -343,7 +343,7 @@ PY
 # Stage 2: the project's own distribution
 # ============================================================
 # Installed with --no-deps into a SEPARATE prefix, for one reason: the console
-# script. `[project.scripts] baselith = core.cli.__main__:main` only exists on
+# script. `[project.scripts] baselith = baselith.core.cli.__main__:main` only exists on
 # PATH if the distribution is installed, and the Helm chart's worker runs
 # `baselith queue worker` while `baselith doctor` is the documented way to
 # diagnose a deployment. A separate prefix keeps the 1.89GB dependency layer
@@ -352,31 +352,35 @@ PY
 #
 # The app still RUNS from /app, so this tree exists for its entry points, not
 # to be imported — and the `rm -rf` below is what makes that true rather than
-# merely intended. `pip install .` also materialises core/ and plugins/ inside
-# the prefix, and PYTHONPATH lists /install-app BEFORE /app, so which copy won
-# depended on the working directory. Measured on the built image:
+# merely intended. `pip install .` also materialises the whole baselith/
+# package (facade, core and the bundled plugins) inside the prefix, and
+# PYTHONPATH lists /install-app BEFORE /app, so which copy won depended on the
+# working directory. Measured on the built image (0.x, before the namespace
+# move, when the packages were still top-level `core` and `plugins`):
 #
 #   cwd=/      import core -> /install-app/lib/python3.12/site-packages/core
-#   cwd=/app   import core -> /app/core
+#   cwd=/app   import core -> the source tree copied into /app
 #
 # uvicorn runs from WORKDIR /app, so the API was always reading the right tree;
 # the `baselith` console script invoked from anywhere else was not. That split
 # matters because the CLI WRITES — `baselith plugin enable` rewrites
 # configs/plugins.yaml — so a command run from the wrong directory would have
-# edited a tree the API never reads. Deleting the packages leaves /app as the
-# only importable copy for every entry point, and takes 24.6MB of duplicate
-# source (17MB core, 7MB plugins) out of the image as a side effect.
+# edited a tree the API never reads. Deleting the package leaves /app as the
+# only importable copy for every entry point, and takes ~25MB of duplicate
+# source out of the image as a side effect. Since 1.0, core and plugins live
+# under baselith/, so the whole baselith/ package goes: a half-deleted copy
+# (facade left, core removed) would shadow /app/baselith and fail to import
+# baselith.core at all.
 #
 # The dist-info stays: it is what `importlib.metadata` resolves the installed
 # version from, and it carries the console script's entry point.
 FROM deps AS app
 
 COPY pyproject.toml README.md ./
-# `baselith/` is the public facade every downstream import goes through. It is
-# in `packages.find.include`, so the wheel built here needs its source present.
+# `baselith/` is the one top-level package: the public facade every downstream
+# import goes through, the core and the bundled plugins. It is what
+# `packages.find.include` selects, so the wheel built here needs it present.
 COPY baselith/ baselith/
-COPY core/ core/
-COPY plugins/ plugins/
 # The build itself needs these two: `[tool.setuptools] cmdclass` points
 # build_py at build_support/scaffold_templates.py, which copies the `baselith
 # init` starters out of templates/ into the wheel. Without them `pip install .`
@@ -388,8 +392,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps --prefix /install-app . \
     && PYTHONPATH=/install/lib/python3.12/site-packages:/install-app/lib/python3.12/site-packages \
        pip check \
-    && rm -rf /install-app/lib/python3.12/site-packages/core \
-              /install-app/lib/python3.12/site-packages/plugins \
+    && rm -rf /install-app/lib/python3.12/site-packages/baselith \
     && test -x /install-app/bin/baselith
 
 # ============================================================
@@ -500,8 +503,8 @@ COPY --from=deps --chown=appuser:appuser /build/models /app/models
 #
 # So the unreachable binary is the FULL Chromium, and not only because nothing
 # asks for it by name: it is what `headless=False` would launch, and headless
-# is false nowhere that matters (plugins/browser_agent/tools.py hardcodes True,
-# plugins/document_sources/web.py hardcodes True, core/config/scraper.py's
+# is false nowhere that matters (baselith/plugins/browser_agent/tools.py hardcodes True,
+# baselith/plugins/document_sources/web.py hardcodes True, baselith/core/config/scraper.py's
 # `playwright_headless` defaults to it). More to the point it CANNOT work here
 # — a headed browser needs a display, and no stage installs Xvfb or an X
 # client, nor do the compose files or deploy/ provide one. Verified on the
@@ -536,16 +539,14 @@ COPY --from=app /install-app /install-app
 # --- Application source ---
 # Owned by appuser, because the app writes inside its own tree: it rewrites
 # configs/plugins.yaml on every plugin enable/disable, and a plugin may persist
-# state under its own directory (baselithbot's .state/.secret_key).
+# state under its own directory.
 COPY --chown=appuser:appuser backend.py ./
 # Alembic config for the pre-deploy Job's `alembic upgrade head`. The scripts
-# themselves live in core/db/migrations (copied with core/ below); alembic.ini
+# themselves live in baselith/core/db/migrations (copied with baselith/ below); alembic.ini
 # points there relative to itself, and the in-app ensure_schema() and
 # `baselith db migrate` locate them through the package, not the cwd.
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser baselith/ baselith/
-COPY --chown=appuser:appuser core/ core/
-COPY --chown=appuser:appuser plugins/ plugins/
 COPY --chown=appuser:appuser configs/ configs/
 # --- Maintenance scripts: an explicit allowlist, not the directory ---
 # `COPY scripts/ scripts/` shipped the whole repository toolbox into the
@@ -560,8 +561,8 @@ COPY --chown=appuser:appuser configs/ configs/
 # Nothing the image runs needs any of it. The API entrypoint is
 # `uvicorn backend:app`, the worker is `baselith queue worker` (a console
 # script from /install-app), and the migration Job runs `alembic upgrade head`
-# against alembic.ini + core/db/migrations/, both copied above. Verified by grepping
-# core/, backend.py, the compose files and every Helm template for a reference
+# against alembic.ini + baselith/core/db/migrations/, both copied above. Verified by grepping
+# baselith/core/, backend.py, the compose files and every Helm template for a reference
 # to scripts/ — the only one was this COPY.
 #
 # The operational shell scripts (backup-db.sh, restore-db.sh, verify-backup.sh,
@@ -572,24 +573,17 @@ COPY --chown=appuser:appuser configs/ configs/
 COPY --chown=appuser:appuser templates/ templates/
 
 # --- Precompile the application bytecode ---
-# pip already ships .pyc for site-packages, but core/ and plugins/ arrive as
+# pip already ships .pyc for site-packages, but baselith/core/ and baselith/plugins/ arrive as
 # source, so every worker — and every restart during a rolling deploy — would
 # recompile them on boot. checked-hash .pyc files stay valid regardless of
 # mtimes and are re-validated against the source, so a bind-mounted edit in
 # development is never served from a stale cache.
 RUN python -m compileall -q --invalidation-mode checked-hash \
-    /app/backend.py /app/core /app/plugins
+    /app/backend.py /app/baselith/core /app/baselith/plugins
 
 # --- Writable runtime directories ---
-# state/baselithbot is the mount point of compose.prod.yaml's plugin_state
-# volume (BASELITHBOT_STATE_DIR). It must exist in the image, owned by appuser
-# and 0700: Docker seeds an empty named volume from the image directory it is
-# mounted on, ownership included, and a mount point the image lacks is created
-# root-owned — a fresh volume the plugin could not write its key into.
-RUN mkdir -p data logs documents qdrant_data state/baselithbot \
-    && chown appuser:appuser /app data logs documents qdrant_data \
-        state state/baselithbot \
-    && chmod 0700 state/baselithbot
+RUN mkdir -p data logs documents qdrant_data \
+    && chown appuser:appuser /app data logs documents qdrant_data
 
 # --- Debian security updates ---
 # LAST, and the position is the whole point.
@@ -617,7 +611,7 @@ RUN mkdir -p data logs documents qdrant_data state/baselithbot \
 #     never again — and everything below it (the 1.89GB dependency copy, the
 #     1.39GB Chromium install) would have had to rebuild to force it. Here, the
 #     source COPYs above already change on every release (semantic-release
-#     rewrites core/_version.py), so this layer is rebuilt every release for
+#     rewrites baselith/core/_version.py), so this layer is rebuilt every release for
 #     free, and it is the only one that is. Re-tagging an unchanged tree reuses
 #     it, which is the honest limit of the arrangement.
 #
@@ -626,7 +620,7 @@ RUN mkdir -p data logs documents qdrant_data state/baselithbot \
 #
 # pip rides in the same layer, for the same reason. The base image ships pip
 # 25.0.1 in /usr/local and that copy is the one runtime pip there is —
-# `baselith plugin deps install` (core/marketplace/installer.py) runs
+# `baselith plugin deps install` (baselith/core/marketplace/installer.py) runs
 # `sys.executable -m pip` — so it cannot simply be removed. 25.0.1 carries five
 # advisories fixed by 26.2.0 (CVE-2025-8869, CVE-2026-3219, CVE-2026-6357,
 # CVE-2026-8643, CVE-2026-13346: symlink, archive and entry-point handling

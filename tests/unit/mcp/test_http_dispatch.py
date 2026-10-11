@@ -1,6 +1,6 @@
 """The HTTP transport's request dispatch: what comes back on a single body.
 
-Both HTTP paths run the message through :class:`~core.mcp.dispatch.RequestDispatcher`,
+Both HTTP paths run the message through :class:`~baselith.core.mcp.dispatch.RequestDispatcher`,
 which gives a request its own cancellable task and its progress context. That
 same dispatcher installs its sender as the progress channel, so everything a
 handler emits — notifications included — arrives through one collector; these
@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from core.mcp.http_transport import (
+from baselith.core.mcp.http_transport import (
     PROTOCOL_HEADER,
     SESSION_HEADER,
     create_mcp_http_router,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 from .test_http_transport import _asgi_client, _config, _initialize_msg
 
@@ -28,7 +28,7 @@ async def test_progress_notification_does_not_replace_the_result():
     """The dispatcher installs its sender as the progress channel, so a handler
     calling report_progress emits a notification through the same collector the
     response arrives on. The response is the one correlated to the request."""
-    from core.mcp.progress import report_progress
+    from baselith.core.mcp.progress import report_progress
 
     server = MCPServer(name="progress-server", version="1.0.0")
 

@@ -7,13 +7,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.plugin_updates.apply.boot_report import PluginBootState
-from core.plugin_updates.apply.executor import Executor
-from core.plugin_updates.apply.models import ApplyRun, RunKind
-from core.plugin_updates.apply.store import RunStore
-from core.plugin_updates.cache import UpdateCache
-from core.plugins.signing import generate_keypair_hex
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.plugin_updates.apply.boot_report import PluginBootState
+from baselith.core.plugin_updates.apply.executor import Executor
+from baselith.core.plugin_updates.apply.models import ApplyRun, RunKind
+from baselith.core.plugin_updates.apply.store import RunStore
+from baselith.core.plugin_updates.cache import UpdateCache
+from baselith.core.plugins.signing import generate_keypair_hex
 
 from ..test_checker import _signed_tarball
 from .fakes import FakeFetcher, FakeRunner, write_report

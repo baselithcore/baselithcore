@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from core.workflows.adapters import CrewNodeAdapter
-from core.workflows.builder import WorkflowBuilder
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.workflows.adapters import CrewNodeAdapter
+from baselith.core.workflows.builder import WorkflowBuilder
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
 
 class _FakeCrew:
@@ -79,7 +79,7 @@ class _FakeColony:
 
 @pytest.mark.asyncio
 async def test_colony_adapter_runs_prompt_as_swarm_task():
-    from core.workflows.adapters import ColonyNodeAdapter
+    from baselith.core.workflows.adapters import ColonyNodeAdapter
 
     async def execute(task, agent):  # pragma: no cover - not invoked by fake
         return "unused"
@@ -97,7 +97,7 @@ async def test_colony_adapter_runs_prompt_as_swarm_task():
 
 @pytest.mark.asyncio
 async def test_colony_adapter_raises_on_failed_or_unassigned():
-    from core.workflows.adapters import ColonyNodeAdapter
+    from baselith.core.workflows.adapters import ColonyNodeAdapter
 
     async def execute(task, agent):  # pragma: no cover
         return "unused"

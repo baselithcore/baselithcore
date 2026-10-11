@@ -9,9 +9,9 @@ personas debate internally to produce balanced, well-reasoned responses.
 import asyncio
 import logging
 
-from core.meta import MultiPersonaAgent, PersonaEnsemble
-from core.observability.logging import get_logger
-from core.personas import Persona
+from baselith.core.meta import MultiPersonaAgent, PersonaEnsemble
+from baselith.core.observability.logging import get_logger
+from baselith.core.personas import Persona
 
 logging.basicConfig(level=logging.INFO)
 logger = get_logger(__name__)

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.mcp.http_authz import resource_identifier, token_audience_rejected
+from baselith.core.mcp.http_authz import resource_identifier, token_audience_rejected
 
 from .test_http_transport import (
     _app,
@@ -36,7 +36,7 @@ def _bearer_user(user_id: str = "u-1", *, aud=None, scopes=("mcp:invoke",)):
 
 
 def _install(monkeypatch, user):
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     monkeypatch.setattr(
         auth_manager_module, "get_auth_manager", lambda: _StubAuthManager(user)
@@ -123,7 +123,7 @@ class TestMissingAudience:
         self, monkeypatch
     ) -> None:
         """Unset resolves at request time: required in production, not elsewhere."""
-        import core.mcp.http_authz as http_authz
+        import baselith.core.mcp.http_authz as http_authz
 
         _install(monkeypatch, _bearer_user(aud=None))
         config = _config(mcp_http_require_auth=True)  # setting absent entirely
@@ -149,7 +149,7 @@ class TestOperatorOverride:
     async def test_production_default_still_enforces_the_mismatch(
         self, monkeypatch
     ) -> None:
-        import core.mcp.http_authz as http_authz
+        import baselith.core.mcp.http_authz as http_authz
 
         _install(monkeypatch, _bearer_user(aud="https://other.example/api"))
         monkeypatch.setattr(http_authz, "is_production_env", lambda: True)
@@ -210,7 +210,7 @@ class TestApiKeysAreExempt:
         self, monkeypatch
     ) -> None:
         """An API key is not an OAuth token and carries no audience to bind."""
-        import core.mcp.http_authz as http_authz
+        import baselith.core.mcp.http_authz as http_authz
 
         _install(monkeypatch, _bearer_user(aud=None))
         monkeypatch.setattr(http_authz, "is_production_env", lambda: True)

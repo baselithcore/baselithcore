@@ -1,0 +1,205 @@
+"""
+Prompt Builder.
+
+Provides utilities for building LLM prompts.
+
+The conversation system prompt is **prompt-as-code**: the canonical template
+lives in ``baselith/core/chat/prompts/conversation_system.md`` (YAML front matter +
+body, reviewed and versioned in git) and is served through the global
+:class:`~baselith.core.prompts.registry.PromptRegistry` under the name
+``conversation_system``. Deployments can override it — new versions or a
+different ``production`` label — by shipping their own catalog via
+``BASELITH_PROMPTS_DIR``; every render emits a ``prompt.render`` span carrying
+name/version/checksum so LLM spans are attributable to a prompt version.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+from baselith.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
+CONVERSATION_PROMPT_NAME = "conversation_system"
+
+# Generic conversation system prompt - plugins can extend this.
+# v2: rewritten against modern prompting guidance — the grounding constraint is
+# stated once with its reason instead of restated five times as a prohibition
+# wall, and the emphasis/emoji scaffolding written for older models is gone
+# (on current models it causes rigidity, not compliance). Every real product
+# constraint (context-only answers, empty-context fallback message, sources
+# rendered by the app, tone) is preserved.
+# v3: the only per-request value (the date) moved from the first paragraph to
+# the last line, so everything above it is a byte-stable prefix — the part a
+# provider's automatic prefix cache (OpenAI) or an operator-supplied longer
+# catalog prompt can actually reuse; a date in the opening sentence broke the
+# shared prefix at ~60 tokens.
+CONVERSATION_SYSTEM_PROMPT = """
+# AI Assistant – System Prompt
+
+You are an assistant that answers questions about the user's business documents — extracting requirements, identifying key concepts, actors, and objectives, and summarizing what the documentation says.
+
+Ground every answer in the CONTEXT section and the conversation history. The user relies on these answers as a faithful reading of their own documents, so anything the CONTEXT does not support stays out of the answer — including requirements, actors, or details that general knowledge could plausibly fill in. When the CONTEXT does not contain the information needed to answer, say so plainly:
+
+> ⚠️ I did not find relevant information in the documents.
+
+Style:
+
+- Professional, concise, and technical. Write structured Markdown; prefer prose and bullets, and use tables only for genuinely tabular comparisons.
+- Answer the question directly, without personal opinions or padding.
+- Leave sources (file names, URLs, paths) out of the answer: the application renders them in a separate section, so repeating them duplicates the UI.
+
+You will receive, in this order:
+
+1. Recent conversation (if present).
+2. Any additional context from plugins.
+3. CONTEXT built from relevant documents.
+4. The user's QUESTION.
+
+The current date is {current_date}.
+""".strip()
+
+# Split the system prompt once around its single ``{current_date}`` field so
+# the registry-unavailable fallback only concatenates strings. The prompt has
+# no other braces, so partition + concatenation is byte-identical to a
+# .format() call.
+_SYSTEM_PROMPT_PREFIX, _, _SYSTEM_PROMPT_SUFFIX = CONVERSATION_SYSTEM_PROMPT.partition(
+    "{current_date}"
+)
+
+_CATALOG_FILE = Path(__file__).parent / "prompts" / "conversation_system.md"
+
+
+def _ensure_registered() -> None:
+    """Seed the global registry with the packaged catalog prompt, once.
+
+    A deployment catalog loaded via ``BASELITH_PROMPTS_DIR`` registers first
+    (inside ``get_prompt_registry``), so when the name already exists this is
+    a no-op and the deployment's versions/labels win.
+    """
+    from baselith.core.prompts.loader import parse_prompt_file
+    from baselith.core.prompts.registry import get_prompt_registry
+
+    registry = get_prompt_registry()
+    if registry.list_versions(CONVERSATION_PROMPT_NAME):
+        return
+    try:
+        registry.store.put(parse_prompt_file(_CATALOG_FILE))
+    except Exception:  # pragma: no cover - packaged file missing/corrupt
+        logger.warning(
+            "conversation_prompt_catalog_unavailable, registering embedded default"
+        )
+        registry.register(
+            CONVERSATION_PROMPT_NAME,
+            CONVERSATION_SYSTEM_PROMPT.replace("{current_date}", "{{ current_date }}"),
+            version="3",
+            labels={"production"},
+            variables=["current_date"],
+        )
+
+
+def _system_prompt(current_date: str) -> str:
+    """Render the conversation system prompt for ``current_date``.
+
+    Resolution: registry ``production`` label > latest registered version >
+    embedded default (registry unavailable). The registry path emits the
+    ``prompt.render`` provenance span.
+    """
+    try:
+        from baselith.core.prompts.registry import get_prompt_registry
+        from baselith.core.prompts.types import PromptNotFoundError
+
+        _ensure_registered()
+        registry = get_prompt_registry()
+        try:
+            rendered = registry.render(
+                CONVERSATION_PROMPT_NAME,
+                {"current_date": current_date},
+                label="production",
+            )
+        except PromptNotFoundError:
+            rendered = registry.render(
+                CONVERSATION_PROMPT_NAME, {"current_date": current_date}
+            )
+        return rendered.text
+    except Exception:
+        logger.warning("prompt_registry_unavailable, using embedded default")
+        return f"{_SYSTEM_PROMPT_PREFIX}{current_date}{_SYSTEM_PROMPT_SUFFIX}"
+
+
+#: Envelope ``tool`` attribute (and scan ``source``) for the retrieved context.
+CHAT_CONTEXT_SOURCE = "document_retrieval"
+
+
+def _render_history(history_text: str) -> str:
+    """Render conversation history as one scanned, enveloped section."""
+    from baselith.core.orchestration.history_context import render_history_context
+
+    if not history_text.strip():
+        return ""
+    rendered = render_history_context(history_text.strip())
+    return f"PREVIOUS CONVERSATION (recent turns):\n{rendered}\n\n"
+
+
+def _render_context(context: str) -> str:
+    """Scan the retrieved context and seal it in the untrusted envelope.
+
+    Documents can carry injected instructions; inside the envelope, and under
+    the data-not-instructions rule, the model reads them as quoted data.
+    """
+    if not context.strip():
+        return context
+    from baselith.core.guardrails.indirect import scan_external_content
+    from baselith.core.orchestration.tool_output import wrap_untrusted
+
+    scanned = scan_external_content(context, source=CHAT_CONTEXT_SOURCE)
+    return wrap_untrusted(scanned, source=CHAT_CONTEXT_SOURCE)
+
+
+def build_prompt(
+    user_query: str,
+    context: str,
+    history_text: str,
+    *,
+    additional_context: str | None = None,
+) -> str:
+    """
+    Build a generic prompt for the LLM.
+
+    Args:
+        user_query: User's question
+        context: Retrieved context from documents
+        history_text: Conversation history
+        additional_context: Optional additional context from plugins
+
+    Returns:
+        Formatted prompt string
+    """
+    from baselith.core.orchestration.handlers.rag import RAG_CONTEXT_IS_DATA_RULE
+
+    current_date = datetime.now(UTC).strftime("%d/%m/%Y")
+    system_prompt = f"{_system_prompt(current_date)}\n\n{RAG_CONTEXT_IS_DATA_RULE}"
+    history_section = _render_history(history_text)
+
+    # Plugin-provided context (if any)
+    plugin_section = ""
+    if additional_context:
+        plugin_section = f"{additional_context}\n\n"
+
+    return f"""{system_prompt}
+
+{history_section}{plugin_section}### CONTEXT:
+{_render_context(context)}
+
+### QUESTION:
+{user_query}
+
+---
+
+## ANSWER:
+"""
+
+
+__all__ = ["CONVERSATION_PROMPT_NAME", "CONVERSATION_SYSTEM_PROMPT", "build_prompt"]

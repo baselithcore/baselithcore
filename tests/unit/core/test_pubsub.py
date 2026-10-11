@@ -1,12 +1,12 @@
 """
-Tests for core.realtime.pubsub module.
+Tests for baselith.core.realtime.pubsub module.
 """
 
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.realtime.pubsub import CHANNEL_PREFIX, PubSubManager
+from baselith.core.realtime.pubsub import CHANNEL_PREFIX, PubSubManager
 
 TEST_REDIS_URL = "redis://test:6379/0"
 
@@ -23,7 +23,7 @@ class TestPubSubManager:
     """Tests for PubSubManager class."""
 
     @pytest.mark.asyncio
-    @patch("core.realtime.pubsub.create_redis_client")
+    @patch("baselith.core.realtime.pubsub.create_redis_client")
     async def test_get_redis_async(self, mock_factory):
         """Clients come off the shared bounded pool, not a per-call pool."""
         mock_client = Mock()
@@ -36,7 +36,7 @@ class TestPubSubManager:
         assert result == mock_client
 
     @pytest.mark.asyncio
-    @patch("core.realtime.pubsub.create_redis_client")
+    @patch("baselith.core.realtime.pubsub.create_redis_client")
     async def test_publish_sends_event(self, mock_factory):
         """Test publish sends event to redis."""
         mock_client = AsyncMock()
@@ -52,7 +52,7 @@ class TestPubSubManager:
         mock_client.publish.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("core.realtime.pubsub.create_redis_client")
+    @patch("baselith.core.realtime.pubsub.create_redis_client")
     async def test_publisher_is_reused_across_events(self, mock_factory):
         """One client per process, not one TCP connect + teardown per event."""
         mock_factory.return_value = AsyncMock()
@@ -67,7 +67,7 @@ class TestPubSubManager:
         assert mock_factory.return_value.publish.await_count == 5
 
     @pytest.mark.asyncio
-    @patch("core.realtime.pubsub.create_redis_client")
+    @patch("baselith.core.realtime.pubsub.create_redis_client")
     async def test_publish_handles_error_gracefully(self, mock_factory):
         """Test publish handles errors gracefully."""
         mock_client = AsyncMock()
@@ -83,7 +83,7 @@ class TestPubSubManager:
         await manager.publish("channel", mock_event)
 
     @pytest.mark.asyncio
-    @patch("core.realtime.pubsub.create_redis_client")
+    @patch("baselith.core.realtime.pubsub.create_redis_client")
     async def test_close_releases_the_publisher(self, mock_factory):
         mock_client = AsyncMock()
         mock_factory.return_value = mock_client

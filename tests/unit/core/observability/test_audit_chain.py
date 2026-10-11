@@ -9,8 +9,12 @@ from itertools import pairwise
 
 import pytest
 
-from core.config.audit import MIN_RETENTION_DAYS, AuditConfig, reset_audit_config
-from core.observability.audit import (
+from baselith.core.config.audit import (
+    MIN_RETENTION_DAYS,
+    AuditConfig,
+    reset_audit_config,
+)
+from baselith.core.observability.audit import (
     AuditEvent,
     AuditEventType,
     AuditLogger,
@@ -18,7 +22,7 @@ from core.observability.audit import (
     get_audit_logger,
     reset_audit_logger,
 )
-from core.observability.audit_chain import (
+from baselith.core.observability.audit_chain import (
     GENESIS_HASH,
     AuditQuery,
     SQLiteAuditSink,
@@ -246,11 +250,11 @@ class TestAuditLoggerIntegration:
     async def test_audit_emit_schedules_on_the_running_loop(self, sink):
         import asyncio
 
-        from core.observability.audit import _pending_tasks
+        from baselith.core.observability.audit import _pending_tasks
 
         reset_audit_logger()
         try:
-            from core.observability.audit import set_audit_logger
+            from baselith.core.observability.audit import set_audit_logger
 
             set_audit_logger(AuditLogger(sinks=[sink]))
             audit_emit(AuditEventType.TRANSPARENCY_MARK, action="mark")
@@ -310,7 +314,7 @@ class TestAuditConfig:
 
 class TestAuditSetup:
     def test_disabled_config_leaves_the_global_logger_untouched(self, monkeypatch):
-        from core.observability.audit_setup import configure_audit_logging
+        from baselith.core.observability.audit_setup import configure_audit_logging
 
         monkeypatch.setenv("AUDIT_ENABLED", "false")
         reset_audit_config()
@@ -318,7 +322,7 @@ class TestAuditSetup:
         reset_audit_config()
 
     def test_enabled_config_installs_the_durable_sink(self, monkeypatch, tmp_path):
-        from core.observability.audit_setup import (
+        from baselith.core.observability.audit_setup import (
             configure_audit_logging,
             get_durable_audit_sink,
         )

@@ -7,15 +7,15 @@ Demonstrates collaborative agent patterns: Researcher, Writer, Reviewer.
 import asyncio
 import yaml
 from contextlib import asynccontextmanager
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 from pathlib import Path
 from typing import Optional, Any, Dict, List
 from dataclasses import dataclass, field
 from enum import Enum
 
 # Baselith-Core Imports
-from core.lifecycle import LifecycleMixin, AgentState
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.lifecycle import LifecycleMixin, AgentState
+from baselith.core.orchestration.protocols import AgentProtocol
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -388,7 +388,7 @@ async def list_agents():
 if __name__ == "__main__":
     # HOST/PORT from .env (127.0.0.1:8000 in the development profile
     # `baselith init` writes): a laptop's dev server stays off the LAN.
-    from core.config import get_app_config
+    from baselith.core.config import get_app_config
 
     _app_config = get_app_config()
     uvicorn.run(app, host=_app_config.host, port=_app_config.port)

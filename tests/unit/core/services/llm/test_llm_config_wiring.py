@@ -1,6 +1,6 @@
 """Config surface for fallback chain + routing wiring."""
 
-from core.config.services import LLMConfig
+from baselith.core.config.services import LLMConfig
 
 
 class TestLLMConfigWiring:

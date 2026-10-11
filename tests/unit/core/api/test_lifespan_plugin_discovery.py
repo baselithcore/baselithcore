@@ -18,11 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.discovery import ENTRY_POINT_GROUP
-from core.plugins.resource_analyzer import ResourceAnalyzer
+from baselith.core.plugins.discovery import ENTRY_POINT_GROUP
+from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
 PLUGIN_SOURCE = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class DemoPlugin(Plugin):
@@ -180,7 +180,7 @@ class TestLoaderFeedsTheLifespanPath:
     """End-to-end of the wiring lifespan uses: loader → analyzer → registry."""
 
     def test_entry_point_reaches_the_registry(self, tmp_path, monkeypatch):
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         local_root = tmp_path / "plugins"
         local_root.mkdir()
@@ -190,7 +190,7 @@ class TestLoaderFeedsTheLifespanPath:
         _write_plugin(site_packages, "from_wheel")
         monkeypatch.syspath_prepend(str(site_packages))
         monkeypatch.setattr(
-            "core.plugins.discovery.entry_points",
+            "baselith.core.plugins.discovery.entry_points",
             lambda group: [_FakeEntryPoint("from_wheel", "from_wheel")],
         )
 
@@ -198,7 +198,7 @@ class TestLoaderFeedsTheLifespanPath:
         loader = PluginLoader(local_root, registry)
         analyzer = ResourceAnalyzer(local_root)
 
-        # Exactly the call core/api/lifespan.py now makes.
+        # Exactly the call baselith/core/api/lifespan.py now makes.
         discoveries = analyzer.discover_plugins(
             {}, extra_dirs=loader.discover_plugins()
         )

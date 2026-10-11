@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.reasoning.tot import ThoughtNode, TreeOfThoughts
-from core.reasoning.tot.cache import get_thought_cache
+from baselith.core.reasoning.tot import ThoughtNode, TreeOfThoughts
+from baselith.core.reasoning.tot.cache import get_thought_cache
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +74,7 @@ class TestTreeOfThoughtsAsync:
 
     async def test_solve_async_basic(self):
         """Test async solve with mock LLM."""
-        from core.reasoning.tot import TreeOfThoughtsAsync
+        from baselith.core.reasoning.tot import TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
 
@@ -107,7 +107,7 @@ class TestTreeOfThoughtsAsync:
         upstream request by the LLMService single-flight layer, collapsing
         branching diversity to a single duplicated thought.
         """
-        from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
+        from baselith.core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
         mock_llm.generate_response = AsyncMock(
@@ -125,7 +125,7 @@ class TestTreeOfThoughtsAsync:
 
     async def test_evaluate_thoughts_async_parallel(self):
         """Test that evaluation fans out one call per thought."""
-        from core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
+        from baselith.core.reasoning.tot import ThoughtNode, TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
         mock_llm.generate_response = AsyncMock(return_value="0.85")

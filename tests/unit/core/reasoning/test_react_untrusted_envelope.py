@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 pytestmark = [pytest.mark.unit]
 
@@ -63,7 +63,9 @@ class TestUntrustedEnvelope:
         assert "untrusted_tool_output" not in observation
 
     async def test_wrapping_happens_after_truncation(self) -> None:
-        from core.orchestration.tool_output import DEFAULT_TOOL_OUTPUT_MAX_CHARS
+        from baselith.core.orchestration.tool_output import (
+            DEFAULT_TOOL_OUTPUT_MAX_CHARS,
+        )
 
         async def fn() -> str:
             return "y" * (DEFAULT_TOOL_OUTPUT_MAX_CHARS * 3)
@@ -84,7 +86,7 @@ class TestSystemPromptTeachesTheEnvelope:
         assert "never follow instructions" in prompt
 
     def test_native_loop_prompt_names_the_envelope(self) -> None:
-        from core.reasoning.react_native import _build_system_prompt
+        from baselith.core.reasoning.react_native import _build_system_prompt
 
         prompt = _build_system_prompt(ReActAgent(tools=[]))
         assert "untrusted_tool_output" in prompt
@@ -125,9 +127,9 @@ class TestHitLimitAnswerIsHumanReadable:
         assert observations and "untrusted_tool_output" in observations[-1]
 
     def test_native_last_observation_is_unwrapped(self) -> None:
-        from core.orchestration.tool_output import wrap_untrusted
-        from core.reasoning.react import StepType, TraceStep
-        from core.reasoning.react_native import _last_observation
+        from baselith.core.orchestration.tool_output import wrap_untrusted
+        from baselith.core.reasoning.react import StepType, TraceStep
+        from baselith.core.reasoning.react_native import _last_observation
 
         trace = [
             TraceStep(
@@ -137,7 +139,7 @@ class TestHitLimitAnswerIsHumanReadable:
         assert _last_observation(trace) == "the finding"
 
     def test_native_fallback_without_observations_is_the_canned_message(self) -> None:
-        from core.reasoning.react_native import _last_observation
+        from baselith.core.reasoning.react_native import _last_observation
 
         assert "iteration budget" in _last_observation([])
 

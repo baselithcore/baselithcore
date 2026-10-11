@@ -1,0 +1,39 @@
+name: document-sources
+version: 0.2.0
+description: Filesystem, web, OCR (MinerU/Tesseract) and document ingestion sources
+  for indexing workflows
+author: Baselith
+tags:
+- documents
+- indexing
+- ingestion
+- ocr
+category: ai
+python_dependencies:
+- pypdf>=6.7.4
+- python-docx>=1.2.0,<2
+- python-pptx==0.6.23
+- openpyxl==3.1.5
+- xlrd==2.0.1
+- pdf2image==1.16.3
+- Pillow==12.1.1
+- pytesseract==0.3.10
+- mineru[pipeline]>=3.4.4,<4
+- docling>=2.130.0,<3
+optional_resources:
+- internet
+# Declared capabilities. The web source fetches operator-supplied URLs and the
+# filesystem source reads operator-supplied paths, so neither set can be
+# narrowed here — that is the plugin's purpose, and saying so plainly is worth
+# more than an understated list.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools: []
+  secrets: []
+  filesystem:
+  - '*'
+integrity_sha256: 2e961fedc57c4b723cdcb9923d9ba7f610848baf1bbd8d14221b965b0c4dd7c2
+hash_surface_version: 5

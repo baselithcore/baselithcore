@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.auth.types import AuthRole, AuthUser
-from core.middleware.security import SecurityManager
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.middleware.security import SecurityManager
 
 AGENT_ACT = {"sub": "agent-1", "client_id": "agent-1"}
 IMPERSONATION_ACT = {"sub": "admin-user"}  # no client_id -> impersonation
@@ -42,7 +42,7 @@ class TestCoarseGate:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -58,7 +58,7 @@ class TestCoarseGate:
 
     async def test_delegated_admin_denied_on_admin_gate(self, mock_security_config):
         manager = self._manager(mock_security_config)
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_get_auth.return_value = self._auth_returning(_delegated_user())
             with pytest.raises(HTTPException) as exc:
                 await manager.enforce_auth(
@@ -68,7 +68,7 @@ class TestCoarseGate:
 
     async def test_delegated_identity_admitted_on_data_tier(self, mock_security_config):
         manager = self._manager(mock_security_config)
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_get_auth.return_value = self._auth_returning(_delegated_user())
             resolved = await manager.enforce_auth(
                 self._request(),
@@ -82,7 +82,7 @@ class TestCoarseGate:
     ):
         manager = self._manager(mock_security_config)
         user = _delegated_user(metadata={"act": IMPERSONATION_ACT, "imp": True})
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_get_auth.return_value = self._auth_returning(user)
             resolved = await manager.enforce_auth(
                 self._request(), allowed_roles={"admin"}, limit_per_minute=10

@@ -8,9 +8,9 @@ import sys
 
 import pytest
 
-from core.plugin_updates.apply.executor import SCHEMA_INIT_ARGV
-from core.plugin_updates.apply.models import RunKind, RunState
-from core.plugin_updates.apply.swap import current_target
+from baselith.core.plugin_updates.apply.executor import SCHEMA_INIT_ARGV
+from baselith.core.plugin_updates.apply.models import RunKind, RunState
+from baselith.core.plugin_updates.apply.swap import current_target
 
 from ._executor_env import Env
 
@@ -19,7 +19,7 @@ def test_schema_init_argv() -> None:
     assert SCHEMA_INIT_ARGV("demo") == [
         sys.executable,
         "-m",
-        "core.cli",
+        "baselith.core.cli",
         "plugin",
         "schema-init",
         "--plugin",

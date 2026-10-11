@@ -1,8 +1,8 @@
 """
-Tests for core.reflection.protocols module.
+Tests for baselith.core.reflection.protocols module.
 """
 
-from core.reflection.protocols import (
+from baselith.core.reflection.protocols import (
     EvaluationResult,
     QualityLevel,
     Refiner,

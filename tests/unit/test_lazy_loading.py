@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from core.di.lazy_registry import (
+from baselith.core.di.lazy_registry import (
     LazyServiceRegistry,
     ResourceType,
     get_lazy_registry,
     reset_lazy_registry,
 )
-from core.plugins.interface import PluginMetadata
-from core.plugins.resource_analyzer import ResourceAnalyzer
+from baselith.core.plugins.interface import PluginMetadata
+from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
 # === Test Lazy Service Registry ===
 
@@ -352,8 +352,8 @@ class TestEvolutionFactory:
     async def test_evolution_gets_memory_by_resource_name(self, monkeypatch):
         # Regression: it asked the registry for the ``AgentMemory`` type while
         # factories are keyed by name, so every boot raised KeyError.
-        import core.learning.evolution as evolution_module
-        from core.bootstrap.lazy_init import initialize_evolution
+        import baselith.core.learning.evolution as evolution_module
+        from baselith.core.bootstrap.lazy_init import initialize_evolution
 
         sentinel_memory = object()
         started: list[object] = []

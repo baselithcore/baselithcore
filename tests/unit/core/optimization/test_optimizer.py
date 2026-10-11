@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.optimization.optimizer import PromptOptimizer
+from baselith.core.optimization.optimizer import PromptOptimizer
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def mock_feedback_collector():
 
 @pytest.fixture
 def mock_llm_service():
-    with patch("core.services.llm.get_llm_service") as mock_get:
+    with patch("baselith.core.services.llm.get_llm_service") as mock_get:
         service = AsyncMock()
         mock_get.return_value = service
         yield service

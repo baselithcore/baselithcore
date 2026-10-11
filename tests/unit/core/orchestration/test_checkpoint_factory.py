@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-import core.orchestration.checkpoint_factory as factory
-from core.orchestration.checkpoint import InMemoryCheckpointStore
+import baselith.core.orchestration.checkpoint_factory as factory
+from baselith.core.orchestration.checkpoint import InMemoryCheckpointStore
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     factory.reset_default_checkpoint_store()
     # Isolate from process env / cached config.
-    import core.config.orchestration as orch_config
+    import baselith.core.config.orchestration as orch_config
 
     monkeypatch.setattr(orch_config, "_orchestration_config", None)
     yield
@@ -71,8 +71,8 @@ class _FakePostgresStore:
 
 @pytest.fixture
 def _postgres_store(monkeypatch):
-    from core.db import reachability
-    from core.orchestration import checkpoint_postgres
+    from baselith.core.db import reachability
+    from baselith.core.orchestration import checkpoint_postgres
 
     monkeypatch.setattr(
         checkpoint_postgres, "PostgresCheckpointStore", _FakePostgresStore
@@ -87,7 +87,7 @@ def _postgres_store(monkeypatch):
 async def test_postgres_store_init_fails_fast_when_the_probe_saw_the_db_down(
     _postgres_store,
 ):
-    from core.db import reachability
+    from baselith.core.db import reachability
 
     reachability._last_outcome = False
     with pytest.raises(factory.CheckpointStoreUnavailableError):
@@ -109,7 +109,7 @@ async def test_postgres_store_init_unchanged_when_never_probed(_postgres_store):
 
 
 async def test_memory_store_ignores_the_probe(monkeypatch):
-    from core.db import reachability
+    from baselith.core.db import reachability
 
     monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
     monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "memory")
@@ -121,3 +121,82 @@ async def test_memory_store_ignores_the_probe(monkeypatch):
         )
     finally:
         reachability.reset_postgres_probe()
+
+
+class _Logger:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, msg: str, *args, **kwargs) -> None:
+        self.warnings.append(msg % args if args else msg)
+
+    def info(self, *args, **kwargs) -> None:
+        pass
+
+
+def _postgres_storage(enabled: bool):
+    from types import SimpleNamespace
+
+    return lambda: SimpleNamespace(postgres_enabled=enabled)
+
+
+def test_auto_resolving_to_memory_warns_that_runs_will_not_survive(monkeypatch):
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "auto")
+    monkeypatch.setattr(
+        "baselith.core.config.storage.get_storage_config", _postgres_storage(False)
+    )
+    log = _Logger()
+    monkeypatch.setattr(factory, "logger", log)
+
+    assert isinstance(factory.get_default_checkpoint_store(), InMemoryCheckpointStore)
+    assert any("checkpoint_backend_not_durable" in w for w in log.warnings)
+    assert any("will NOT survive a restart" in w for w in log.warnings)
+
+
+def test_an_explicit_memory_backend_is_not_warned_about(monkeypatch):
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_ENABLED", "true")
+    monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_BACKEND", "memory")
+    log = _Logger()
+    monkeypatch.setattr(factory, "logger", log)
+
+    factory.get_default_checkpoint_store()
+    assert log.warnings == []
+
+
+@pytest.mark.parametrize(
+    ("configured", "durable", "expected"),
+    [
+        (None, True, True),
+        (None, False, False),
+        ("false", True, False),
+        ("true", False, True),
+    ],
+)
+def test_auto_resume_defaults_on_for_a_durable_store(
+    monkeypatch, tmp_path, configured, durable, expected
+):
+    from baselith.core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+
+    if configured is None:
+        monkeypatch.delenv("ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP", raising=False)
+    else:
+        monkeypatch.setenv("ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP", configured)
+    store = (
+        SQLiteCheckpointStore(tmp_path / "c.db")
+        if durable
+        else InMemoryCheckpointStore()
+    )
+    try:
+        assert factory.is_durable_store(store) is durable
+        assert factory.auto_resume_enabled(store) is expected
+    finally:
+        if durable:
+            store.close()
+
+
+def test_resume_on_startup_is_unset_by_default(monkeypatch):
+    from baselith.core.config.orchestration import OrchestrationConfig
+
+    monkeypatch.delenv("ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP", raising=False)
+    assert OrchestrationConfig().checkpoint_resume_on_startup is None

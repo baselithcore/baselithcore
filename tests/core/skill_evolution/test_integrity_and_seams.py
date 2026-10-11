@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.registry import PluginRegistry
-from core.plugins.skills_service import SkillService
-from core.skill_evolution.service import make_activation_guard
-from core.skill_evolution.types import SkillProposal
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.plugins.registry import PluginRegistry
+from baselith.core.plugins.skills_service import SkillService
+from baselith.core.skill_evolution.service import make_activation_guard
+from baselith.core.skill_evolution.types import SkillProposal
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 SKILL_MD = """---
 name: fix-parser

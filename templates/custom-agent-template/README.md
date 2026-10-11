@@ -33,15 +33,15 @@ custom-agent-template/
 ## Agent Implementation
 
 ```python
-from core.agents.base import BaseAgent
+from baselith.core.agents.base import BaseAgent
 
 class MyAgent(BaseAgent):
     name = "my-agent"
-    
+
     def __init__(self, llm_service, tools=None):
         super().__init__(llm_service)
         self.tools = tools or []
-    
+
     async def process(self, message: str, context: dict) -> str:
         # 1. Prepare prompt
         # 2. Call LLM
@@ -54,7 +54,7 @@ class MyAgent(BaseAgent):
 Define functions that the agent can invoke:
 
 ```python
-from core.agents.tools import tool
+from baselith.core.agents.tools import tool
 
 @tool
 def search_database(query: str) -> list[dict]:
@@ -94,12 +94,12 @@ Create a plugin wrapper:
 
 ```python
 # plugin.py
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 from .agent import MyAgent
 
 class MyAgentPlugin(AgentPlugin):
     name = "my-agent"
-    
+
     def create_agent(self, service, **kwargs):
         from .tools import search_database, send_email
         return MyAgent(service, tools=[search_database, send_email])

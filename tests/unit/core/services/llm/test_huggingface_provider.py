@@ -1,5 +1,5 @@
 """
-Tests for core/services/llm/providers/huggingface_provider.py
+Tests for baselith/core/services/llm/providers/huggingface_provider.py
 
 Tests HuggingFace LLM provider with mocked API calls.
 """
@@ -13,11 +13,13 @@ class TestHuggingFaceProviderInit:
     """Tests for HuggingFaceProvider initialization."""
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     def test_init_with_api_key(self, mock_init_client):
         """Verify provider initializes with API key for Inference API mode."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test_token")
 
@@ -31,10 +33,12 @@ class TestHuggingFaceProviderInit:
 
     def test_init_without_api_key_for_inference_raises(self):
         """Verify provider raises error without API key in Inference API mode."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
-        with patch("core.config.services.get_llm_config") as mock_get_config:
+        with patch("baselith.core.config.services.get_llm_config") as mock_get_config:
             mock_get_config.return_value.api_key = None
             with patch.dict("os.environ", {}, clear=True):
                 with pytest.raises(LLMProviderError) as exc_info:
@@ -44,7 +48,9 @@ class TestHuggingFaceProviderInit:
 
     def test_init_local_mode_without_api_key(self):
         """Verify local mode doesn't require API key."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         # Local mode should not raise even without API key
         provider = HuggingFaceProvider(use_local=True)
@@ -54,7 +60,9 @@ class TestHuggingFaceProviderInit:
 
     def test_init_with_custom_device(self):
         """Verify custom device setting is stored."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(use_local=True, device="cuda")
 
@@ -62,7 +70,9 @@ class TestHuggingFaceProviderInit:
 
     def test_init_with_custom_dtype(self):
         """Verify custom dtype setting is stored."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(use_local=True, torch_dtype="float16")
 
@@ -73,12 +83,14 @@ class TestHuggingFaceProviderGenerateInferenceAPI:
     """Tests for HuggingFaceProvider.generate with Inference API."""
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_returns_content_and_tokens(self, mock_init):
         """Verify generate returns tuple of content and tokens."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -96,12 +108,14 @@ class TestHuggingFaceProviderGenerateInferenceAPI:
         mock_client.text_generation.assert_called_once()
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_with_json_mode(self, mock_init):
         """Verify generate appends JSON instruction in json_mode."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -116,13 +130,15 @@ class TestHuggingFaceProviderGenerateInferenceAPI:
         assert "JSON" in prompt_sent
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_raises_on_error(self, mock_init):
         """Verify generate raises LLMProviderError on exception."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -142,7 +158,9 @@ class TestHuggingFaceProviderGenerateLocal:
     @pytest.mark.asyncio
     async def test_generate_local_returns_content_and_tokens(self):
         """Verify local generate returns tuple of content and tokens."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(use_local=True)
 
@@ -160,7 +178,9 @@ class TestHuggingFaceProviderGenerateLocal:
     @pytest.mark.asyncio
     async def test_generate_local_with_json_mode(self):
         """Verify local generate appends JSON instruction in json_mode."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(use_local=True)
 
@@ -180,12 +200,14 @@ class TestHuggingFaceProviderGenerateStream:
     """Tests for HuggingFaceProvider.generate_stream method."""
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_stream_yields_chunks(self, mock_init):
         """Verify generate_stream yields content chunks."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -203,12 +225,14 @@ class TestHuggingFaceProviderGenerateStream:
         assert chunks[2][0] == "!"
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_stream_accumulates_tokens(self, mock_init):
         """Verify generate_stream accumulates token counts."""
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -224,13 +248,15 @@ class TestHuggingFaceProviderGenerateStream:
         assert chunks[1][1] >= chunks[0][1]
 
     @patch(
-        "core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
+        "baselith.core.services.llm.providers.huggingface_provider.HuggingFaceProvider._init_inference_client"
     )
     @pytest.mark.asyncio
     async def test_generate_stream_raises_on_error(self, mock_init):
         """Verify generate_stream raises LLMProviderError on exception."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         provider = HuggingFaceProvider(api_key="hf_test")
 
@@ -252,8 +278,10 @@ class TestHuggingFaceProviderImportError:
 
     def test_init_without_huggingface_hub_raises(self):
         """Verify appropriate error when huggingface-hub is not installed."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.huggingface_provider import HuggingFaceProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.huggingface_provider import (
+            HuggingFaceProvider,
+        )
 
         with patch.dict("sys.modules", {"huggingface_hub": None}):
             # We must NOT patch _init_inference_client here because we want to test the REAL failure

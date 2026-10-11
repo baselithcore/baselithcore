@@ -1,6 +1,6 @@
 # Feature Flags
 
-`core.feature_flags` provides runtime feature flags with percentage rollout and
+`baselith.core.feature_flags` provides runtime feature flags with percentage rollout and
 a pluggable backend. Flags are **opt-in**: with nothing registered and no
 `BASELITH_FLAG_*` overrides set, `is_enabled` returns the call-site default, so
 framework behaviour is unchanged.
@@ -12,7 +12,7 @@ framework behaviour is unchanged.
 ## Usage
 
 ```python
-from core.feature_flags import get_feature_flags, FeatureFlag, is_enabled
+from baselith.core.feature_flags import get_feature_flags, FeatureFlag, is_enabled
 
 flags = get_feature_flags()
 flags.register(FeatureFlag(
@@ -56,7 +56,7 @@ Dynamic providers (LaunchDarkly, Unleash, a DB-backed table) stay out of `core`
 (Sacred Core rule). Register one at startup and select it via the env var:
 
 ```python
-from core.feature_flags import register_flag_provider
+from baselith.core.feature_flags import register_flag_provider
 
 register_flag_provider("unleash", lambda: MyUnleashProvider(...))
 # then run with FEATURE_FLAGS_BACKEND=unleash

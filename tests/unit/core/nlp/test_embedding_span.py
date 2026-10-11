@@ -18,8 +18,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from core.config.vectorstore import VectorStoreConfig
-from core.nlp.models import EMBEDDING_OPERATION, CachedEmbedder
+from baselith.core.config.vectorstore import VectorStoreConfig
+from baselith.core.nlp.models import EMBEDDING_OPERATION, CachedEmbedder
 
 pytestmark = [pytest.mark.unit]
 
@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.unit]
 def _token_usage(enabled: bool):
     """Toggle VECTORSTORE_EMBEDDING_TOKEN_USAGE_ENABLED for one test."""
     return patch(
-        "core.nlp.models.get_vectorstore_config",
+        "baselith.core.nlp.models.get_vectorstore_config",
         return_value=VectorStoreConfig(embedding_token_usage_enabled=enabled),
     )
 
@@ -38,7 +38,9 @@ def otel_sdk(monkeypatch):
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     monkeypatch.setattr(trace, "get_tracer", lambda *a, **k: provider.get_tracer("t"))
-    monkeypatch.setattr("core.observability.tracing._otel_active", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.observability.tracing._otel_active", lambda: True
+    )
     yield exporter
 
 
@@ -205,7 +207,7 @@ class TestEmbeddingMetrics:
 
     async def test_metric_failure_never_breaks_encoding(self, monkeypatch):
         monkeypatch.setattr(
-            "core.nlp.models.GEN_AI_OPERATION_DURATION",
+            "baselith.core.nlp.models.GEN_AI_OPERATION_DURATION",
             MagicMock(labels=MagicMock(side_effect=RuntimeError("registry down"))),
         )
         assert await _embedder().encode("hello") is not None

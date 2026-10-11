@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.observability.setup import ensure_logging_configured
+from baselith.core.observability.setup import ensure_logging_configured
 
 pytestmark = [pytest.mark.unit]
 
@@ -45,7 +45,7 @@ def test_blank_value_uses_the_default_directory(
     isolated_root: Path, monkeypatch, value: str
 ) -> None:
     monkeypatch.setenv("BASELITH_LOG_DIR", value)
-    with patch("core.observability.logging.configure_logging"):
+    with patch("baselith.core.observability.logging.configure_logging"):
         ensure_logging_configured()
 
     assert (isolated_root / "logs" / "app.log").exists()
@@ -55,7 +55,7 @@ def test_blank_value_uses_the_default_directory(
 def test_explicit_directory_is_honoured(isolated_root: Path, monkeypatch) -> None:
     target = isolated_root / "custom"
     monkeypatch.setenv("BASELITH_LOG_DIR", str(target))
-    with patch("core.observability.logging.configure_logging"):
+    with patch("baselith.core.observability.logging.configure_logging"):
         ensure_logging_configured()
 
     assert (target / "app.log").exists()

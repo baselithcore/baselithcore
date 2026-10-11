@@ -7,31 +7,34 @@ from unittest.mock import patch
 
 import pytest
 
-from core.compliance.annex_iv import AnnexIVSection, draft_from_system
-from core.compliance.artefact_services import (
+from baselith.core.compliance.annex_iv import AnnexIVSection, draft_from_system
+from baselith.core.compliance.artefact_services import (
     DpiaService,
     InstructionsService,
     RiskManagementService,
 )
-from core.compliance.dpia import (
+from baselith.core.compliance.dpia import (
     DataProtectionImpactAssessment,
     DpiaRisk,
     DpiaTrigger,
 )
-from core.compliance.instructions import InstructionsForUse, draft_instructions
-from core.compliance.persistence import (
+from baselith.core.compliance.instructions import InstructionsForUse, draft_instructions
+from baselith.core.compliance.persistence import (
     SQLiteDpiaStore,
     SQLiteInstructionsStore,
     SQLiteRiskManagementStore,
 )
-from core.compliance.post_market import MonitoringMetric, PostMarketMonitoringPlan
-from core.compliance.risk_management import (
+from baselith.core.compliance.post_market import (
+    MonitoringMetric,
+    PostMarketMonitoringPlan,
+)
+from baselith.core.compliance.risk_management import (
     HarmCategory,
     IdentifiedRisk,
     RiskManagementSystem,
     RiskTreatment,
 )
-from core.compliance.types import AiSystem
+from baselith.core.compliance.types import AiSystem
 
 
 def _closed_risk(description: str = "under-detection") -> IdentifiedRisk:
@@ -48,7 +51,7 @@ def _closed_risk(description: str = "under-detection") -> IdentifiedRisk:
 
 def _fully_closed_risk() -> IdentifiedRisk:
     risk = _closed_risk()
-    from core.compliance.risk_management import RiskLikelihood, RiskSeverity
+    from baselith.core.compliance.risk_management import RiskLikelihood, RiskSeverity
 
     risk.residual_severity = RiskSeverity.MINOR
     risk.residual_likelihood = RiskLikelihood.UNLIKELY
@@ -83,7 +86,10 @@ class TestRiskEntry:
 
     def test_acceptance_without_verification_does_not_close_a_risk(self):
         risk = _closed_risk()
-        from core.compliance.risk_management import RiskLikelihood, RiskSeverity
+        from baselith.core.compliance.risk_management import (
+            RiskLikelihood,
+            RiskSeverity,
+        )
 
         risk.residual_severity = RiskSeverity.MINOR
         risk.residual_likelihood = RiskLikelihood.RARE
@@ -186,7 +192,7 @@ class TestInstructions:
     def test_draft_pulls_from_the_records_on_file(self, monkeypatch):
         monkeypatch.setenv("AUDIT_ENABLED", "true")
         monkeypatch.setenv("AUDIT_RETENTION_DAYS", "180")
-        from core.config.audit import reset_audit_config
+        from baselith.core.config.audit import reset_audit_config
 
         reset_audit_config()
         try:
@@ -320,7 +326,7 @@ class TestDpiaService:
         # Patch the module logger instead of capturing stdout: the global
         # structlog sink is process-wide mutable state, so a stdout assert
         # is order-dependent under random test ordering.
-        with patch("core.compliance.artefact_services.logger") as log:
+        with patch("baselith.core.compliance.artefact_services.logger") as log:
             completed = await service.complete(dpia.id)
         assert completed.may_start_processing is False
         logged = " ".join(str(c) for c in log.warning.call_args_list)

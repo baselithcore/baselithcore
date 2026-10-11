@@ -15,7 +15,7 @@ class TestCacheIntegration:
 
     def test_redis_cache_prefix_isolation(self):
         """Verify that cache prefixes are correctly namespaced."""
-        from core.optimization.caching import RedisCache
+        from baselith.core.optimization.caching import RedisCache
 
         cache1 = RedisCache(prefix="semantic")
         cache2 = RedisCache(prefix="embedding")
@@ -30,7 +30,7 @@ class TestCacheIntegration:
 
     def test_semantic_cache_hash_determinism(self):
         """Verify that semantic cache generates deterministic hashes."""
-        from core.optimization.caching import SemanticCache
+        from baselith.core.optimization.caching import SemanticCache
 
         cache = SemanticCache()
 
@@ -49,7 +49,7 @@ class TestGraphDBCacheIntegration:
 
     def test_graph_cache_uses_correct_prefix(self):
         """Verify GraphDB cache uses isolated prefix."""
-        from core.cache import RedisTTLCache
+        from baselith.core.cache import RedisTTLCache
 
         mock_client = MagicMock()
         cache = RedisTTLCache(mock_client, prefix="agentbot:graph", default_ttl=3600)
@@ -62,7 +62,7 @@ class TestMemoryIntegration:
 
     def test_memory_manager_initialization(self):
         """Verify MemoryManager initializes correctly."""
-        from core.memory.manager import AgentMemory
+        from baselith.core.memory.manager import AgentMemory
 
         manager = AgentMemory()
 
@@ -73,8 +73,8 @@ class TestMemoryIntegration:
     @pytest.mark.asyncio
     async def test_memory_store_and_recall(self):
         """Test basic memory store and recall flow."""
-        from core.memory.manager import AgentMemory
-        from core.memory.types import MemoryType
+        from baselith.core.memory.manager import AgentMemory
+        from baselith.core.memory.types import MemoryType
 
         manager = AgentMemory()
 
@@ -94,7 +94,7 @@ class TestReasoningIntegration:
 
     def test_tot_initialization(self):
         """Verify Tree of Thoughts initializes correctly."""
-        from core.reasoning.tot import TreeOfThoughts
+        from baselith.core.reasoning.tot import TreeOfThoughts
 
         tot = TreeOfThoughts()
         assert tot is not None
@@ -102,7 +102,7 @@ class TestReasoningIntegration:
     @pytest.mark.asyncio
     async def test_tot_async_initialization(self):
         """Verify Async Tree of Thoughts initializes correctly."""
-        from core.reasoning.tot import TreeOfThoughtsAsync
+        from baselith.core.reasoning.tot import TreeOfThoughtsAsync
 
         mock_llm = MagicMock()
         mock_llm.generate = AsyncMock(return_value="Test thought")
@@ -117,8 +117,8 @@ class TestOrchestratorServiceIntegration:
     @pytest.mark.asyncio
     async def test_orchestrator_with_memory_integration(self):
         """Test orchestrator correctly uses memory manager."""
-        from core.memory.manager import AgentMemory
-        from core.orchestration.orchestrator import Orchestrator
+        from baselith.core.memory.manager import AgentMemory
+        from baselith.core.orchestration.orchestrator import Orchestrator
 
         memory = AgentMemory()
 
@@ -133,8 +133,8 @@ class TestOrchestratorServiceIntegration:
     @pytest.mark.asyncio
     async def test_orchestrator_flow_routing(self):
         """Test orchestrator routes to correct handlers."""
-        from core.memory.manager import AgentMemory
-        from core.orchestration.orchestrator import Orchestrator
+        from baselith.core.memory.manager import AgentMemory
+        from baselith.core.orchestration.orchestrator import Orchestrator
 
         memory = AgentMemory()
 

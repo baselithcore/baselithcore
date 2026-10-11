@@ -1,8 +1,8 @@
 """
-Tests for core.api.events module.
+Tests for baselith.core.api.events module.
 """
 
-from core.api.events import AgentEvent, EventType
+from baselith.core.api.events import AgentEvent, EventType
 
 
 class TestEventType:

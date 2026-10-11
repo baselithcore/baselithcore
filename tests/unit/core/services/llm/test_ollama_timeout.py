@@ -10,9 +10,9 @@ setting that was being ignored.
 
 from unittest.mock import patch
 
-from core.config.services import LLMConfig
-from core.services.llm.provider_factory import create_provider
-from core.services.llm.providers.ollama_provider import OllamaProvider
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.provider_factory import create_provider
+from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
 
 def _config(**kwargs) -> LLMConfig:
@@ -38,6 +38,6 @@ def test_a_service_config_sets_the_ollama_deadline() -> None:
 def test_without_explicit_timeouts_the_global_default_still_applies() -> None:
     """Callers that build the provider directly keep today's behaviour."""
     ambient = _config(provider="ollama", model="m", request_timeout=42.0)
-    with patch("core.config.services.get_llm_config", return_value=ambient):
+    with patch("baselith.core.config.services.get_llm_config", return_value=ambient):
         provider = OllamaProvider(api_base="http://box:11434")
     assert provider._timeout.read == 42.0

@@ -5,15 +5,15 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from core.api.errors import install_error_handlers
-from core.auth.types import AuthRole, AuthUser
-from core.config.webhooks import WebhookConfig
-from core.context import set_tenant_context
-from core.middleware import require_user
-from core.webhooks.dispatcher import WebhookDispatcher
-from core.webhooks.service import WebhookService
-from core.webhooks.store import InMemoryWebhookStore
-from plugins.api_routers import webhooks as wh
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.config.webhooks import WebhookConfig
+from baselith.core.context import set_tenant_context
+from baselith.core.middleware import require_user
+from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.service import WebhookService
+from baselith.core.webhooks.store import InMemoryWebhookStore
+from baselith.plugins.api_routers import webhooks as wh
 
 HOOK_URL = "https://hooks.test/receiver"
 
@@ -132,7 +132,7 @@ def test_deliveries_serialises_only_the_requested_page(service, monkeypatch):
     """Only the returned page is dumped, and the cursor still walks the window."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from core.webhooks.types import WebhookDelivery
+    from baselith.core.webhooks.types import WebhookDelivery
 
     records = []
     for i in range(5):

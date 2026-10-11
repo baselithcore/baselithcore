@@ -7,9 +7,9 @@ hard-coded ``"qa_docs"``, the classifier ``0.6`` and telemetry off.
 
 from unittest.mock import MagicMock
 
-import core.config.orchestration as orchestration_config
-from core.config.orchestration import OrchestrationConfig
-from core.orchestration.orchestrator import Orchestrator
+import baselith.core.config.orchestration as orchestration_config
+from baselith.core.config.orchestration import OrchestrationConfig
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 def _orchestrator(monkeypatch, **fields) -> Orchestrator:

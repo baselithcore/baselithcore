@@ -6,14 +6,14 @@ import time
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     STATUS_FAILED,
     STATUS_RUNNING,
     Checkpoint,
 )
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.recovery import sweep_stale_runs
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.recovery import sweep_stale_runs
 
 pytestmark = [pytest.mark.unit]
 

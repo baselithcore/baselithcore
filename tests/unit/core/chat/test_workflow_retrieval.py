@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from qdrant_client.models import PointStruct
 
-from core.chat.agent_state import AgentState
-from core.chat.service import ChatService
-from core.chat.workflow_retrieval import RetrievalPipeline
-from core.models.chat import ChatRequest
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.chat.service import ChatService
+from baselith.core.chat.workflow_retrieval import RetrievalPipeline
+from baselith.core.models.chat import ChatRequest
 
 
 @pytest.fixture
@@ -29,8 +29,10 @@ def mock_chat_service():
 @pytest.fixture
 def mock_vectorstore_service():
     with (
-        patch("core.chat.mixins.retrieval_search.get_vectorstore_service") as mock1,
-        patch("core.chat.workflow_retrieval.get_vectorstore_service") as mock2,
+        patch(
+            "baselith.core.chat.mixins.retrieval_search.get_vectorstore_service"
+        ) as mock1,
+        patch("baselith.core.chat.workflow_retrieval.get_vectorstore_service") as mock2,
     ):
         service = AsyncMock()
         mock1.return_value = service
@@ -40,7 +42,9 @@ def mock_vectorstore_service():
 
 @pytest.fixture
 def mock_indexing_service():
-    with patch("core.chat.mixins.retrieval_search.get_indexing_service") as mock:
+    with patch(
+        "baselith.core.chat.mixins.retrieval_search.get_indexing_service"
+    ) as mock:
         service = MagicMock()
         service.indexed_documents = {
             "doc1": {
@@ -151,8 +155,12 @@ async def test_retrieve_documents_fallback_recall(
 def mock_scoring_services():
     """Patch the SCORING mixin's service accessors (module-local imports)."""
     with (
-        patch("core.chat.mixins.retrieval_scoring.get_vectorstore_service") as vs,
-        patch("core.chat.mixins.retrieval_scoring.get_indexing_service") as idx,
+        patch(
+            "baselith.core.chat.mixins.retrieval_scoring.get_vectorstore_service"
+        ) as vs,
+        patch(
+            "baselith.core.chat.mixins.retrieval_scoring.get_indexing_service"
+        ) as idx,
     ):
         vector_service = AsyncMock()
         vs.return_value = vector_service
@@ -238,7 +246,7 @@ async def test_score_documents_fallback_excludes_seen_documents(
 def test_doc_match_fields_memoized_and_invalidated():
     """Derived match fields are computed once per doc and recomputed only
     when the raw metadata triple changes."""
-    from core.chat.mixins import retrieval_search as rs
+    from baselith.core.chat.mixins import retrieval_search as rs
 
     rs._doc_match_cache.clear()
     md = {"title": "My Doc", "filename": "My_Doc.PDF", "relative_path": "a/My_Doc.pdf"}

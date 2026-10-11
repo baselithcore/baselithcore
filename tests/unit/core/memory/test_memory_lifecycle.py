@@ -1,23 +1,23 @@
-"""Tests for memory tier lifecycle policies (core.memory.lifecycle)."""
+"""Tests for memory tier lifecycle policies (baselith.core.memory.lifecycle)."""
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.memory.hierarchy import (
+from baselith.core.memory.hierarchy import (
     HierarchicalMemory,
     HierarchyConfig,
     MemoryTier,
     TierConfig,
 )
-from core.memory.lifecycle import (
+from baselith.core.memory.lifecycle import (
     drop_duplicates,
     is_expired,
     partition_expired,
     select_promotable,
     ttl_enforcement_enabled,
 )
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 
 def _item(content: str, importance: float = 0.5, age_seconds: float = 0.0):
@@ -208,8 +208,8 @@ class TestDedupKeyCanonicalization:
     and whitespace variants of the same note collapse to one item."""
 
     def test_accent_and_punctuation_variants_are_duplicates(self) -> None:
-        from core.memory.lifecycle import drop_duplicates
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.lifecycle import drop_duplicates
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         existing = [MemoryItem("Café aperto!", MemoryType.SHORT_TERM)]
         candidate = MemoryItem("cafe  aperto", MemoryType.SHORT_TERM)

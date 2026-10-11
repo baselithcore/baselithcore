@@ -7,8 +7,12 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates.sources import GitHubReleaseSource, SourceError, load_sources
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates.sources import (
+    GitHubReleaseSource,
+    SourceError,
+    load_sources,
+)
 
 
 def _rel(
@@ -327,7 +331,7 @@ async def test_release_by_tag_raises_on_server_error() -> None:
 
 
 async def test_json_metadata_over_the_cap_is_refused() -> None:
-    from core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
+    from baselith.core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
 
     big = b"[" + b"1," * (MAX_TEXT_FILE_BYTES // 2) + b"1]"
     src = _source(lambda r: httpx.Response(200, content=big))
@@ -336,7 +340,7 @@ async def test_json_metadata_over_the_cap_is_refused() -> None:
 
 
 async def test_declared_oversize_metadata_is_refused_before_the_body() -> None:
-    from core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
+    from baselith.core.plugin_updates.sources import MAX_TEXT_FILE_BYTES, SourceError
 
     src = _source(
         lambda r: httpx.Response(
@@ -348,7 +352,7 @@ async def test_declared_oversize_metadata_is_refused_before_the_body() -> None:
 
 
 async def test_download_accepts_a_tighter_per_call_cap(tmp_path: Path) -> None:
-    from core.plugin_updates.sources import SourceError
+    from baselith.core.plugin_updates.sources import SourceError
 
     src = _source(lambda r: httpx.Response(200, content=b"x" * 100))
     with pytest.raises(SourceError, match="larger than 10"):

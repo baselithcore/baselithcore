@@ -1,6 +1,6 @@
 """The in-repo splitter must stay byte-compatible with the one it replaced.
 
-``core.services.vectorstore.recursive_splitter`` replaced LangChain's
+``baselith.core.services.vectorstore.recursive_splitter`` replaced LangChain's
 ``RecursiveCharacterTextSplitter`` so the framework stops pulling
 ``langchain-text-splitters`` → ``langchain-core`` → ``langsmith`` for one
 algorithm.
@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.services.vectorstore.chunking import chunk_text
-from core.services.vectorstore.recursive_splitter import RecursiveCharacterSplitter
+from baselith.core.services.vectorstore.chunking import chunk_text
+from baselith.core.services.vectorstore.recursive_splitter import (
+    RecursiveCharacterSplitter,
+)
 
 SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
@@ -143,7 +145,7 @@ class TestPublicChunkText:
 
     def test_default_splitter_is_reused(self) -> None:
         """The default (size, overlap) pair must not rebuild a splitter."""
-        from core.services.vectorstore.chunking import (
+        from baselith.core.services.vectorstore.chunking import (
             DEFAULT_CHUNK_OVERLAP,
             DEFAULT_CHUNK_SIZE,
             DEFAULT_SPLITTER,
@@ -169,7 +171,7 @@ class TestSplitterContract:
 
     def test_langchain_is_not_imported(self) -> None:
         """The dependency this module exists to remove must stay removed."""
-        import core.services.vectorstore.chunking as module
+        import baselith.core.services.vectorstore.chunking as module
 
         source = __import__("pathlib").Path(module.__file__).read_text(encoding="utf-8")
         assert "langchain" not in source

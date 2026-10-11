@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.errors import (
+from baselith.core.services.llm.errors import (
     LLMClientError,
     LLMConnectionError,
     LLMRateLimitError,
@@ -18,7 +18,7 @@ from core.services.llm.errors import (
     LLMServerError,
     LLMTimeoutError,
 )
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.usage import Usage
 
 MODERN = "claude-opus-5"
 
@@ -70,11 +70,13 @@ def _anthropic(create=None, stream=None):
     if stream is not None:
         client.messages.stream = stream
     with patch(
-        "core.services.llm.providers.anthropic_provider.anthropic"
+        "baselith.core.services.llm.providers.anthropic_provider.anthropic"
     ) as mock_anthropic:
         mock_anthropic.AsyncAnthropic.return_value = client
         mock_anthropic.NOT_GIVEN = "not_given"
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test")
         provider._ensure_client()
@@ -288,7 +290,7 @@ class TestPauseTurnResilience:
 class TestRefusalLogging:
     async def test_a_refusal_is_not_logged_as_a_generation_error(self):
         """A refusal is a model decision, not a provider failure."""
-        from core.services.llm.providers import anthropic_provider as module
+        from baselith.core.services.llm.providers import anthropic_provider as module
 
         provider, _ = _anthropic(
             create=AsyncMock(
@@ -305,7 +307,7 @@ class TestRefusalLogging:
         error_log.assert_not_called()
 
     async def test_a_real_provider_failure_is_still_logged_as_an_error(self):
-        from core.services.llm.providers import anthropic_provider as module
+        from baselith.core.services.llm.providers import anthropic_provider as module
 
         provider, _ = _anthropic(create=AsyncMock(side_effect=APIStatusError("x", 500)))
         with patch.object(module.logger, "error") as error_log:

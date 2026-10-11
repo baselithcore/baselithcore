@@ -9,7 +9,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.orchestration.intent_classifier import ClassificationResult, IntentClassifier
+from baselith.core.orchestration.intent_classifier import (
+    ClassificationResult,
+    IntentClassifier,
+)
 
 
 @pytest.mark.asyncio

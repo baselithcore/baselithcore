@@ -6,17 +6,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.auth import AuthRole, AuthUser
-from core.cache.semantic_cache import SemanticLLMCache
+from baselith.core.auth import AuthRole, AuthUser
+from baselith.core.cache.semantic_cache import SemanticLLMCache
 
 # Import system under test
-from core.context import get_current_tenant_id, reset_tenant_context, set_tenant_context
-from core.db.feedback import insert_feedback
-from core.db.schema import ensure_schema
-from core.middleware.tenant import TenantMiddleware
-from core.optimization.caching import RedisCache
-from core.services.indexing.service import IndexedDocument, IndexingService
-from core.services.vectorstore.service import VectorStoreService
+from baselith.core.context import (
+    get_current_tenant_id,
+    reset_tenant_context,
+    set_tenant_context,
+)
+from baselith.core.db.feedback import insert_feedback
+from baselith.core.db.schema import ensure_schema
+from baselith.core.middleware.tenant import TenantMiddleware
+from baselith.core.optimization.caching import RedisCache
+from baselith.core.services.indexing.service import IndexedDocument, IndexingService
+from baselith.core.services.vectorstore.service import VectorStoreService
 
 
 class TestContext:
@@ -66,8 +70,8 @@ class TestTenantMiddleware:
 
     @pytest.mark.asyncio
     async def test_middleware_logging_binding(self):
-        with patch("core.middleware.tenant.structlog"):
-            with patch("core.middleware.tenant.bind_contextvars") as mock_bind:
+        with patch("baselith.core.middleware.tenant.structlog"):
+            with patch("baselith.core.middleware.tenant.bind_contextvars") as mock_bind:
 
                 async def downstream(scope, receive, send):
                     await send(
@@ -93,7 +97,7 @@ class TestTenantMiddleware:
 
 class TestRedisCacheIsolation:
     def test_redis_key_namespacing(self):
-        with patch("core.optimization.caching.redis"):
+        with patch("baselith.core.optimization.caching.redis"):
             cache = RedisCache(prefix="test")
             cache._enabled = True
             cache._client = MagicMock()
@@ -161,7 +165,7 @@ class TestVectorStoreIsolation:
     async def test_search_injects_tenant_filter(self):
         # Patch configuration to return a specific provider type
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_config"
+            "baselith.core.services.vectorstore.service.get_vectorstore_config"
         ) as mock_conf:
             mock_conf.return_value.provider = "qdrant"
             mock_conf.return_value.collection_name = "test_coll"
@@ -169,11 +173,11 @@ class TestVectorStoreIsolation:
             mock_conf.return_value.search_cache_enabled = False
 
             # Patch RedisCache so we don't need real redis
-            with patch("core.services.vectorstore.service.RedisCache"):
+            with patch("baselith.core.services.vectorstore.service.RedisCache"):
                 # We need to ensure QdrantProvider is mocked when initialized
                 # VectorStoreService imports QdrantProvider from provider module
                 with patch(
-                    "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
+                    "baselith.core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                 ) as MockProviderCls:
                     mock_provider_instance = AsyncMock()
                     MockProviderCls.return_value = mock_provider_instance
@@ -198,13 +202,13 @@ class TestVectorStoreIsolation:
     @pytest.mark.asyncio
     async def test_delete_injects_tenant_filter(self):
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_config"
+            "baselith.core.services.vectorstore.service.get_vectorstore_config"
         ) as mock_conf:
             mock_conf.return_value.provider = "qdrant"
             with (
-                patch("core.services.vectorstore.service.RedisCache"),
+                patch("baselith.core.services.vectorstore.service.RedisCache"),
                 patch(
-                    "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
+                    "baselith.core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                 ) as MockProviderCls,
             ):
                 mock_provider = AsyncMock()
@@ -231,18 +235,20 @@ class TestIndexingServiceIsolation:
         Verify that IndexingService correctly delegates to VectorStoreService
         and that VectorStoreService injects the tenant_id.
         """
-        import core.services.indexing.service
+        import baselith.core.services.indexing.service
 
         with (
             patch(
-                "core.services.indexing.service.get_vectorstore_service"
+                "baselith.core.services.indexing.service.get_vectorstore_service"
             ) as mock_get_vs,
             patch.object(
-                core.services.indexing.service, "get_vectorstore_config"
+                baselith.core.services.indexing.service, "get_vectorstore_config"
             ) as mock_idx_conf,
-            patch.object(core.services.indexing.service, "get_processing_config"),
             patch.object(
-                core.services.indexing.service, "get_embedder"
+                baselith.core.services.indexing.service, "get_processing_config"
+            ),
+            patch.object(
+                baselith.core.services.indexing.service, "get_embedder"
             ) as mock_get_embedder,
         ):
             # Setup Indexing Config
@@ -250,7 +256,7 @@ class TestIndexingServiceIsolation:
 
             # Setup VectorStore Service (Real instance but mocked provider to catch the payload)
             with patch(
-                "core.services.vectorstore.service.get_vectorstore_config"
+                "baselith.core.services.vectorstore.service.get_vectorstore_config"
             ) as mock_vs_conf:
                 mock_vs_conf.return_value.provider = "qdrant"
                 mock_vs_conf.return_value.collection_name = "test_coll"
@@ -258,17 +264,17 @@ class TestIndexingServiceIsolation:
 
                 with (
                     patch(
-                        "core.services.vectorstore.service.RedisCache"
+                        "baselith.core.services.vectorstore.service.RedisCache"
                     ) as MockCacheCls,
                     patch(
-                        "core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
+                        "baselith.core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
                     ) as MockProviderCls,
                     patch(
-                        "core.services.vectorstore._indexing.chunk_text",
+                        "baselith.core.services.vectorstore._indexing.chunk_text",
                         return_value=["chunk1"],
                     ),
                     patch(
-                        "core.services.vectorstore._indexing.prepare_chunk_text",
+                        "baselith.core.services.vectorstore._indexing.prepare_chunk_text",
                         return_value="chunk1",
                     ),
                 ):
@@ -304,8 +310,10 @@ class TestIndexingServiceIsolation:
 
                         # Batched path: build the Document, then flush the
                         # one-item batch -> real_vs.index -> mock_provider.upsert
-                        from core.services.indexing._batch import build_document
-                        from core.services.indexing.state import IndexingStats
+                        from baselith.core.services.indexing._batch import (
+                            build_document,
+                        )
+                        from baselith.core.services.indexing.state import IndexingStats
 
                         doc = build_document(item)
                         assert doc is not None
@@ -374,7 +382,9 @@ class TestFeedbackIsolation:
         async def get_conn_gen():
             yield mock_conn
 
-        with patch("core.db.feedback.get_async_connection", side_effect=get_conn_gen):
+        with patch(
+            "baselith.core.db.feedback.get_async_connection", side_effect=get_conn_gen
+        ):
             token = set_tenant_context("tenant-db")
             try:
                 await insert_feedback("q", "a", "pos")

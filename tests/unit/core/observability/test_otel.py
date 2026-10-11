@@ -17,10 +17,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from core.observability import otel
-from core.observability.logging import add_otel_context
-from core.observability.otel_exporters import PROTOCOL_GRPC
-from core.observability.tracing import SpanStatus, Tracer
+from baselith.core.observability import otel
+from baselith.core.observability.logging import add_otel_context
+from baselith.core.observability.otel_exporters import PROTOCOL_GRPC
+from baselith.core.observability.tracing import SpanStatus, Tracer
 
 
 @pytest.fixture
@@ -36,7 +36,9 @@ def otel_sdk(monkeypatch):
     provider.add_span_processor(SimpleSpanProcessor(exporter))
 
     monkeypatch.setattr(trace, "get_tracer", lambda *a, **k: provider.get_tracer("t"))
-    monkeypatch.setattr("core.observability.tracing._otel_active", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.observability.tracing._otel_active", lambda: True
+    )
 
     yield exporter
     exporter.clear()
@@ -98,7 +100,9 @@ class TestNoBridgeWhenInactive:
         monkeypatch.setattr(
             trace, "get_tracer", lambda *a, **k: provider.get_tracer("t")
         )
-        monkeypatch.setattr("core.observability.tracing._otel_active", lambda: False)
+        monkeypatch.setattr(
+            "baselith.core.observability.tracing._otel_active", lambda: False
+        )
 
         tracer = Tracer("svc")
         with tracer.start_span("op"):
@@ -142,7 +146,7 @@ class TestSetupTeardown:
 
 class TestHelpers:
     def test_coerce_attr(self):
-        from core.observability.tracing import _coerce_attr
+        from baselith.core.observability.tracing import _coerce_attr
 
         assert _coerce_attr("s") == "s"
         assert _coerce_attr(3) == 3
@@ -239,7 +243,7 @@ class TestExistingAppIsInstrumented:
     def test_prebuilt_app_gets_instrumented(self):
         from fastapi import FastAPI
 
-        from core.observability import otel_instrumentation
+        from baselith.core.observability import otel_instrumentation
 
         app = FastAPI()
         assert not getattr(app, "_is_instrumented_by_opentelemetry", False)
@@ -250,7 +254,7 @@ class TestExistingAppIsInstrumented:
         """Probes stay untraced and one request stays one span."""
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        from core.observability import otel_instrumentation
+        from baselith.core.observability import otel_instrumentation
 
         monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
         monkeypatch.delenv("OTEL_PYTHON_EXCLUDED_URLS", raising=False)
@@ -278,13 +282,13 @@ class TestExistingAppIsInstrumented:
         assert seen["exclude_spans"] == ["receive", "send"]
 
     def test_sub_spans_can_be_restored_for_debugging(self, monkeypatch):
-        from core.observability import otel_instrumentation
+        from baselith.core.observability import otel_instrumentation
 
         monkeypatch.setenv("BASELITH_OTEL_ASGI_SUB_SPANS", "true")
         assert otel_instrumentation._fastapi_exclude_spans() is None
 
     def test_instrument_app_is_a_noop_without_an_app(self):
-        from core.observability import otel_instrumentation
+        from baselith.core.observability import otel_instrumentation
 
         otel_instrumentation._instrument_app(None)  # must not raise
 

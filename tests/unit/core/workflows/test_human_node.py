@@ -12,15 +12,15 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import ApprovalPendingError
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.autonomy import ApprovalPendingError
+from baselith.core.orchestration.checkpoint import (
     Checkpoint,
     CheckpointManager,
     record_approval_decision,
 )
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.workflows.builder import WorkflowBuilder
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.workflows.builder import WorkflowBuilder
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
 
 def _gated_workflow():

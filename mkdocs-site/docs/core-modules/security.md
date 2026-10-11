@@ -1,16 +1,16 @@
 # Security & Encryption
 
-The `core.security` package provides three domain-agnostic infrastructure
+The `baselith.core.security` package provides three domain-agnostic infrastructure
 primitives for enterprise deployments:
 
 1. **Encryption at rest** — authenticated, versioned field encryption
-   (`core.security.encryption`).
+   (`baselith.core.security.encryption`).
 2. **Pluggable secret resolution** — decouples *where* credentials come from
    (environment, mounted files, external managers) from *how* they are consumed
-   (`core.security.secrets`).
+   (`baselith.core.security.secrets`).
 3. **Unified SSRF protection** — a single fail-closed guard
-   (`core.security.ssrf`) and hardened `httpx` client factory
-   (`core.security.http`) that every outbound-URL call site in the framework
+   (`baselith.core.security.ssrf`) and hardened `httpx` client factory
+   (`baselith.core.security.http`) that every outbound-URL call site in the framework
    builds on.
 
 Encryption and secrets are **opt-in**: with no configuration, the framework
@@ -59,7 +59,7 @@ python -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).deco
 ### Usage
 
 ```python
-from core.security import get_field_encryptor
+from baselith.core.security import get_field_encryptor
 
 enc = get_field_encryptor()           # None if not configured
 if enc:
@@ -94,14 +94,14 @@ Tampering, an unknown key id, or a malformed/unsupported-version token raise
 
 ## Credential digests
 
-`core.security.digest.credential_digest(data)` returns the hex SHA-256 of an
+`baselith.core.security.digest.credential_digest(data)` returns the hex SHA-256 of an
 opaque credential. API keys, JWTs and session tokens are indexed and cached by
 this digest, so the raw value never becomes a dictionary key, a cache entry or
 a rate-limit bucket name. SHA-256 fits because the inputs are random tokens,
 not human-chosen passwords, and the lookup runs on every authenticated request.
 
 It is not password storage. The operator credential goes through
-PBKDF2-SHA256 in `core/middleware/_admin_credentials.py`.
+PBKDF2-SHA256 in `baselith/core/middleware/_admin_credentials.py`.
 
 ## SSRF Protection
 
@@ -113,13 +113,13 @@ Forgery** vector: without a guard, the attacker can make the server issue
 requests to `169.254.169.254` (cloud metadata), `127.0.0.1`, or an internal
 service.
 
-`core.security.ssrf` merges what used to be two separate implementations —
+`baselith.core.security.ssrf` merges what used to be two separate implementations —
 the browser agent's literal/offline hostname check and the webhook
 dispatcher's DNS-resolve-and-pin strategy — into one module every other call
-site now builds on. `core.security.http` wraps it in an `httpx.AsyncClient`
+site now builds on. `baselith.core.security.http` wraps it in an `httpx.AsyncClient`
 factory so a call site cannot forget the guard.
 
-### `core.security.ssrf`
+### `baselith.core.security.ssrf`
 
 | Symbol | Purpose |
 |---|---|
@@ -137,11 +137,11 @@ components that legitimately talk to internal hosts by design (an A2A mesh
 of peer agents, a local Ollama instance) and is threaded through from an
 environment variable in every such call site (see the table below).
 
-### `core.security.http`
+### `baselith.core.security.http`
 
 ```python
-from core.security.http import create_hardened_async_client
-from core.security.ssrf import SsrfPolicy
+from baselith.core.security.http import create_hardened_async_client
+from baselith.core.security.ssrf import SsrfPolicy
 
 client = create_hardened_async_client(policy=SsrfPolicy(), timeout=15.0)
 resp = await client.get("https://example.com/resource")
@@ -176,6 +176,35 @@ Hardening details baked into the factory:
   gap; pass `limits=httpx.Limits(...)` explicitly to opt back into pooling
   when the caller is a single fixed host.
 
+### `baselith.core.security.bounded_body` {#bounded-bodies}
+
+A byte counter on `httpx.Response.aiter_bytes()` does not bound memory for a
+compressed body: httpx inflates each network chunk whole before yielding it,
+so a few KiB of gzip on the wire become gigabytes before the counter is
+consulted. `aiter_bounded(response, limit)` / `read_bounded(response, limit)`
+read the raw wire bytes and inflate them under the cap instead:
+
+- `identity` (or no `Content-Encoding`) passes through, and an identity
+  `Content-Length` over the cap is refused before the body is read;
+- `gzip` and `deflate` are inflated with `zlib` under a `max_length`, so the
+  decoder never produces more than `limit + 1` bytes;
+- any other encoding (`br`, `zstd`, stacked encodings) raises
+  `UnsupportedEncodingError` before the body is read.
+
+Over the cap raises `BodyTooLargeError`; both derive from `BodyLimitError`
+(a `ValueError`). `read_truncated(response, limit)` keeps the first `limit`
+decoded bytes instead of refusing — for bodies where a prefix is still useful,
+such as `robots.txt`. Requests read this way send
+`Accept-Encoding: BOUNDED_ACCEPT_ENCODING` (`gzip, deflate`), so a server never
+picks an encoding the reader refuses; `decoded_headers(response)` drops
+`Content-Encoding`/`Content-Length` when a buffered response is rebuilt from
+the decoded body.
+
+Every capped reader goes through it: the connector client, the plugin-update
+source, the inference HTTP client, the voice providers, and the `web_scraper`
+and `document_sources` web fetchers. The MCP client keeps its stricter
+identity-only rule (`baselith.core.mcp.bounded_http`).
+
 ### Adopted call sites
 
 Every framework component that fetches an attacker-influenced URL routes
@@ -184,25 +213,25 @@ through `assert_url_safe`/`assert_url_safe_async` or
 
 | Call site | Module | Internal hosts |
 |---|---|---|
-| Webhook dispatch | `core.webhooks.dispatcher` (via the `core.webhooks.ssrf` shim) | Rejected by default; `WEBHOOK_ALLOW_INTERNAL=true` to allow. |
-| OIDC discovery + JWKS | `core.auth.oidc` | Always rejected — issuer and the JWKS URI read back from the discovery document (attacker-influenced if the issuer/its DNS is compromised) are both screened before any HTTP call. No opt-out. |
-| A2A client | `core.a2a.client.A2AClient` | **Environment-aware default** for `A2AClientConfig.allow_internal_endpoints`: allowed outside production (A2A meshes commonly run peer agents on private networks), **denied in production** — the same deny-by-default as the MCP transport and the webhook guard. Setting `A2A_ALLOW_INTERNAL_ENDPOINTS` explicitly (`1`/`true`/`yes`/`on` is truthy, anything else falsy) overrides in both directions, so a private-mesh production deployment opts back in with `A2A_ALLOW_INTERNAL_ENDPOINTS=true`. Production is resolved by the [runtime-environment resolver](config.md#runtime-environment). See [A2A Protocol](a2a.md). |
-| MCP Streamable HTTP transport | `core.mcp.http_client_transport` | Rejected by default; `MCP_ALLOW_INTERNAL_ENDPOINTS=true` for a local/internal MCP server. See [MCP Integration](mcp.md#ssrf-guard-streamable-http-transport). |
-| Fine-tuning providers | `core.finetuning.providers.TogetherProvider` | Rejected; hardcoded public SaaS endpoints, so the guard is defense-in-depth with no functional impact. No opt-out. |
-| Plugin exporters (marketplace JWT exchange) | `core.plugins.exporters.router` | Rejected; always targets `OFFICIAL_MARKETPLACE_URL`. No opt-out. |
-| Browser agent navigation + sub-resources | `plugins.browser_agent` | Rejected by default; `BASELITH_BROWSER_ALLOW_INTERNAL=true`. See [Runtime hardening controls](../advanced/security.md#ssrf-connection-pinning). |
-| Web scraper (HTTP + Playwright fetchers) | `plugins.web_scraper` | Governed by `ScraperConfig.block_private_ips` (default `True`). See [Web Scraper](scraper.md#security-ssrf-protection). |
-| Baselithbot channels/integrations/skills | `plugins.baselithbot.http.hardened_client` | Rejected by default; `BASELITHBOT_ALLOW_INTERNAL_WEBHOOKS=true`. |
+| Webhook registration + dispatch | `baselith.core.webhooks.service` (`assert_url_safe`), `baselith.core.webhooks.dispatcher` (`resolve_pinned_target`) | Rejected by default; `WEBHOOK_ALLOW_INTERNAL=true` to allow. |
+| Marketplace registry URL | `baselith.core.marketplace.registry` | Rejected by default; loopback (local testing) or `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` for a trusted internal registry. |
+| OIDC discovery + JWKS | `baselith.core.auth.oidc` | Always rejected — issuer and the JWKS URI read back from the discovery document (attacker-influenced if the issuer/its DNS is compromised) are both screened before any HTTP call. No opt-out. |
+| A2A client | `baselith.core.a2a.client.A2AClient` | **Environment-aware default** for `A2AClientConfig.allow_internal_endpoints`: allowed outside production (A2A meshes commonly run peer agents on private networks), **denied in production** — the same deny-by-default as the MCP transport and the webhook guard. Setting `A2A_ALLOW_INTERNAL_ENDPOINTS` explicitly (`1`/`true`/`yes`/`on` is truthy, anything else falsy) overrides in both directions, so a private-mesh production deployment opts back in with `A2A_ALLOW_INTERNAL_ENDPOINTS=true`. Production is resolved by the [runtime-environment resolver](config.md#runtime-environment). See [A2A Protocol](a2a.md). |
+| MCP Streamable HTTP transport | `baselith.core.mcp.http_client_transport` | Rejected by default; `MCP_ALLOW_INTERNAL_ENDPOINTS=true` for a local/internal MCP server. See [MCP Integration](mcp.md#ssrf-guard-streamable-http-transport). |
+| Fine-tuning providers | `baselith.core.finetuning.providers.TogetherProvider` | Rejected; hardcoded public SaaS endpoints, so the guard is defense-in-depth with no functional impact. No opt-out. |
+| Plugin exporters (marketplace JWT exchange) | `baselith.core.plugins.exporters.router` | Rejected; always targets `OFFICIAL_MARKETPLACE_URL`. No opt-out. |
+| Browser agent navigation + sub-resources | `baselith.plugins.browser_agent` | Rejected by default; `BASELITH_BROWSER_ALLOW_INTERNAL=true`. See [Runtime hardening controls](../advanced/security.md#ssrf-connection-pinning). |
+| Web scraper (HTTP + Playwright fetchers) | `baselith.plugins.web_scraper` | Governed by `ScraperConfig.block_private_ips` (default `True`). See [Web Scraper](scraper.md#security-ssrf-protection). |
 
 ### Per-caller egress guard
 
 The checks above answer "is this host safe to reach at all". They cannot answer
 "is *this caller* allowed to reach it" — that is a policy about plugins, and
-`core.security` must not know what a plugin is (Sacred Core rule). The decision
+`baselith.core.security` must not know what a plugin is (Sacred Core rule). The decision
 therefore arrives as a callable:
 
 ```python
-from core.security.ssrf import set_egress_guard
+from baselith.core.security.ssrf import set_egress_guard
 
 set_egress_guard(lambda host: policy.assert_allowed(host))  # raises to refuse
 set_egress_guard(None)                                      # remove it
@@ -216,15 +245,25 @@ loopback/private/link-local screening and the IP pinning described above.
 
 ### Deprecated shims
 
-`core/webhooks/ssrf.py` is a thin backward-compatible shim over
-`core.security.ssrf`: `WebhookSSRFError` is now an alias of `SsrfError`, and
-`resolve_pinned_target`/`validate_webhook_url` delegate to the new module
-with a `SsrfPolicy(allow_internal=...)` built from their `allow_internal`
-kwarg. It is kept only so existing imports keep working (`core.webhooks.dispatcher`,
-`core.webhooks.service`, the marketplace registry, and third-party plugins)
-and will be removed in a future major release — new code should import
-`core.security.ssrf` directly. `core.scraper.utils` and
-`plugins.web_scraper.utils.is_private_ip`/`resolve_safe_ips` are similar
+`baselith/core/webhooks/ssrf.py` is a thin backward-compatible shim over
+`baselith.core.security.ssrf`, **deprecated since 1.0 and removed in 2.0**.
+No framework module imports it any more — the webhook service and dispatcher,
+the marketplace registry and the webhook management router all call
+`baselith.core.security.ssrf` directly; it exists only for third-party code.
+
+| Deprecated (`baselith.core.webhooks.ssrf`, also re-exported by `baselith.core.webhooks`) | Replacement (`baselith.core.security.ssrf`) |
+| --- | --- |
+| `validate_webhook_url(url, allow_internal=x)` | `assert_url_safe(url, SsrfPolicy(allow_internal=x))` |
+| `resolve_pinned_target(url, allow_internal=x)` | `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` |
+| `WebhookSSRFError` | `SsrfError` |
+
+The two functions are wrapped in `@deprecated(since="1.0", removed_in="2.0", …)`
+and emit a `DeprecationWarning` on every call. `WebhookSSRFError` is an
+**alias**, not a wrapper — the same class object as `SsrfError` — so
+`except WebhookSSRFError` keeps catching what the new API raises; for the same
+reason it cannot warn (a warning on the class would fire for every `SsrfError`
+the framework raises), and it is deprecated by documentation only. `baselith.core.scraper.utils` and
+`baselith.plugins.web_scraper.utils.is_private_ip`/`resolve_safe_ips` are similar
 compatibility re-exports (see [Web Scraper](scraper.md#security-ssrf-protection)).
 
 ---
@@ -238,9 +277,10 @@ credentials never leak via `repr()`, logs, or Sentry frames.
 |---|---|
 | `env` (default) | Process environment variables. Identical to current behaviour. |
 | `file` | Per-secret files under `SECRETS_DIR` (the Docker/Kubernetes secrets pattern, e.g. `/run/secrets`). Also honours the `<NAME>_FILE` indirection and falls back to the environment. |
+| any other name | A provider an installed package declares under the `baselith.secrets_providers` entry point, or one registered in-process (see [below](#external-backends-vault-cloud-secret-managers)). |
 
 ```python
-from core.security import get_secret
+from baselith.core.security import get_secret
 
 password = get_secret("DB_PASSWORD")   # SecretStr | None
 ```
@@ -262,30 +302,97 @@ Both settings are fields of `SecurityConfig` (`secrets_backend`,
 supplied through any settings source applies. The provider and the security
 config are both cached for the process: a test that changes `SECRETS_BACKEND`
 must reset both (`reset_secrets_provider()` and
-`core.config.security._security_config = None`).
+`baselith.core.config.security._security_config = None`).
 
-### Registering an external backend (Vault, cloud KMS)
+### External backends (Vault, cloud secret managers)
 
 Heavy or environment-specific providers stay **out of `core`** (Sacred Core
-rule). Register them at startup and select via `SECRETS_BACKEND`:
+rule): `core` ships no vendor SDK and no Vault client. A provider only needs
+`get_secret(name) -> SecretStr | None`, and it reaches the runtime one of two
+ways — both selected the same way, with `SECRETS_BACKEND=<name>`.
+
+**Ship it as a package (recommended).** Declare a zero-argument factory under
+the `baselith.secrets_providers` entry-point group. The operator installs the
+package and sets `SECRETS_BACKEND=vault`; no startup code changes. This works
+even though the first secret read happens during bootstrap, before any plugin
+loads, because discovery is part of building the provider itself.
+
+```toml
+# pyproject.toml of your provider package
+[project.entry-points."baselith.secrets_providers"]
+vault = "acme_vault_secrets:VaultSecretsProvider"
+```
 
 ```python
-from core.security import register_secrets_provider
+# acme_vault_secrets.py — EXAMPLE ONLY, not part of BaselithCore.
+# A minimal HashiCorp Vault KV v2 provider. Each secret lives at
+# <mount>/data/<path> under a key equal to the secret name.
+import os
+
+import httpx
+from pydantic import SecretStr
+
+
+class VaultSecretsProvider:
+    def __init__(self) -> None:
+        self._addr = os.environ["VAULT_ADDR"].rstrip("/")
+        self._token = SecretStr(os.environ["VAULT_TOKEN"])  # never a plain str
+        self._mount = os.environ.get("VAULT_KV_MOUNT", "secret")
+        self._path = os.environ.get("VAULT_KV_PATH", "baselith")
+        self._client = httpx.Client(timeout=5.0)
+
+    def get_secret(self, name: str) -> SecretStr | None:
+        response = self._client.get(
+            f"{self._addr}/v1/{self._mount}/data/{self._path}",
+            headers={"X-Vault-Token": self._token.get_secret_value()},
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        value = response.json()["data"]["data"].get(name)
+        return SecretStr(value) if value is not None else None
+```
+
+A production provider would add caching, token renewal (or Kubernetes/AppRole
+auth) and TLS settings; the contract above is all the framework requires.
+
+**Register it in-process** (tests, or an application embedding the framework):
+
+```python
+from baselith.core.security import register_secrets_provider
 
 register_secrets_provider("vault", lambda: MyVaultProvider(addr=..., token=...))
 # then run with SECRETS_BACKEND=vault
 ```
 
-A provider only needs `get_secret(name) -> SecretStr | None`.
+**Precedence.** The built-ins `env` and `file` always win and cannot be
+shadowed (registering either raises `ValueError`; an entry point with either
+name is ignored). An explicit registration beats an entry point of the same
+name. The entry-point group is read lazily, only when the selected backend is
+neither a built-in nor registered, so the default `env` path never scans
+package metadata.
+
+**Fail closed.** A misconfigured backend stops the first secret read rather
+than silently reading credentials from the environment:
+
+| Situation | Error |
+|---|---|
+| Name is not a built-in, registered, or installed | `ValueError` listing the built-in, registered and discovered names |
+| Two installed packages declare the same name | `ValueError` ("Ambiguous …") naming both distributions |
+| The entry point fails to import, or its factory raises | `RuntimeError` naming the entry point; the original exception is chained, its text is not echoed |
+| The factory returns something without `get_secret` | `TypeError` naming the entry point (or registered backend) |
+
+A failed build is not cached, and no secret value ever appears in these
+messages or in the provider's log line (which records only the provider class).
 
 ### Per-caller secret guard
 
 Which backend answers a lookup is one question; **who may ask** is another, and
-it is again a policy about plugins that `core.security` cannot hold. The same
+it is again a policy about plugins that `baselith.core.security` cannot hold. The same
 seam as the egress guard applies:
 
 ```python
-from core.security.secrets import set_secret_guard
+from baselith.core.security.secrets import set_secret_guard
 
 set_secret_guard(lambda name: policy.assert_may_read(name))  # raises to refuse
 set_secret_guard(None)                                       # remove it

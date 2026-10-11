@@ -10,8 +10,10 @@ import uuid
 
 import pytest
 
-from core.services.vectorstore.exceptions import VectorStoreError
-from core.services.vectorstore.providers.pgvector_provider import PgVectorProvider
+from baselith.core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.services.vectorstore.providers.pgvector_provider import (
+    PgVectorProvider,
+)
 
 pytestmark = [pytest.mark.integration]
 
@@ -24,7 +26,7 @@ async def _pg_available() -> bool:
     ``SELECT 1`` to come back, which no mock produces.
     """
     try:
-        from core.db.connection import get_async_cursor
+        from baselith.core.db.connection import get_async_cursor
 
         async with get_async_cursor() as cur:
             await cur.execute("SELECT 1")
@@ -46,7 +48,7 @@ async def provider():
     except VectorStoreError as exc:
         pytest.skip(f"pgvector extension unavailable: {exc}")
     yield provider, collection
-    from core.db.connection import get_async_cursor
+    from baselith.core.db.connection import get_async_cursor
 
     async with get_async_cursor() as cur:
         await cur.execute(f"DROP TABLE IF EXISTS vs_{collection}")

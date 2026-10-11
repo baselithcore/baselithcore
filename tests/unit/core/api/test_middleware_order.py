@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 _CHILD = r"""
-from core.api.factory import create_app
+from baselith.core.api.factory import create_app
 
 app = create_app()
 # user_middleware[0] is the OUTERMOST layer (add_middleware inserts at index 0).

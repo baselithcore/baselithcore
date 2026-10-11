@@ -7,17 +7,23 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.api.errors import install_error_handlers
-from core.auth.types import AuthRole, AuthUser
-from core.compliance.documents import reset_document_services
-from core.compliance.post_market import MonitoringMetric, PostMarketMonitoringPlan
-from core.compliance.post_market_service import (
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.compliance.documents import reset_document_services
+from baselith.core.compliance.post_market import (
+    MonitoringMetric,
+    PostMarketMonitoringPlan,
+)
+from baselith.core.compliance.post_market_service import (
     get_post_market_service,
     reset_post_market_service,
 )
-from core.compliance.registry import get_ai_system_registry, reset_ai_system_registry
-from core.middleware import require_user
-from plugins.api_routers.compliance import router
+from baselith.core.compliance.registry import (
+    get_ai_system_registry,
+    reset_ai_system_registry,
+)
+from baselith.core.middleware import require_user
+from baselith.plugins.api_routers.compliance import router
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +101,7 @@ class TestRegistry:
         assert resp.json()["system"]["risk_category"] == "prohibited"
 
     def test_blocking_mode_refuses_a_prohibited_practice(self, client, monkeypatch):
-        from core.config import compliance as compliance_config
+        from baselith.core.config import compliance as compliance_config
 
         monkeypatch.setenv("COMPLIANCE_BLOCK_PROHIBITED_PRACTICES", "true")
         compliance_config._compliance_config = None
@@ -181,7 +187,7 @@ class TestRegistry:
 
 
 async def _add_annex_iii(system_id: str, area: str) -> None:
-    from core.compliance.types import AnnexIIIArea
+    from baselith.core.compliance.types import AnnexIIIArea
 
     registry = get_ai_system_registry()
     system = await registry.require(system_id)
@@ -289,7 +295,7 @@ class TestPosture:
         assert "AUDIT_ENABLED" in body["gaps"]
 
     def test_audit_verify_reports_when_no_durable_sink(self, client):
-        from core.observability.audit import reset_audit_logger
+        from baselith.core.observability.audit import reset_audit_logger
 
         reset_audit_logger()
         try:

@@ -1,4 +1,4 @@
-"""Unit tests for exact Claude token counting in ``core.utils.tokens``.
+"""Unit tests for exact Claude token counting in ``baselith.core.utils.tokens``.
 
 ``estimate_tokens_async`` prefers
 ``anthropic.Anthropic().messages.count_tokens`` for ``claude*`` models when
@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import core.utils.tokens as tokens_module
+import baselith.core.utils.tokens as tokens_module
 
 count_tokens_exact_available = tokens_module.count_tokens_exact_available
 estimate_tokens = tokens_module.estimate_tokens
@@ -43,7 +43,7 @@ def _reset_exact_token_globals(monkeypatch):
     monkeypatch.delenv("LLM_ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("BASELITH_EXACT_TOKEN_COUNTING", raising=False)
     # The key is resolved through the cached LLMConfig: rebuild it per test.
-    monkeypatch.setattr("core.config.services._llm_config", None)
+    monkeypatch.setattr("baselith.core.config.services._llm_config", None)
     tokens_module._exact_token_cache.clear()
     tokens_module._exact_count_failed_at.clear()
     # Resolve the tiktoken encoder up front. Left unresolved (which depends on
@@ -192,7 +192,7 @@ class TestAsyncExactCountingPath:
             tokens_module, "_load_anthropic_client", lambda: _mock_client(4)
         )
         with patch(
-            "core.utils.tokens.asyncio.to_thread",
+            "baselith.core.utils.tokens.asyncio.to_thread",
             wraps=tokens_module.asyncio.to_thread,
         ) as spy:
             result = await estimate_tokens_async("hi", model="claude-sonnet-5")
@@ -203,7 +203,7 @@ class TestAsyncExactCountingPath:
     async def test_non_claude_small_text_stays_inline(self, monkeypatch):
         _enable_exact_counting(monkeypatch)
         with patch(
-            "core.utils.tokens.asyncio.to_thread",
+            "baselith.core.utils.tokens.asyncio.to_thread",
             wraps=tokens_module.asyncio.to_thread,
         ) as spy:
             await estimate_tokens_async("hi", model="gpt-4o")

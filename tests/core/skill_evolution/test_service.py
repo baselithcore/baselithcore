@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.context import reset_tenant_context, set_tenant_context
-from core.events import EventNames, get_event_bus
-from core.skill_evolution.gating import SkillGate
-from core.skill_evolution.impact import SkillImpactTracker
-from core.skill_evolution.maintainer import WikiMaintainer
-from core.skill_evolution.proposer import SkillProposer
-from core.skill_evolution.service import (
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.events import EventNames, get_event_bus
+from baselith.core.skill_evolution.gating import SkillGate
+from baselith.core.skill_evolution.impact import SkillImpactTracker
+from baselith.core.skill_evolution.maintainer import WikiMaintainer
+from baselith.core.skill_evolution.proposer import SkillProposer
+from baselith.core.skill_evolution.service import (
     SkillEvolutionService,
     build_skill_evolution_service,
 )
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import PatternStatus
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import PatternStatus
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 VALID_SKILL = """---
 name: avoid-utf8-assumption

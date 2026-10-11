@@ -1,11 +1,12 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.evaluation.protocols import EvaluationResult, QualityLevel
-from core.evaluation.service import EvaluationService
-from core.events import EventBus, EventNames
+from baselith.core.config.evaluation import EvaluationConfig
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.service import EvaluationService
+from baselith.core.events import EventBus, EventNames
 
 
 @pytest.fixture
@@ -32,55 +33,53 @@ def mock_evaluator():
 async def test_evaluation_service_flow(mock_event_bus, mock_evaluator):
     """Test that EvaluationService listens to FLOW_COMPLETED and triggers evaluation."""
 
-    # 1. Initialize Service
-    service = EvaluationService(event_bus=mock_event_bus, evaluator=mock_evaluator)
+    # 1. Initialize Service: every flow sampled and judged.
+    config = EvaluationConfig(
+        enabled=True, online_sample_rate=1.0, online_judge_rate=1.0
+    )
+    service = EvaluationService(
+        event_bus=mock_event_bus, evaluator=mock_evaluator, config=config
+    )
 
-    # Force enable for this test instance (in case config mock fails)
-    # But strictly we should mock the config.
-    # Let's rely on the service logic which checks config inside start()
-    # We will patch the config check in the test to be safe.
+    service.start()
 
-    with patch("core.config.evaluation.evaluation_config") as mock_config:
-        mock_config.enabled = True
+    # 2. Simulate FLOW_COMPLETED event
+    event_data = {
+        "intent": "test_intent",
+        "success": True,
+        "query": "Hello",
+        "response": "World",
+        "context": {},
+        "run_id": "run-1",
+    }
 
-        service.start()
+    # We need to capture the EVALUATION_COMPLETED event
+    # Let's subscribe a test listener
+    future = asyncio.Future()
 
-        # 2. Simulate FLOW_COMPLETED event
-        event_data = {
-            "intent": "test_intent",
-            "success": True,
-            "query": "Hello",
-            "response": "World",
-            "context": {},
-        }
+    async def on_eval_complete(data):
+        future.set_result(data)
 
-        # We need to capture the EVALUATION_COMPLETED event
-        # Let's subscribe a test listener
-        future = asyncio.Future()
+    mock_event_bus.subscribe(EventNames.EVALUATION_COMPLETED, on_eval_complete)
 
-        async def on_eval_complete(data):
-            future.set_result(data)
+    # Emit the trigger event
+    await mock_event_bus.emit(EventNames.FLOW_COMPLETED, event_data)
 
-        mock_event_bus.subscribe(EventNames.EVALUATION_COMPLETED, on_eval_complete)
+    # 3. Wait for evaluation to complete (with timeout)
+    try:
+        result_data = await asyncio.wait_for(future, timeout=2.0)
+    except TimeoutError:
+        pytest.fail("Evaluation did not complete in time")
 
-        # Emit the trigger event
-        await mock_event_bus.emit(EventNames.FLOW_COMPLETED, event_data)
+    # 4. Verify results
+    assert result_data["intent"] == "test_intent"
+    assert result_data["score"] == 0.9
+    assert result_data["quality"] == "excellent"
 
-        # 3. Wait for evaluation to complete (with timeout)
-        try:
-            result_data = await asyncio.wait_for(future, timeout=2.0)
-        except TimeoutError:
-            pytest.fail("Evaluation did not complete in time")
+    # Verify evaluator was called with correct data
+    mock_evaluator.evaluate.assert_called_once()
+    args = mock_evaluator.evaluate.call_args
+    assert args.kwargs["query"] == "Hello"
+    assert args.kwargs["response"] == "World"
 
-        # 4. Verify results
-        assert result_data["intent"] == "test_intent"
-        assert result_data["score"] == 0.9
-        assert result_data["quality"] == "excellent"
-
-        # Verify evaluator was called with correct data
-        mock_evaluator.evaluate.assert_called_once()
-        args = mock_evaluator.evaluate.call_args
-        assert args.kwargs["query"] == "Hello"
-        assert args.kwargs["response"] == "World"
-
-        service.stop()
+    await service.shutdown()

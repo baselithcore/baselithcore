@@ -7,10 +7,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.middleware.security import require_admin
-from core.plugin_updates import api as api_mod
-from core.plugin_updates.models import CheckReport, UpdateCandidate
-from core.plugins.api import router as plugin_management_router
+from baselith.core.middleware.security import require_admin
+from baselith.core.plugin_updates import api as api_mod
+from baselith.core.plugin_updates.models import CheckReport, UpdateCandidate
+from baselith.core.plugins.api import router as plugin_management_router
 
 
 def _report() -> CheckReport:
@@ -39,7 +39,7 @@ class _FakeService:
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app = FastAPI()
-    # Same order as core/api/factory.py: updates first, or /{plugin_name} wins.
+    # Same order as baselith/core/api/factory.py: updates first, or /{plugin_name} wins.
     app.include_router(api_mod.router)
     app.include_router(plugin_management_router)
     app.dependency_overrides[require_admin] = lambda: "admin"
@@ -92,7 +92,7 @@ def test_updates_route_not_swallowed_by_plugin_detail(
 def test_factory_registers_updates_before_plugin_management() -> None:
     import inspect
 
-    from core.api import factory
+    from baselith.core.api import factory
 
     src = inspect.getsource(factory)
     # Both routers are mounted from one ordered list (served unprefixed and

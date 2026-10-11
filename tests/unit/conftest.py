@@ -7,9 +7,9 @@ import pytest
 def mock_llm_service():
     """
     Mock LLMService for all unit tests to prevent real API calls and configuration errors.
-    This fixture automatically patches `core.services.llm.get_llm_service`.
+    This fixture automatically patches `baselith.core.services.llm.get_llm_service`.
     """
-    with patch("core.services.llm.get_llm_service") as mock_get:
+    with patch("baselith.core.services.llm.get_llm_service") as mock_get:
         mock_service = MagicMock()
         # generate_response is async on the real LLMService — mock it as such
         # so callers that `await` it get a value, not an un-awaitable Mock.
@@ -29,7 +29,7 @@ def reset_circuit_breakers():
     Reset all global circuit breakers before each test to prevent state
     persistence (e.g., trips from previous 'raises_on_error' tests).
     """
-    from core.resilience.circuit_breaker import (
+    from baselith.core.resilience.circuit_breaker import (
         CircuitState,
         CircuitStats,
         _circuit_breakers,

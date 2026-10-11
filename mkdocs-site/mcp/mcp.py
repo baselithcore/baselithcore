@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 from .service import DocsService
 

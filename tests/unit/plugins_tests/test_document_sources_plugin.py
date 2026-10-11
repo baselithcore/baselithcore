@@ -1,12 +1,14 @@
-from core.doc_sources import DocumentSourceError as CoreDocumentSourceError
-from core.doc_sources import create_document_sources as core_create_document_sources
-from core.doc_sources import readers as core_readers
-from plugins.document_sources import (
+from baselith.core.doc_sources import DocumentSourceError as CoreDocumentSourceError
+from baselith.core.doc_sources import (
+    create_document_sources as core_create_document_sources,
+)
+from baselith.core.doc_sources import readers as core_readers
+from baselith.plugins.document_sources import (
     DocumentSourceError,
     create_document_sources,
     readers,
 )
-from plugins.document_sources.plugin import DocumentSourcesPlugin
+from baselith.plugins.document_sources.plugin import DocumentSourcesPlugin
 
 
 def test_core_doc_sources_alias_points_to_plugin_exports() -> None:
@@ -26,7 +28,7 @@ async def test_read_item_rejects_sibling_directory_sharing_the_root_prefix(
     tmp_path,
 ) -> None:
     """``/x/docs-private`` must not pass a containment check for ``/x/docs``."""
-    from plugins.document_sources.filesystem import FilesystemDocumentSource
+    from baselith.plugins.document_sources.filesystem import FilesystemDocumentSource
 
     root = tmp_path / "docs"
     root.mkdir()
@@ -40,7 +42,7 @@ async def test_read_item_rejects_sibling_directory_sharing_the_root_prefix(
 
 
 async def test_read_item_rejects_symlink_escaping_the_root(tmp_path) -> None:
-    from plugins.document_sources.filesystem import FilesystemDocumentSource
+    from baselith.plugins.document_sources.filesystem import FilesystemDocumentSource
 
     root = tmp_path / "docs"
     root.mkdir()
@@ -57,7 +59,7 @@ def test_ooxml_guard_refuses_a_zip_bomb(tmp_path, monkeypatch) -> None:
     import sys
     import zipfile
 
-    utils_module = sys.modules["plugins.document_sources.utils"]
+    utils_module = sys.modules["baselith.plugins.document_sources.utils"]
 
     bomb = tmp_path / "bomb.docx"
     with zipfile.ZipFile(bomb, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -73,7 +75,7 @@ def test_ooxml_guard_refuses_a_zip_bomb(tmp_path, monkeypatch) -> None:
 def test_ooxml_guard_accepts_an_ordinary_archive(tmp_path) -> None:
     import zipfile
 
-    from plugins.document_sources.utils import ooxml_archive_is_safe
+    from baselith.plugins.document_sources.utils import ooxml_archive_is_safe
 
     doc = tmp_path / "ok.docx"
     with zipfile.ZipFile(doc, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -84,7 +86,9 @@ def test_ooxml_guard_accepts_an_ordinary_archive(tmp_path) -> None:
 def test_word_reader_skips_unsafe_archive(tmp_path, monkeypatch) -> None:
     import importlib
 
-    readers_module = importlib.import_module("plugins.document_sources.readers")
+    readers_module = importlib.import_module(
+        "baselith.plugins.document_sources.readers"
+    )
 
     monkeypatch.setattr(readers_module, "ooxml_archive_is_safe", lambda p: False)
     target = tmp_path / "x.docx"

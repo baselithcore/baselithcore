@@ -1,7 +1,7 @@
 """Server-Sent Events decoding for ``/chat/stream`` and ``/runs/{run_id}/events``.
 
 Split out of ``client.py`` (which was pushing the 500-line file-size cap):
-frames the wire format emitted by ``plugins/api_routers/chat.py`` — splits on
+frames the wire format emitted by ``baselith/plugins/api_routers/chat.py`` — splits on
 blank lines, reassembles multi-line ``data:`` fields, ignores ``: keepalive``
 comment lines, stops at ``event: done`` and raises :class:`ChatStreamError` on
 ``event: error`` — shared by the sync and async ``chat_stream`` methods.
@@ -21,7 +21,7 @@ class ChatStreamError(BaselithError):
 
     The server has already committed to a ``200`` response by the time a
     provider read fails, so the only way to report it is in-band (see
-    ``plugins/api_routers/chat.py::sse_error_event``). ``message`` is
+    ``baselith/plugins/api_routers/chat.py::sse_error_event``). ``message`` is
     deliberately generic — the server never puts provider detail on the wire.
     Current servers send a JSON payload, whose ``code`` and ``request_id``
     (quote it when reporting the failure) are exposed here; older servers sent
@@ -166,7 +166,7 @@ def _handle_sse_event(event: _SSEEvent) -> str:
 def _iter_sse_chunks(raw_chunks: Iterator[str]) -> Iterator[str]:
     """Decode a raw ``/chat/stream`` text stream into plain text chunks.
 
-    Frames the wire format emitted by ``plugins/api_routers/chat.py``: splits
+    Frames the wire format emitted by ``baselith/plugins/api_routers/chat.py``: splits
     on blank lines, reassembles multi-line ``data:`` fields, ignores
     ``: keepalive`` comment lines, stops at ``event: done`` and raises
     :class:`ChatStreamError` on ``event: error``.

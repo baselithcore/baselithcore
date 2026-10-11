@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import psycopg
 import pytest
 
-from core.db import documents
+from baselith.core.db import documents
 
 
 @pytest.fixture(autouse=True)

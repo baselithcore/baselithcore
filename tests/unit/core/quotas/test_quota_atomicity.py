@@ -19,9 +19,9 @@ from typing import Any
 
 import pytest
 
-from core.config.quotas import QuotaConfig
-from core.quotas import InMemoryQuotaStore, QuotaExceededError, QuotaManager
-from core.quotas.store import CHECK_AND_INCR_LUA, RedisQuotaStore
+from baselith.core.config.quotas import QuotaConfig
+from baselith.core.quotas import InMemoryQuotaStore, QuotaExceededError, QuotaManager
+from baselith.core.quotas.store import CHECK_AND_INCR_LUA, RedisQuotaStore
 
 NOW = datetime(2026, 6, 17, 12, 0, 0, tzinfo=UTC)
 

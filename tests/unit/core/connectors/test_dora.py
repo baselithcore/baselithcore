@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from core.connectors import (
+from baselith.core.connectors import (
     ConnectorEntry,
     ConnectorRegistry,
     ConnectorSpec,
     declare_ict_providers,
     vendor_provider_id,
 )
-from core.thirdparty import RegisterOfInformation
+from baselith.core.thirdparty import RegisterOfInformation
 
 
 def _registry(*specs: ConnectorSpec) -> ConnectorRegistry:

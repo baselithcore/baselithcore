@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
-from core.config.services import LLMConfig
-from core.services.llm.service import LLMService
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.service import LLMService
 
 
 class _SlowProvider:
@@ -60,7 +60,7 @@ def test_config_default_is_unlimited():
 async def test_cap_covers_streaming_for_the_whole_stream(monkeypatch):
     """An open stream occupies the provider like an in-flight call: the slot
     is held from open to exhaustion, not just for the open."""
-    import core.services.llm._streaming as streaming_module
+    import baselith.core.services.llm._streaming as streaming_module
 
     service, _provider = _service(max_concurrent=1)
     state = {"live": 0, "peak": 0}

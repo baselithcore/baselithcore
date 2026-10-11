@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.optimization.caching import (
+from baselith.core.optimization.caching import (
     RedisCache,
     SemanticCache,
     SemanticCacheVectorBacked,
@@ -17,7 +17,7 @@ from core.optimization.caching import (
 def mock_redis():
     # RedisCache is backed by the shared bounded pool factory, not a
     # per-instance redis.from_url — patch the factory it calls in __init__.
-    with patch("core.cache.redis_cache.create_redis_client") as mock_factory:
+    with patch("baselith.core.cache.redis_cache.create_redis_client") as mock_factory:
         mock_client = AsyncMock()
         mock_factory.return_value = mock_client
         yield mock_client
@@ -136,7 +136,7 @@ async def test_semantic_cache_vector_backed(mock_redis):
     # Mock vector service
     mock_vector_service = AsyncMock()
     with patch(
-        "core.services.vectorstore.service.get_vectorstore_service",
+        "baselith.core.services.vectorstore.service.get_vectorstore_service",
         return_value=mock_vector_service,
     ):
         # Access vector service to trigger lazy load

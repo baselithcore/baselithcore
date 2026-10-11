@@ -1,1 +1,1 @@
-"""Tests for core.security (encryption-at-rest and secret resolution)."""
+"""Tests for baselith.core.security (encryption-at-rest and secret resolution)."""

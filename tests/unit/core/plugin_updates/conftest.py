@@ -3,7 +3,7 @@
 ``build_announcement_gate`` picks Redis whenever the environment carries
 ``CACHE_BACKEND=redis`` plus a URL (a developer ``.env``), which would make the
 tests claim keys in a real Redis. Force the file-lock gate for every test; a
-test that wants a Redis-backed gate patches ``core.config.get_storage_config``
+test that wants a Redis-backed gate patches ``baselith.core.config.get_storage_config``
 itself (later patches win) and injects a fake client.
 """
 
@@ -14,7 +14,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _announcement_gate_uses_file_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    import core.config as config_pkg
+    import baselith.core.config as config_pkg
 
     real = config_pkg.get_storage_config
 
@@ -32,8 +32,8 @@ def _apply_state_is_private(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     """Keep every service off the checkout's ``data/plugin_updates/apply``."""
-    from core.config.plugin_update_apply import UpdateApplyConfig
-    from core.plugin_updates import service as svc_mod
+    from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+    from baselith.core.plugin_updates import service as svc_mod
 
     state = tmp_path_factory.mktemp("apply-state")
     monkeypatch.setattr(

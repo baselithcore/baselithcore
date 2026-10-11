@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.services.llm.reasoning_text import ReasoningStreamFilter, strip_reasoning
+from baselith.core.services.llm.reasoning_text import (
+    ReasoningStreamFilter,
+    strip_reasoning,
+)
 
 _REAL = "Here's a thinking process:\n\n1. **Analyze**\n   - 4\n✅\n</think>\n\n4"
 
@@ -76,3 +79,30 @@ class TestStream:
 
     def test_a_truncated_reasoning_stream_yields_nothing(self):
         assert _run(["<think>\n", "still thinking"]) == ""
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "deepseek-r1-distill-llama-70b",
+        "DeepSeek-R1-Distill-Qwen2.5-32B",
+        "qwen3-32b",
+        "QwQ-32B",
+        "gpt-oss-20b",
+        "phi-4-reasoning",
+        "Magistral-small",
+    ],
+)
+def test_an_inline_reasoner_never_streams_live_whatever_its_base_family(model):
+    """A reasoner named after its base family must keep the hold-until-close."""
+    from baselith.core.services.llm.reasoning_text import can_stream_live
+
+    assert can_stream_live(model) is False
+    assert can_stream_live(model, extra_pattern=".*") is False
+
+
+@pytest.mark.parametrize("model", ["llama-3.1-8b", "mistral-7b", "qwen2.5-7b"])
+def test_known_non_reasoners_still_stream_live(model):
+    from baselith.core.services.llm.reasoning_text import can_stream_live
+
+    assert can_stream_live(model) is True

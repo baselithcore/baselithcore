@@ -1,4 +1,4 @@
-"""Property-based tests (hypothesis) for core.resilience invariants.
+"""Property-based tests (hypothesis) for baselith.core.resilience invariants.
 
 The resilience layer is the strict-typed, highest-assurance zone; these
 properties pin down behavior that example-based tests only sample:
@@ -11,12 +11,12 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from core.resilience.circuit_breaker import (
+from baselith.core.resilience.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerError,
     CircuitState,
 )
-from core.resilience.retry import retry
+from baselith.core.resilience.retry import retry
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore::pytest.PytestUnraisableExceptionWarning"
@@ -51,7 +51,7 @@ def test_backoff_delays_bounded_and_monotone(
     def always_fails():
         raise _Boom()
 
-    with patch("core.resilience.retry.time.sleep", side_effect=sleeps.append):
+    with patch("baselith.core.resilience.retry.time.sleep", side_effect=sleeps.append):
         with pytest.raises(_Boom):
             always_fails()
 
@@ -83,7 +83,7 @@ def test_backoff_jitter_stays_within_band(base_delay, max_delay):
     def always_fails():
         raise _Boom()
 
-    with patch("core.resilience.retry.time.sleep", side_effect=sleeps.append):
+    with patch("baselith.core.resilience.retry.time.sleep", side_effect=sleeps.append):
         with pytest.raises(_Boom):
             always_fails()
 

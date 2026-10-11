@@ -5,14 +5,14 @@ import pytest
 from rq import Retry
 from rq.job import Job, JobStatus
 
-from core.config.task_queue import TaskQueueConfig
-from core.task_queue.scheduler import (
+from baselith.core.config.task_queue import TaskQueueConfig
+from baselith.core.task_queue.scheduler import (
     TaskScheduler,
     enqueue_task,
     get_task_scheduler,
     schedule_task,
 )
-from core.task_queue.status import TaskStatus
+from baselith.core.task_queue.status import TaskStatus
 
 
 @pytest.fixture
@@ -28,7 +28,9 @@ def mock_queue():
 
 @pytest.fixture
 def mock_get_queue(mock_queue):
-    with patch("core.task_queue.scheduler.get_queue", return_value=mock_queue) as mock:
+    with patch(
+        "baselith.core.task_queue.scheduler.get_queue", return_value=mock_queue
+    ) as mock:
         yield mock
 
 
@@ -44,7 +46,7 @@ def mock_task_tracker():
     where one happens to run. Autouse so the trap cannot be re-armed by adding a
     test; tests that assert on the tracker still request it by name.
     """
-    with patch("core.task_queue.scheduler.get_task_tracker") as mock:
+    with patch("baselith.core.task_queue.scheduler.get_task_tracker") as mock:
         yield mock.return_value
 
 
@@ -57,8 +59,8 @@ def mock_config():
         result_ttl=500,
         failure_ttl=1000,
     )
-    # Patch the function in core.config because it is imported inside the method
-    with patch("core.config.get_task_queue_config", return_value=config):
+    # Patch the function in baselith.core.config because it is imported inside the method
+    with patch("baselith.core.config.get_task_queue_config", return_value=config):
         yield config
 
 
@@ -141,7 +143,7 @@ class TestTaskScheduler:
         # what killed self-rescheduling chains mid-run.
         call = mock_get_queue.return_value.enqueue_at.call_args
         assert call[0] == (scheduled_time, dummy_task, 1, 2)
-        from core.config import get_task_queue_config
+        from baselith.core.config import get_task_queue_config
 
         config = get_task_queue_config()
         assert call[1]["job_timeout"] == config.job_timeout
@@ -166,8 +168,8 @@ class TestTaskScheduler:
             assert isinstance(call_args[0][1], datetime)
 
     def test_cancel_job_success(self, scheduler, mock_task_tracker):
-        # Patch core.task_queue.get_queue_redis_connection because it works via import inside method
-        with patch("core.task_queue.get_queue_redis_connection"):
+        # Patch baselith.core.task_queue.get_queue_redis_connection because it works via import inside method
+        with patch("baselith.core.task_queue.get_queue_redis_connection"):
             with patch("rq.job.Job.fetch") as mock_fetch:
                 mock_job = MagicMock()
                 mock_fetch.return_value = mock_job
@@ -181,13 +183,13 @@ class TestTaskScheduler:
                 )
 
     def test_cancel_job_failure(self, scheduler):
-        with patch("core.task_queue.get_queue_redis_connection"):
+        with patch("baselith.core.task_queue.get_queue_redis_connection"):
             with patch("rq.job.Job.fetch", side_effect=Exception("Job not found")):
                 result = scheduler.cancel_job("job-123")
                 assert result is False
 
     def test_get_job_success(self, scheduler):
-        with patch("core.task_queue.get_queue_redis_connection"):
+        with patch("baselith.core.task_queue.get_queue_redis_connection"):
             with patch("rq.job.Job.fetch") as mock_fetch:
                 mock_job = MagicMock()
                 mock_job.id = "job-123"
@@ -212,14 +214,15 @@ class TestTaskScheduler:
                 assert info["result"] == "test-result"
 
     def test_get_job_failure(self, scheduler):
-        with patch("core.task_queue.get_queue_redis_connection"):
+        with patch("baselith.core.task_queue.get_queue_redis_connection"):
             with patch("rq.job.Job.fetch", side_effect=Exception("doh")):
                 info = scheduler.get_job("job-123")
                 assert info is None
 
     def test_global_enqueue_task(self, mock_get_queue, mock_task_tracker, mock_config):
         with patch(
-            "core.task_queue.scheduler.get_current_tenant_id", return_value="tenant-123"
+            "baselith.core.task_queue.scheduler.get_current_tenant_id",
+            return_value="tenant-123",
         ):
             enqueue_task(dummy_task, 1, 2, queue="documents", meta={"foo": "bar"})
 
@@ -254,7 +257,7 @@ class TestScheduledJobTimeouts:
         assert call[1]["job_timeout"] == 900
 
     def test_enqueue_in_defaults_match_enqueue(self, scheduler, mock_get_queue):
-        from core.config import get_task_queue_config
+        from baselith.core.config import get_task_queue_config
 
         config = get_task_queue_config()
 
@@ -277,17 +280,17 @@ class TestAmbientJobMetadata:
     """
 
     def _bind(self, monkeypatch, plugin="world_sim", policy=("ollama", "llama3.2")):
-        from core.services.llm.policy import PluginLLMPolicy
-        from core.task_queue import scheduler as sched
+        from baselith.core.services.llm.policy import PluginLLMPolicy
+        from baselith.core.task_queue import scheduler as sched
 
         monkeypatch.setattr(
-            "core.context.get_current_plugin", lambda: plugin, raising=False
+            "baselith.core.context.get_current_plugin", lambda: plugin, raising=False
         )
         monkeypatch.setattr(
-            "core.context.get_current_tenant_id", lambda: "acme", raising=False
+            "baselith.core.context.get_current_tenant_id", lambda: "acme", raising=False
         )
         monkeypatch.setattr(
-            "core.services.llm.policy.resolve_active_llm_policy",
+            "baselith.core.services.llm.policy.resolve_active_llm_policy",
             lambda: PluginLLMPolicy(*policy) if policy else None,
         )
         return sched

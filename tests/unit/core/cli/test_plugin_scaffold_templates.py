@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core._core_version import CORE_VERSION
-from core.cli.commands.plugin.const import PLUGIN_TEMPLATE
-from core.cli.commands.plugin.create import create_plugin
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.cli.commands.plugin.const import PLUGIN_TEMPLATE
+from baselith.core.cli.commands.plugin.create import create_plugin
 
 pytestmark = pytest.mark.unit
 

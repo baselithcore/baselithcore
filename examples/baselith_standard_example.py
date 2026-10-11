@@ -13,12 +13,12 @@ where it appears:
 4. **Multi-tenancy** — execution happens inside a tenant context, so every
    downstream read and write is scoped without passing a tenant id by hand.
 5. **Typing and protocols** — the agent is typed against
-   :class:`~core.interfaces.LLMServiceProtocol`, not a concrete service.
+   :class:`~baselith.core.interfaces.LLMServiceProtocol`, not a concrete service.
 6. **Structured errors** — failures carry a
-   :class:`~core.lifecycle.FrameworkErrorCode`, so a caller can branch on the
+   :class:`~baselith.core.lifecycle.FrameworkErrorCode`, so a caller can branch on the
    cause instead of matching on message text.
 7. **No domain logic in core** — the summarising behaviour lives here, in the
-   example. ``core/`` stays domain-agnostic; anything domain-specific belongs
+   example. ``baselith/core/`` stays domain-agnostic; anything domain-specific belongs
    in a plugin.
 
 Run it:
@@ -35,12 +35,17 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from core.context import reset_tenant_context, set_tenant_context
-from core.di import DependencyContainer, ServiceNotFoundError
-from core.interfaces import LLMServiceProtocol
-from core.lifecycle import AgentError, AgentState, FrameworkErrorCode, LifecycleMixin
-from core.observability.logging import get_logger
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.di import DependencyContainer, ServiceNotFoundError
+from baselith.core.interfaces import LLMServiceProtocol
+from baselith.core.lifecycle import (
+    AgentError,
+    AgentState,
+    FrameworkErrorCode,
+    LifecycleMixin,
+)
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.protocols import AgentProtocol
 
 # The framework configures structlog on startup. An example that calls
 # logging.basicConfig() here would override that for anything importing it.

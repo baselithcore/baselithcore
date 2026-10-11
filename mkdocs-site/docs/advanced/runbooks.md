@@ -25,6 +25,24 @@ If the primary database is corrupted or data is lost, you can restore from a bac
 3. The script handles both plain `.sql` and gzipped `.sql.gz` backups
    (it decompresses `.gz` in-stream).
 
+The target database must be empty. The restore runs as one transaction and
+stops at the first SQL error (`ON_ERROR_STOP`), so a dump that does not apply
+cleanly leaves the target untouched and the script exits non-zero instead of
+reporting success over a half-restored database.
+
+Outside Docker Compose (a managed Postgres, a `kubectl port-forward` to the
+chart's database), add `--direct`: the script then restores into whatever the
+libpq environment names, using the local `psql`:
+
+```bash
+PGHOST=127.0.0.1 PGPORT=5432 PGUSER=baselithcore PGPASSWORD=... PGDATABASE=baselithcore_restored \
+  ./scripts/restore-db.sh /path/to/backup_20261010_020000.sql.gz --direct
+```
+
+Use a `psql` at least as new as the `pg_dump` that wrote the file; the Helm
+CronJob dumps with `backup.image` (`postgres:16-alpine`), and the nightly drill
+restores with that same image.
+
 ### Handling High Error Rate Alerts
 
 When Prometheus triggers a **HighErrorRate** alert (HTTP 5xx > 5%):
@@ -87,7 +105,27 @@ BaselithCore uses circuit breakers to protect against cascading failures from ex
 ```
 
 Run the `--drill` verification at least monthly; it both proves restorability
-and measures your real RTO (its wall-clock time).
+and measures your real RTO (its wall-clock time). The drill restores as a
+throwaway `drill` role, so the dump's `ALTER ... OWNER TO <role>` statements are
+expected to fail and are counted, not fatal; any other SQL error fails the
+drill, however many tables happened to land.
+
+### Nightly restore drill (CI)
+
+The `restore_drill` job in `.github/workflows/nightly.yml` proves, every night,
+that the backup path the chart ships restores. It migrates a fresh Postgres
+(the same `pgvector/pgvector:0.8.1-pg16` image CI uses), seeds known rows
+(unicode, NULLs, JSONB, a foreign key, a sequence advanced past its rows),
+renders the chart with `backup.enabled=true` and runs the `pg-backup`
+container's own script in the chart's own image, runs
+`scripts/verify-backup.sh` (both levels) on the dump, restores it into a new
+database with `scripts/restore-db.sh --direct`, and fails unless the restored
+database equals the source: every table's row count and content checksum,
+columns, constraints, indexes, row-level-security flags and policies, sequence
+positions and extensions. The steps are subcommands of
+`scripts/backup_restore_drill.py` (`seed`, `backup`, `restore`, `compare`), so
+the drill runs locally against any Postgres with Docker and `helm` installed.
+It covers Postgres only; Qdrant snapshots and graph backups are not drilled.
 
 ### RTO / RPO targets
 
@@ -102,8 +140,9 @@ managed Postgres with continuous backup.
 ### Restore procedure (production)
 
 1. Provision/clear the target Postgres.
-2. `./scripts/restore-db.sh <backup.sql.gz>` (Compose) or pipe the dump into
-   `psql` against the managed instance.
+2. `./scripts/restore-db.sh <backup.sql.gz>` (Compose), or
+   `./scripts/restore-db.sh <backup.sql.gz> --direct` with the `PG*` variables
+   pointing at the managed instance.
 3. Run Alembic migrations if the dump predates the current schema:
    `alembic upgrade head`, or simply start the API — with
    `DB_MIGRATIONS_ON_STARTUP=true` (the default) the lifespan runs the upgrade
@@ -116,3 +155,5 @@ managed Postgres with continuous backup.
 - Keep the system updated with latest security patches.
 - Periodically review Prometheus metrics and adjust alert thresholds as needed.
 - Run `./scripts/verify-backup.sh --drill` monthly; full restore rehearsal quarterly.
+  The nightly `restore_drill` job rehearses the restore path itself; it does
+  not replace drilling your own dumps, from your own volume or bucket.

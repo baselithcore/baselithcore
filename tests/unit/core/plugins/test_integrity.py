@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.integrity import (
+from baselith.core.plugins.integrity import (
     compute_plugin_hash,
     enforce_signing_policy,
     is_strict_mode_enabled,
@@ -237,7 +237,7 @@ def test_verify_rejects_tampered_build_file(plugin_dir: Path) -> None:
 
 def test_verify_accepts_legacy_signature_outside_strict(plugin_dir: Path) -> None:
     """A pre-0.17 (source-only) signature keeps loading until re-signed."""
-    from core.plugins.integrity import compute_legacy_plugin_hash
+    from baselith.core.plugins.integrity import compute_legacy_plugin_hash
 
     (plugin_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
@@ -248,7 +248,7 @@ def test_verify_accepts_legacy_signature_outside_strict(plugin_dir: Path) -> Non
 
 
 def test_verify_rejects_legacy_signature_in_strict_mode(plugin_dir: Path) -> None:
-    from core.plugins.integrity import compute_legacy_plugin_hash
+    from baselith.core.plugins.integrity import compute_legacy_plugin_hash
 
     (plugin_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
@@ -280,7 +280,7 @@ def test_compute_hash_covers_skill_md(plugin_dir: Path) -> None:
 
 def test_legacy_hash_excludes_skill_md(plugin_dir: Path) -> None:
     """The pre-0.17 surface stays source-only so old signatures keep loading."""
-    from core.plugins.integrity import compute_legacy_plugin_hash
+    from baselith.core.plugins.integrity import compute_legacy_plugin_hash
 
     base = compute_legacy_plugin_hash(plugin_dir)
     skill = plugin_dir / "skills" / "demo"
@@ -347,7 +347,7 @@ def test_v2_signature_accepted_outside_strict_but_not_in_strict(
     write_dist_bundle: Callable[..., Path],
 ) -> None:
     """Existing 0.17-0.26 signatures keep loading until re-signed."""
-    from core.plugins.integrity import HashSurface
+    from baselith.core.plugins.integrity import HashSurface
 
     (plugin_dir / "pyproject.toml").write_text(
         '[build-system]\nrequires = ["setuptools"]\n', encoding="utf-8"
@@ -360,7 +360,7 @@ def test_v2_signature_accepted_outside_strict_but_not_in_strict(
 
 
 def test_current_surface_is_v5(plugin_dir: Path) -> None:
-    from core.plugins.integrity import CURRENT_HASH_SURFACE, HashSurface
+    from baselith.core.plugins.integrity import CURRENT_HASH_SURFACE, HashSurface
 
     assert CURRENT_HASH_SURFACE is HashSurface.V5_MANIFEST
     assert compute_plugin_hash(plugin_dir) == compute_plugin_hash(
@@ -387,7 +387,7 @@ def test_current_surface_is_v5(plugin_dir: Path) -> None:
     ],
 )
 def test_is_hashed_path_per_surface(name: str, v1: bool, v2: bool, v3: bool) -> None:
-    from core.plugins.integrity import HashSurface, is_hashed_path
+    from baselith.core.plugins.integrity import HashSurface, is_hashed_path
 
     path = Path("plugins/demo") / name
     assert is_hashed_path(path, surface=HashSurface.V1_SOURCE) is v1

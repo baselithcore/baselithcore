@@ -1,0 +1,192 @@
+"""
+Output Guard - Post-LLM Output Filtering
+
+Filters LLM output before returning to user:
+- PII detection and redaction
+- Harmful content filtering
+- Output length validation
+"""
+
+import re
+from dataclasses import dataclass
+
+from baselith.core.observability.logging import get_logger
+
+from .config import (
+    COMPILED_PII_PATTERNS,
+    GuardrailsConfig,
+)
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class OutputFilterResult:
+    """Result of output filtering."""
+
+    is_safe: bool
+    filtered_output: str
+    redactions: dict[str, int] | None = None  # type -> count
+    warnings: list[str] | None = None
+
+
+# Harmful content patterns (simplified)
+HARMFUL_PATTERNS = [
+    (r"\b(kill|murder|harm|hurt)\s+(yourself|someone|people)\b", "violence"),
+    (r"\b(how\s+to\s+make|build|create)\s+(a\s+)?(bomb|weapon|explosive)\b", "weapons"),
+    # Instructions for the act, not a mention of it. The bare-word form
+    # ``\b(steal|hack|break\s+into)\b`` rewrote any answer containing "hack" —
+    # "a quick hack", "someone tried to hack our server" — to
+    # [CONTENT_FILTERED] and flagged it unsafe, which is ordinary prose for the
+    # coding and browser agents this engine ships.
+    (
+        r"\b(?:how\s+to|steps?\s+to|ways?\s+to)\s+(?:steal|hack\s+into|break\s+into)\b",
+        "illegal_activity",
+    ),
+]
+
+
+class OutputGuard:
+    """
+    Filters LLM output before returning to user.
+
+    Filters:
+    - PII (emails, phones, SSN, credit cards)
+    - Harmful content patterns
+    - Excessive output length
+    """
+
+    def __init__(self, config: GuardrailsConfig | None = None):
+        """
+        Initialize OutputGuard.
+
+        Args:
+            config: Guardrails configuration (uses defaults if None)
+        """
+        self.config = config or GuardrailsConfig()
+        self._harmful_patterns = [
+            (re.compile(p, re.IGNORECASE), category) for p, category in HARMFUL_PATTERNS
+        ]
+
+    def filter(self, text: str) -> OutputFilterResult:
+        """
+        Filter output text.
+
+        Args:
+            text: Output text to filter
+
+        Returns:
+            OutputFilterResult with filtered output and metadata
+        """
+        if not self.config.output_enabled:
+            return OutputFilterResult(is_safe=True, filtered_output=text)
+
+        filtered = text
+        redactions: dict[str, int] = {}
+        warnings: list[str] = []
+
+        # Truncate if too long
+        if len(filtered) > self.config.max_output_length:
+            filtered = filtered[: self.config.max_output_length]
+            warnings.append(
+                f"Output truncated to {self.config.max_output_length} chars"
+            )
+
+        # Filter PII
+        if self.config.filter_pii:
+            filtered, pii_redactions = self._redact_pii(filtered)
+            redactions.update(pii_redactions)
+
+        # Filter harmful content
+        if self.config.filter_harmful_content:
+            filtered, harmful_detected = self._filter_harmful(filtered)
+            if harmful_detected:
+                warnings.extend(harmful_detected)
+
+        is_safe = len(warnings) == 0 or all("truncated" in w for w in warnings)
+
+        if redactions:
+            logger.info(f"Redacted PII from output: {redactions}")
+
+        return OutputFilterResult(
+            is_safe=is_safe,
+            filtered_output=filtered,
+            redactions=redactions if redactions else None,
+            warnings=warnings if warnings else None,
+        )
+
+    def _redact_pii(self, text: str) -> tuple[str, dict[str, int]]:
+        """
+        Redact PII from text.
+
+        With a configured NER engine (``BASELITH_PII_ENGINE``, see
+        :mod:`baselith.core.guardrails.pii`) the engine performs the pass; the regex
+        set below is the always-on fallback on any engine failure.
+
+        Args:
+            text: Text to redact
+
+        Returns:
+            Tuple of (redacted text, redaction counts by type)
+        """
+        from baselith.core.guardrails import pii as pii_module
+
+        engine = pii_module.get_pii_engine()
+        if engine is not None:
+            try:
+                engine_text, engine_counts = engine.redact(text)
+                return engine_text, engine_counts
+            except Exception as exc:
+                logger.warning(
+                    "pii_engine_redact_failed_falling_back_regex",
+                    extra={"error": str(exc)},
+                )
+
+        result = text
+        counts: dict[str, int] = {}
+
+        for pii_type, pattern in COMPILED_PII_PATTERNS.items():
+            # One pass per pattern: subn counts while it substitutes, where
+            # findall + sub scanned the text twice.
+            result, n = pattern.subn(f"[{pii_type.upper()}_REDACTED]", result)
+            if n:
+                counts[pii_type] = n
+
+        return result, counts
+
+    def _filter_harmful(self, text: str) -> tuple[str, list[str]]:
+        """
+        Filter harmful content.
+
+        Args:
+            text: Text to filter
+
+        Returns:
+            Tuple of (filtered text, list of detected categories)
+        """
+        result = text
+        detected = []
+
+        for pattern, category in self._harmful_patterns:
+            if pattern.search(result):
+                result = pattern.sub("[CONTENT_FILTERED]", result)
+                detected.append(f"harmful_content:{category}")
+
+        return result, detected
+
+    def check_safety(self, text: str) -> bool:
+        """
+        Quick check if text is safe without filtering.
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text appears safe
+        """
+        # Check for harmful patterns
+        for pattern, _ in self._harmful_patterns:
+            if pattern.search(text):
+                return False
+
+        return True

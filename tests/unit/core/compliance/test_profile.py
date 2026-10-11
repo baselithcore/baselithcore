@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from core.compliance.profile import (
+from baselith.core.compliance.profile import (
     ComplianceProfile,
     ComplianceProfileError,
     enforce_profile,
     evaluate_profile,
 )
-from core.config.audit import reset_audit_config
-from core.config.compliance import reset_compliance_config
+from baselith.core.config.audit import reset_audit_config
+from baselith.core.config.compliance import reset_compliance_config
 
 
 @pytest.fixture(autouse=True)
@@ -118,7 +118,7 @@ class TestEnforcement:
         monkeypatch.delenv("AUDIT_ENABLED", raising=False)
         reset_audit_config()
         enforce_profile(ComplianceProfile.FULL)
-        from core.config.audit import get_audit_config
+        from baselith.core.config.audit import get_audit_config
 
         # Reporting a gap must not have enabled anything behind the operator.
         assert get_audit_config().enabled is False

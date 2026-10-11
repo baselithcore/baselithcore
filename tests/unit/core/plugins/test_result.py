@@ -1,10 +1,10 @@
-"""Unit tests for ``core.plugins.result``."""
+"""Unit tests for ``baselith.core.plugins.result``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.plugins.result import (
+from baselith.core.plugins.result import (
     SNAPSHOT_MAX_CHARS,
     SkillResult,
     fail,
@@ -84,10 +84,10 @@ class TestSkillResultFactories:
 
 class TestSkillResultIntegration:
     def test_envelope_exposed_from_plugins_package(self) -> None:
-        from core.plugins import SkillResult as ExportedResult
-        from core.plugins import fail as exported_fail
-        from core.plugins import ok as exported_ok
-        from core.plugins import partial as exported_partial
+        from baselith.core.plugins import SkillResult as ExportedResult
+        from baselith.core.plugins import fail as exported_fail
+        from baselith.core.plugins import ok as exported_ok
+        from baselith.core.plugins import partial as exported_partial
 
         assert ExportedResult is SkillResult
         assert exported_ok is ok

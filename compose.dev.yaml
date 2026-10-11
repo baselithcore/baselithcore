@@ -18,8 +18,8 @@ services:
       context: .
     volumes:
       - ./backend.py:/app/backend.py
-      - ./core:/app/core
-      - ./plugins:/app/plugins
+      - ./baselith/core:/app/baselith/core
+      - ./baselith/plugins:/app/baselith/plugins
       - ./configs:/app/configs
       # Mount logs to see them locally
       - ./logs:/app/logs
@@ -29,7 +29,7 @@ services:
       context: .
     volumes:
       - ./backend.py:/app/backend.py
-      - ./core:/app/core
-      - ./plugins:/app/plugins
+      - ./baselith/core:/app/baselith/core
+      - ./baselith/plugins:/app/baselith/plugins
       - ./configs:/app/configs
       - ./logs:/app/logs

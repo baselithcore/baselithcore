@@ -13,8 +13,11 @@ from fastapi.testclient import TestClient
 from psycopg import OperationalError
 from psycopg_pool import PoolTimeout
 
-from core.api.errors import DATABASE_RETRY_AFTER_SECONDS, install_error_handlers
-from core.middleware.unhandled_error import UnhandledErrorMiddleware
+from baselith.core.api.errors import (
+    DATABASE_RETRY_AFTER_SECONDS,
+    install_error_handlers,
+)
+from baselith.core.middleware.unhandled_error import UnhandledErrorMiddleware
 
 
 def _client(exc: Exception) -> TestClient:

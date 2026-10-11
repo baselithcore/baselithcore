@@ -1,10 +1,10 @@
-"""Unit tests for ``core.orchestration.task_classifier``."""
+"""Unit tests for ``baselith.core.orchestration.task_classifier``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.orchestration.task_classifier import (
+from baselith.core.orchestration.task_classifier import (
     RoutingRecommendation,
     TaskClassifier,
 )

@@ -115,7 +115,7 @@ Beyond separation via Database ID, the system implements granular isolation via 
 
 ### Key Structure
 
-The tenant-aware `RedisCache` (`core/optimization/caching.py`) builds every key
+The tenant-aware `RedisCache` (`baselith/core/optimization/caching.py`) builds every key
 as `{CACHE_REDIS_PREFIX}:{tenant_id}:{namespace}:{key}`, where `namespace` is
 the per-cache prefix (`embedding`, `search`, `learner`, …):
 
@@ -131,7 +131,7 @@ baselithcore:tenant-456:search:<query-hash>
    tenant-aware `RedisCache`, the graph query cache (`<prefix>:graph`) and the
    NLP model cache. `REDIS_CACHE_PREFIX` (`RedisCacheConfig.cache_prefix`,
    default `baselithcore:cache`) namespaces `RedisTTLCache`
-   (`core/cache/redis_cache.py`) and the rate-limiter, idempotency, JWT-blacklist
+   (`baselith/core/cache/redis_cache.py`) and the rate-limiter, idempotency, JWT-blacklist
    and API-key-denylist keys derived from it. Change both if you share one
    Redis between deployments.
 2. **Tenant Isolation**: `RedisCache` and `SemanticLLMCache` partition entries by
@@ -200,7 +200,7 @@ maxmemory-policy allkeys-lru
 
 ### Application Configuration
 
-```python title="core/config/storage.py"
+```python title="baselith/core/config/storage.py"
 from pydantic import Field
 from pydantic_settings import BaseSettings
 

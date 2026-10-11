@@ -45,7 +45,7 @@ hide:
 ```python
 import asyncio
 
-from core.orchestration import Orchestrator
+from baselith.core.orchestration import Orchestrator
 
 # Initialize the core orchestrator
 orchestrator = Orchestrator()
@@ -141,91 +141,91 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-needle:</div>
         <h4>Dependency Injection</h4>
       </div>
-      <div class="module-path">core/di</div>
+      <div class="module-path">baselith/core/di</div>
     </a>
     <a href="core-modules/config/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-cog:</div>
         <h4>Configuration</h4>
       </div>
-      <div class="module-path">core/config</div>
+      <div class="module-path">baselith/core/config</div>
     </a>
     <a href="core-modules/resilience/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-shield-half-full:</div>
         <h4>Resilience</h4>
       </div>
-      <div class="module-path">core/resilience</div>
+      <div class="module-path">baselith/core/resilience</div>
     </a>
     <a href="core-modules/events/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-flash:</div>
         <h4>Event System</h4>
       </div>
-      <div class="module-path">core/events</div>
+      <div class="module-path">baselith/core/events</div>
     </a>
     <a href="core-modules/auth/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-lock:</div>
         <h4>Authentication & Auth</h4>
       </div>
-      <div class="module-path">core/auth</div>
+      <div class="module-path">baselith/core/auth</div>
     </a>
     <a href="core-modules/prompts/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-file-document-edit:</div>
         <h4>Prompt Registry</h4>
       </div>
-      <div class="module-path">core/prompts</div>
+      <div class="module-path">baselith/core/prompts</div>
     </a>
     <a href="core-modules/webhooks/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-webhook:</div>
         <h4>Webhooks</h4>
       </div>
-      <div class="module-path">core/webhooks</div>
+      <div class="module-path">baselith/core/webhooks</div>
     </a>
     <a href="core-modules/quotas/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-speedometer:</div>
         <h4>Usage Quotas</h4>
       </div>
-      <div class="module-path">core/quotas</div>
+      <div class="module-path">baselith/core/quotas</div>
     </a>
     <a href="core-modules/privacy/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-shield-account:</div>
         <h4>Privacy & DSR</h4>
       </div>
-      <div class="module-path">core/privacy</div>
+      <div class="module-path">baselith/core/privacy</div>
     </a>
     <a href="core-modules/observability-module/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-eye:</div>
         <h4>Observability</h4>
       </div>
-      <div class="module-path">core/observability</div>
+      <div class="module-path">baselith/core/observability</div>
     </a>
     <a href="core-modules/nlp/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-text-recognition:</div>
         <h4>NLP Utilities</h4>
       </div>
-      <div class="module-path">core/nlp</div>
+      <div class="module-path">baselith/core/nlp</div>
     </a>
     <a href="core-modules/cache/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-cached:</div>
         <h4>Caching System</h4>
       </div>
-      <div class="module-path">core/cache</div>
+      <div class="module-path">baselith/core/cache</div>
     </a>
     <a href="core-modules/lifecycle/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-state-machine:</div>
         <h4>Lifecycle Management</h4>
       </div>
-      <div class="module-path">core/lifecycle</div>
+      <div class="module-path">baselith/core/lifecycle</div>
     </a>
     </div>
 
@@ -237,49 +237,49 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-transit-connection-variant:</div>
         <h4>Orchestration</h4>
       </div>
-      <div class="module-path">core/orchestration</div>
+      <div class="module-path">baselith/core/orchestration</div>
     </a>
     <a href="core-modules/prioritization/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-sort:</div>
         <h4>Prioritization</h4>
       </div>
-      <div class="module-path">core/prioritization</div>
+      <div class="module-path">baselith/core/prioritization</div>
     </a>
     <a href="core-modules/workflows/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-sitemap:</div>
         <h4>Workflows</h4>
       </div>
-      <div class="module-path">core/workflows</div>
+      <div class="module-path">baselith/core/workflows</div>
     </a>
     <a href="core-modules/planning/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-view-list:</div>
         <h4>Planning</h4>
       </div>
-      <div class="module-path">core/planning</div>
+      <div class="module-path">baselith/core/planning</div>
     </a>
     <a href="core-modules/plugins/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-puzzle-outline:</div>
         <h4>Plugin System</h4>
       </div>
-      <div class="module-path">core/plugins</div>
+      <div class="module-path">baselith/core/plugins</div>
     </a>
     <a href="core-modules/task-queue/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-format-list-checks:</div>
         <h4>Task Queue</h4>
       </div>
-      <div class="module-path">core/task_queue</div>
+      <div class="module-path">baselith/core/task_queue</div>
     </a>
     <a href="core-modules/chat/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-chat:</div>
         <h4>Chat & RAG Workflow</h4>
       </div>
-      <div class="module-path">core/chat</div>
+      <div class="module-path">baselith/core/chat</div>
     </a>
     </div>
 
@@ -291,35 +291,35 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-memory:</div>
         <h4>Memory System</h4>
       </div>
-      <div class="module-path">core/memory</div>
+      <div class="module-path">baselith/core/memory</div>
     </a>
     <a href="core-modules/hierarchical-memory/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-file-tree:</div>
         <h4>Hierarchical Memory</h4>
       </div>
-      <div class="module-path">core/memory</div>
+      <div class="module-path">baselith/core/memory</div>
     </a>
     <a href="core-modules/services/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-server-network:</div>
         <h4>Services</h4>
       </div>
-      <div class="module-path">core/services</div>
+      <div class="module-path">baselith/core/services</div>
     </a>
     <a href="core-modules/storage/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-database:</div>
         <h4>Storage Layer</h4>
       </div>
-      <div class="module-path">core/storage</div>
+      <div class="module-path">baselith/core/storage</div>
     </a>
     <a href="core-modules/db/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-database-search:</div>
         <h4>Database Layer</h4>
       </div>
-      <div class="module-path">core/db</div>
+      <div class="module-path">baselith/core/db</div>
     </a>
     </div>
 
@@ -331,42 +331,35 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-brain:</div>
         <h4>Reasoning</h4>
       </div>
-      <div class="module-path">core/reasoning</div>
+      <div class="module-path">baselith/core/reasoning</div>
     </a>
     <a href="core-modules/reflection/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-mirror:</div>
         <h4>Reflection</h4>
       </div>
-      <div class="module-path">core/reflection</div>
+      <div class="module-path">baselith/core/reflection</div>
     </a>
     <a href="core-modules/swarm/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-bee:</div>
         <h4>Swarm Intelligence</h4>
       </div>
-      <div class="module-path">core/swarm</div>
+      <div class="module-path">baselith/core/swarm</div>
     </a>
     <a href="core-modules/guardrails/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-shield-check:</div>
         <h4>Guardrails</h4>
       </div>
-      <div class="module-path">core/guardrails</div>
+      <div class="module-path">baselith/core/guardrails</div>
     </a>
     <a href="core-modules/agents/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-robot-outline:</div>
         <h4>Official Agent Plugins</h4>
       </div>
-      <div class="module-path">plugins/browser_agent + plugins/coding_agent</div>
-    </a>
-    <a href="plugins/baselithbot/" class="module-card">
-      <div class="module-header">
-        <div class="module-icon">:material-robot-happy-outline:</div>
-        <h4>Baselithbot</h4>
-      </div>
-      <div class="module-path">plugins/baselithbot — autonomous multi-channel agent</div>
+      <div class="module-path">baselith/plugins/browser_agent + baselith/plugins/coding_agent</div>
     </a>
     </div>
 
@@ -378,35 +371,35 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-earth:</div>
         <h4>World Model</h4>
       </div>
-      <div class="module-path">core/world_model</div>
+      <div class="module-path">baselith/core/world_model</div>
     </a>
     <a href="core-modules/exploration/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-compass:</div>
         <h4>Exploration</h4>
       </div>
-      <div class="module-path">core/exploration</div>
+      <div class="module-path">baselith/core/exploration</div>
     </a>
     <a href="core-modules/adversarial/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-sword:</div>
         <h4>Adversarial</h4>
       </div>
-      <div class="module-path">core/adversarial</div>
+      <div class="module-path">baselith/core/adversarial</div>
     </a>
     <a href="core-modules/personas/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-account-box:</div>
         <h4>Personas</h4>
       </div>
-      <div class="module-path">core/personas</div>
+      <div class="module-path">baselith/core/personas</div>
     </a>
     <a href="core-modules/meta/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-account-group:</div>
         <h4>Meta-Agent</h4>
       </div>
-      <div class="module-path">core/meta</div>
+      <div class="module-path">baselith/core/meta</div>
     </a>
     </div>
 
@@ -418,21 +411,21 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-chart-bar:</div>
         <h4>Evaluation</h4>
       </div>
-      <div class="module-path">core/evaluation</div>
+      <div class="module-path">baselith/core/evaluation</div>
     </a>
     <a href="core-modules/learning/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-reload:</div>
         <h4>Learning Loop</h4>
       </div>
-      <div class="module-path">core/learning</div>
+      <div class="module-path">baselith/core/learning</div>
     </a>
     <a href="core-modules/finetuning/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-tune:</div>
         <h4>Auto Fine-Tuning</h4>
       </div>
-      <div class="module-path">core/finetuning</div>
+      <div class="module-path">baselith/core/finetuning</div>
     </a>
     </div>
 
@@ -444,21 +437,21 @@ The framework is organized into over 30 specialized modules across several core 
         <div class="module-icon">:material-connection:</div>
         <h4>A2A Protocol</h4>
       </div>
-      <div class="module-path">core/a2a</div>
+      <div class="module-path">baselith/core/a2a</div>
     </a>
     <a href="core-modules/mcp/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-tools:</div>
         <h4>MCP Integration</h4>
       </div>
-      <div class="module-path">core/mcp</div>
+      <div class="module-path">baselith/core/mcp</div>
     </a>
     <a href="core-modules/human/" class="module-card">
       <div class="module-header">
         <div class="module-icon">:material-account-hard-hat:</div>
         <h4>Human-in-the-Loop</h4>
       </div>
-      <div class="module-path">core/human</div>
+      <div class="module-path">baselith/core/human</div>
     </a>
     </div>
 
@@ -577,7 +570,7 @@ graph TB
 ## Design Principles
 
 !!! tip "Sacred Core"
-    The `core/` directory contains **only** domain-agnostic logic. Never insert domain-specific logic into the core.
+    The `baselith/core/` directory contains **only** domain-agnostic logic. Never insert domain-specific logic into the core.
 
 !!! tip "Plugin-First"
     Any domain-specific functionality must be implemented as a plugin.

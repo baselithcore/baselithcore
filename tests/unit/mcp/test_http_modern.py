@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import httpx
 from fastapi import FastAPI
 
-from core.mcp.http_transport import SESSION_HEADER, create_mcp_http_router
-from core.mcp.server import MCPServer
+from baselith.core.mcp.http_transport import SESSION_HEADER, create_mcp_http_router
+from baselith.core.mcp.server import MCPServer
 
 
 def _config(**overrides):
@@ -308,7 +308,7 @@ async def test_mirrored_param_header_must_be_present_and_match():
 
 
 async def _sse_app():
-    from core.mcp import report_progress
+    from baselith.core.mcp import report_progress
 
     server = MCPServer(name="test-server", version="1.0.0")
 

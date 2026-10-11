@@ -8,14 +8,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.approvals as approvals_module
-from core.orchestration.checkpoint import (
+import baselith.plugins.api_routers.approvals as approvals_module
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from plugins.api_routers.admin import verify_credentials
-from plugins.api_routers.approvals import router
+from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.approvals import router
 
 
 @pytest.fixture
@@ -219,7 +219,7 @@ class TestResume:
         class _FakeChatService:
             agent = fake_agent
 
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")
@@ -235,7 +235,7 @@ class TestResume:
         """The admin's ambient tenant must not leak into another tenant's run."""
         import anyio
 
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         anyio.run(lambda: _paused_run(store, tenant="tenant-a"))
         seen: dict[str, object] = {}
@@ -249,7 +249,7 @@ class TestResume:
             agent = AsyncMock()
 
         _FakeChatService.agent.process = _process
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")
@@ -267,7 +267,7 @@ class TestResume:
         class _FakeChatService:
             agent = fake_agent
 
-        import core.chat as chat_module
+        import baselith.core.chat as chat_module
 
         monkeypatch.setattr(chat_module, "chat_service", _FakeChatService())
         resp = client.post("/approvals/run-1/resume")
@@ -277,3 +277,69 @@ class TestResume:
     def test_resume_404_for_unknown_run(self, client):
         resp = client.post("/approvals/nope/resume")
         assert resp.status_code == 404
+
+
+class TestResumeDurability:
+    """The resume route goes through the orchestrator's restore and lease."""
+
+    @staticmethod
+    def _real_orchestrator(store, seen):
+        from baselith.core.orchestration.orchestrator import Orchestrator
+
+        class _Peek:
+            async def handle(self, query, context):
+                seen.update(context)
+                return {"response": "resumed"}
+
+        orch = Orchestrator(checkpoint_store=store, default_intent="test_intent")
+        orch._flow_handlers["test_intent"] = _Peek()
+        return orch
+
+    def test_resume_restores_the_inputs_the_run_started_with(
+        self, client, store, monkeypatch
+    ):
+        import anyio
+
+        async def _seed():
+            checkpoint = await _paused_run(store)
+            checkpoint.intent = "test_intent"
+            checkpoint.inputs = {"strategy": "bfs", "history_text": "user: earlier"}
+            await store.save(checkpoint)
+
+        anyio.run(_seed)
+        seen: dict = {}
+
+        class _ChatService:
+            agent = self._real_orchestrator(store, seen)
+
+        import baselith.core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _ChatService())
+        resp = client.post("/approvals/run-1/resume")
+
+        assert resp.status_code == 200
+        assert seen["strategy"] == "bfs"
+        assert seen["history_text"] == "user: earlier"
+
+    def test_resume_of_a_run_executing_elsewhere_is_409(
+        self, client, store, monkeypatch
+    ):
+        import anyio
+
+        async def _seed():
+            await _paused_run(store)
+            await store.claim("run-1", "another-worker", 600.0)
+
+        anyio.run(_seed)
+        seen: dict = {}
+
+        class _ChatService:
+            agent = self._real_orchestrator(store, seen)
+
+        import baselith.core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _ChatService())
+        resp = client.post("/approvals/run-1/resume")
+
+        assert resp.status_code == 409
+        assert seen == {}

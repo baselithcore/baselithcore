@@ -7,10 +7,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.runs as runs_module
-from core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
-from plugins.api_routers.admin import verify_credentials
-from plugins.api_routers.runs import router
+import baselith.plugins.api_routers.runs as runs_module
+from baselith.core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
+from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.runs import router
 
 
 @pytest.fixture
@@ -94,8 +94,8 @@ class TestEventStream:
 
         from httpx import ASGITransport, AsyncClient
 
-        from core.api.events import AgentEvent, EventType
-        from core.orchestration.run_events import RunEventStream
+        from baselith.core.api.events import AgentEvent, EventType
+        from baselith.core.orchestration.run_events import RunEventStream
 
         stream = RunEventStream()
         monkeypatch.setattr(runs_module, "get_run_event_stream", lambda: stream)
@@ -141,7 +141,7 @@ class TestEventStreamKeepaliveAndDisconnect:
     async def test_quiet_run_gets_keepalives_then_disconnect_unsubscribes(
         self, monkeypatch
     ):
-        from core.orchestration.run_events import RunEventStream
+        from baselith.core.orchestration.run_events import RunEventStream
 
         stream = RunEventStream()
         monkeypatch.setattr(runs_module, "get_run_event_stream", lambda: stream)

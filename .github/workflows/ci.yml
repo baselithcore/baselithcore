@@ -124,7 +124,6 @@ jobs:
       image: ${{ steps.plan.outputs.image }}
       workflows: ${{ steps.plan.outputs.workflows }}
       helm: ${{ steps.plan.outputs.helm }}
-      ui: ${{ steps.plan.outputs.ui }}
       frontend: ${{ steps.plan.outputs.frontend }}
       sdk: ${{ steps.plan.outputs.sdk }}
       supply: ${{ steps.plan.outputs.supply }}
@@ -937,7 +936,7 @@ jobs:
   # 🧪 TEST
   # ============================================================
   frontend_test:
-    # `core/static/frontend/js/api.js` is the SSE client the shipped chat UI
+    # `baselith/core/static/frontend/js/api.js` is the SSE client the shipped chat UI
     # runs: it reassembles `/chat/stream` frames across arbitrary chunk
     # boundaries. Its tests existed and nothing ran them, so the regressions
     # they pin (a CRLF line split exactly at the \r/\n boundary, `event: error`
@@ -973,9 +972,9 @@ jobs:
         # while verifying nothing, which is worse than the hole it closes. The
         # emptiness check below is the whole point of doing it this way.
         run: |
-          FILES="$(find core/static/frontend/js -name '*.test.mjs' | sort)"
+          FILES="$(find baselith/core/static/frontend/js -name '*.test.mjs' | sort)"
           if [ -z "$FILES" ]; then
-            echo "::error::no *.test.mjs found under core/static/frontend/js"
+            echo "::error::no *.test.mjs found under baselith/core/static/frontend/js"
             exit 1
           fi
           echo "Running:"
@@ -988,10 +987,9 @@ jobs:
     timeout-minutes: 30
     # evals/red_team/fairness in the needs graph: the three quality gates
     # block the test→release path structurally, not only when configured as
-    # required checks in branch protection. zizmor, helm_lint, ui_build and
+    # required checks in branch protection. zizmor, helm_lint and
     # frontend_test join them for the same reason — a gate that nothing depends
-    # on is advisory, and a workflow audit, a chart that will not render, a
-    # stale dashboard bundle or a broken SSE client in the shipped chat UI are
+    # on is advisory, and a workflow audit, a chart that will not render or a broken SSE client in the shipped chat UI are
     # all things that must not reach a release.
     #
     # Most of them are skipped when the `changes` plan says their inputs did
@@ -1003,7 +1001,7 @@ jobs:
     # dependency_review is deliberately NOT here: it only runs on
     # pull_request, and it gates the diff under review rather than the tree
     # that ships.
-    needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, ui_build, frontend_test]
+    needs: [changes, quality_gates, docs_consistency, security_scan, package_smoke, evals, red_team, fairness, zizmor, helm_lint, frontend_test]
     if: ${{ !cancelled() && !failure() && needs.changes.outputs.python == 'true' }}
     # 3.14 is NOT here. requires-python is >=3.12 with no upper cap, so it is
     # worth testing — but until every upstream dep publishes wheels it can only
@@ -1045,6 +1043,12 @@ jobs:
           version: "0.12.0"
           enable-cache: true
           cache-dependency-glob: uv.lock
+      - name: Make the interpreter's directory non-world-writable
+        # The runner image ships its tool cache world-writable, and the MCP
+        # stdio launcher refuses a binary in a world-writable directory: the
+        # stdio client tests spawn sys.executable as their fake server. Owner
+        # write stays, so the installs below are unaffected.
+        run: chmod -R o-w "$pythonLocation"
       - name: Run Tests
         env:
           POSTGRES_DB: test_db
@@ -1071,10 +1075,10 @@ jobs:
           # The project itself, without deps: they all came from the lock above.
           uv pip install --system --no-deps -e .
           # Coverage XML on every run so PRs get a Codecov delta, not just main.
-          pytest -n auto --cov=core --cov-report=xml:coverage.xml --cov-report=term -q
+          pytest -n auto --cov=baselith/core --cov-report=xml:coverage.xml --cov-report=term -q
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.12'
-        # Reporting, not gating: the 78% floor is enforced by pytest in the
+        # Reporting, not gating: the 85% floor is enforced by pytest in the
         # step above. `fail_ci_if_error: false` covers Codecov's own API
         # answers, not the action crashing on the network — a `read
         # ECONNRESET` while fetching the uploader failed this job on PR #104
@@ -1088,11 +1092,15 @@ jobs:
 
   integration_test:
     # The suite under tests/integration/ against REAL backends: the Postgres
-    # stores (tool ledger, webhooks, skill-evolution patterns), row-level
-    # security under a least-privilege role, pgvector, the Redis event
-    # stream, the Qdrant provider, and the migration upgrade path from every
-    # earlier revision with rows in the tables. python_test runs the same
-    # files with psycopg mocked, where every one of these cases skips.
+    # stores (tool ledger, webhooks, skill-evolution patterns, online eval
+    # results), row-level security under a least-privilege role, pgvector,
+    # the Redis event stream, the Qdrant provider, and the migration upgrade
+    # path from every earlier revision with rows in the tables, down to base
+    # and back. Plus the durable-checkpoint store contract (compare-and-swap,
+    # leases, lease expiry on the database clock), which lives under
+    # tests/unit/ because its memory and SQLite cases need no service.
+    # python_test runs the same files with psycopg mocked, where every one of
+    # these Postgres cases skips.
     #
     # BASELITH_TEST_INTEGRATION_STRICT turns a skip under tests/integration/
     # into a failure (tests/integration/conftest.py): with every backend
@@ -1189,84 +1197,19 @@ jobs:
         # What an operator runs before the first boot; the suite then works
         # on the schema the packaged migrations produce, not on tables each
         # test creates for itself.
-        run: python -m core.db.migrate
+        run: python -m baselith.core.db.migrate
       - name: Run integration suite
-        # tests/core/skill_evolution/test_store_postgres.py is the one
-        # real-database module outside tests/integration/. --no-cov: the
-        # coverage floor belongs to python_test's full run.
+        # The four real-database modules outside tests/integration/ are
+        # named explicitly; they fail rather than skip under
+        # BASELITH_TEST_INTEGRATION_STRICT. --no-cov: the coverage floor
+        # belongs to python_test's full run.
         run: |
-          pytest tests/integration tests/core/skill_evolution/test_store_postgres.py \
+          pytest tests/integration \
+            tests/core/skill_evolution/test_store_postgres.py \
+            tests/unit/core/orchestration/test_checkpoint_store_contract.py \
+            tests/unit/core/orchestration/test_checkpoint_lease_clock.py \
+            tests/unit/mcp/test_mcp_task_durability.py \
             -m "not slow" --no-cov -q -rs
-
-  # ============================================================
-  # 🏗️ BUILD
-  # ============================================================
-  ui_build:
-    # `plugins/baselithbot/ui/dist/` is COMMITTED and is the only thing the
-    # wheel ships (ui/src and ui/node_modules are excluded in pyproject.toml).
-    # A committed build output that nothing rebuilds is a build output that
-    # drifts: a change to ui/src/ that was never rebuilt ships the previous
-    # bundle, and the dashboard silently serves stale code for a release.
-    #
-    # This rebuilds it from a clean `npm ci` and fails if the result differs
-    # from what is committed — the same shape as the openapi_drift gate — and
-    # lints and tests the sources on the way through.
-    name: BaselithBot UI Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [changes]
-    if: needs.changes.outputs.ui == 'true'
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with:
-          persist-credentials: false
-      - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          # From the dashboard's own .nvmrc rather than a literal here, so a
-          # contributor's `nvm use`, the package.json `engines.node` floor and
-          # the version CI builds the committed dist/ with are one fact. A
-          # bundle built on a different major is a bundle this gate's rebuild
-          # comparison can fail for reasons nobody changed.
-          node-version-file: plugins/baselithbot/ui/.nvmrc
-          cache: 'npm'
-          cache-dependency-path: plugins/baselithbot/ui/package-lock.json
-      - name: Install, lint, typecheck, test and build
-        working-directory: plugins/baselithbot/ui
-        # npm ci, not npm install: it installs the locked tree exactly and
-        # fails on a lockfile that disagrees with package.json, rather than
-        # quietly resolving something new and rewriting the lock.
-        #
-        # lint and test run HERE and nowhere else. The dashboard ships an
-        # ESLint 9 flat config and a vitest suite, and until this step neither
-        # was executed by any workflow: `npm test` elsewhere in this file
-        # belongs to the `sdk` job (sdk/typescript), and `frontend_test` covers
-        # a different tree entirely (core/static/frontend/js, via node --test).
-        # A test suite no pipeline runs is a test suite that rots silently.
-        run: |
-          npm ci
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
-      - name: Committed dist/ matches a clean rebuild
-        # `git status --porcelain`, not `git diff`: dist/ is covered by a
-        # `dist/` line in .gitignore and its bundles are tracked only because
-        # they were force-added. `git diff` sees modifications and deletions of
-        # those tracked files but is blind to ADDED ones — and an added file is
-        # the normal shape of this drift, because the bundle names are
-        # content-hashed, so a source change produces a new filename rather
-        # than a changed one. --porcelain reports tracked and untracked alike.
-        run: |
-          DRIFT="$(git status --porcelain -- plugins/baselithbot/ui/dist)"
-          if [ -n "$DRIFT" ]; then
-            echo "::error::plugins/baselithbot/ui/dist is out of date."
-            echo "Run 'npm ci && npm run build' in plugins/baselithbot/ui and commit dist/."
-            echo "$DRIFT"
-            exit 1
-          fi
 
   # ============================================================
   # 🐳 CONTAINER IMAGE
@@ -1307,8 +1250,8 @@ jobs:
       # A full image build is ~30 minutes cold, so it is scoped to the inputs
       # that can actually change what the image CONTAINS: the Dockerfile, the
       # ignore file, and the dependency surface (pyproject.toml drives the
-      # extras, uv.lock pins the resolved set). A change under core/ or
-      # plugins/ only invalidates the thin source layers at the very top of the
+      # extras, uv.lock pins the resolved set). A change under baselith/core/ or
+      # baselith/plugins/ only invalidates the thin source layers at the very top of the
       # image, which the release build reproduces from cache in seconds — not
       # worth half an hour on every PR.
       #
@@ -1412,17 +1355,17 @@ jobs:
 
           # There must be exactly ONE importable copy of the source. The
           # project distribution is installed into /install-app for its entry
-          # points, and pip also materialises core/ and plugins/ there; with
+          # points, and pip also materialises baselith/core/ and baselith/plugins/ there; with
           # /install-app ahead of /app on PYTHONPATH, which copy won depended
-          # on the working directory. The Dockerfile deletes them, so `core`
-          # must resolve under /app from ANY cwd.
+          # on the working directory. The Dockerfile deletes them, so
+          # `baselith.core` must resolve under /app from ANY cwd.
           for wd in / /app /tmp; do
             RESOLVED="$(docker run --rm --workdir "$wd" --entrypoint python \
-              baselithcore:ci -c 'import core; print(core.__file__)')"
+              baselithcore:ci -c 'import baselith.core; print(baselith.core.__file__)')"
             echo "cwd=${wd} -> ${RESOLVED}"
             case "${RESOLVED}" in
-              /app/core/*) ;;
-              *) echo "::error::core resolved to ${RESOLVED} with cwd=${wd}, expected /app/core"; exit 1 ;;
+              /app/baselith/core/*) ;;
+              *) echo "::error::baselith.core resolved to ${RESOLVED} with cwd=${wd}, expected /app/baselith/core"; exit 1 ;;
             esac
           done
 
@@ -1439,7 +1382,7 @@ jobs:
 
           # Every capability the image installs must be able to RUN in it. The
           # spaCy stack is ~160MB and delivers nothing without its model: the
-          # image shipped for a long time with core/nlp falling back to a blank
+          # image shipped for a long time with baselith/core/nlp falling back to a blank
           # sentencizer, which no test could see.
           docker run --rm --entrypoint python baselithcore:ci -c '
           import spacy

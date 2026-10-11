@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._metadata import PluginMetadata
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.manifest_model import (
+from baselith.core.plugins._metadata import PluginMetadata
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.manifest_model import (
     VENDOR_EXTENSION_PREFIX,
     ManifestValidationError,
     PluginManifestModel,
@@ -245,7 +245,7 @@ class TestExtensionsAreSigned:
 
 class TestShippedManifestsUnaffected:
     def test_repo_manifests_declare_no_extensions_yet(self):
-        for plugin_dir in sorted((REPO_ROOT / "plugins").iterdir()):
+        for plugin_dir in sorted((REPO_ROOT / "baselith" / "plugins").iterdir()):
             manifest = plugin_dir / "manifest.yaml"
             if not manifest.is_file():
                 continue

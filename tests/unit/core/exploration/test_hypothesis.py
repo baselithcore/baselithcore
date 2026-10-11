@@ -2,7 +2,11 @@ from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 
-from core.exploration.hypothesis import ConfidenceLevel, Hypothesis, HypothesisGenerator
+from baselith.core.exploration.hypothesis import (
+    ConfidenceLevel,
+    Hypothesis,
+    HypothesisGenerator,
+)
 
 
 @pytest.fixture
@@ -53,7 +57,7 @@ async def test_generate_with_llm(mock_llm_service):
 async def test_generate_simple_fallback():
     """Test fallback to simple generation when LLM is missing."""
     with patch(
-        "core.exploration.hypothesis.HypothesisGenerator.llm_service",
+        "baselith.core.exploration.hypothesis.HypothesisGenerator.llm_service",
         new_callable=PropertyMock,
     ) as mock_service_prop:
         mock_service_prop.return_value = None

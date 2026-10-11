@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class _SlowMemory:

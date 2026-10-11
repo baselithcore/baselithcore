@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 
-from core.api._plugin_runtime import PluginRuntimeHooks
-from core.mcp.plugin_tools import (
+from baselith.core.api._plugin_runtime import PluginRuntimeHooks
+from baselith.core.mcp.plugin_tools import (
     PluginToolUnavailableError,
     register_plugin_mcp_tools,
     unregister_plugin_mcp_tools,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 
 class _Plugin:

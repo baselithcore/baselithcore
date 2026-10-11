@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.apply.models import RunKind, RunState
-from core.plugin_updates.apply.store import RunConflict, RunStateConflict, RunStore
+from baselith.core.plugin_updates.apply.models import RunKind, RunState
+from baselith.core.plugin_updates.apply.store import (
+    RunConflict,
+    RunStateConflict,
+    RunStore,
+)
 
 T0 = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 
@@ -184,7 +188,10 @@ def test_runs_lists_every_plugin_oldest_first_and_filters(tmp_path: Path) -> Non
 
 
 def test_rollback_failed_event_is_public() -> None:
-    from core.plugin_updates.apply import ROLLBACK_FAILED_EVENT, rollback_failed_payload
+    from baselith.core.plugin_updates.apply import (
+        ROLLBACK_FAILED_EVENT,
+        rollback_failed_payload,
+    )
 
     assert ROLLBACK_FAILED_EVENT == "plugin.update_rollback_failed"
     assert callable(rollback_failed_payload)
@@ -217,7 +224,7 @@ def test_stale_claim_of_a_finished_run_is_replaced(tmp_path: Path) -> None:
 
 
 def test_heartbeat_and_expectations_roundtrip(tmp_path: Path) -> None:
-    from core.plugin_updates.apply.models import Expectation, UpdaterHeartbeat
+    from baselith.core.plugin_updates.apply.models import Expectation, UpdaterHeartbeat
 
     store = RunStore(tmp_path)
     assert store.read_heartbeat() is None
@@ -347,7 +354,7 @@ def test_next_approved_requires_the_live_claim(tmp_path: Path) -> None:
 
 
 def test_clear_stale_expectations_drops_only_finished_runs(tmp_path: Path) -> None:
-    from core.plugin_updates.apply.models import Expectation
+    from baselith.core.plugin_updates.apply.models import Expectation
 
     store = RunStore(tmp_path)
     done = _create(store, approval=False)

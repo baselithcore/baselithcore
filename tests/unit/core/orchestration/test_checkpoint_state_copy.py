@@ -24,8 +24,8 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.checkpoint import Checkpoint
-from core.orchestration.checkpoint_memory import (
+from baselith.core.orchestration.checkpoint import Checkpoint
+from baselith.core.orchestration.checkpoint_memory import (
     InMemoryCheckpointStore,
     _copy_state,
 )

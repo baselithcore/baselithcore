@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.plugins.resource_analyzer import (
+from baselith.core.plugins.resource_analyzer import (
     ResourceAnalyzer,
     analyze_plugin_resources,
 )
@@ -139,7 +139,7 @@ class TestResourceAnalyzer:
         )
         (plugin_dir / "plugin.py").write_text(
             """
-from core.plugins import RouterPlugin
+from baselith.core.plugins import RouterPlugin
 
 
 class DemoPlugin(RouterPlugin):
@@ -209,7 +209,7 @@ class DemoPlugin(RouterPlugin):
         )
         (plugin_dir / "plugin.py").write_text(
             """
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 
 
 class ReasoningPlugin(AgentPlugin):

@@ -12,18 +12,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.agent import Agent
-from core.orchestration.tool_output import UNTRUSTED_OUTPUT_SYSTEM_RULE
-from core.plugins.result import ok as skill_ok
-from core.reasoning.react import ToolDefinition
-from core.services.llm.messages import (
+from baselith.core.agent import Agent
+from baselith.core.orchestration.tool_output import UNTRUSTED_OUTPUT_SYSTEM_RULE
+from baselith.core.plugins.result import ok as skill_ok
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.messages import (
     Message,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     to_anthropic,
 )
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 def _service(results):
@@ -300,7 +300,7 @@ class TestObservationRendering:
         assert block.is_error is False
 
     async def test_a_failed_skill_result_is_flagged_as_an_error(self):
-        from core.plugins.result import fail as skill_fail
+        from baselith.core.plugins.result import fail as skill_fail
 
         def lookup(q: str = "x"):
             """Returns a failed SkillResult."""
@@ -337,7 +337,7 @@ class TestObservationRendering:
 
     async def test_an_empty_ledger_row_never_replays_as_empty_content(self):
         """The last route to an empty tool_result: a row written before the guard."""
-        from core.orchestration.idempotency import (
+        from baselith.core.orchestration.idempotency import (
             InMemoryToolLedger,
             derive_idempotency_key,
         )

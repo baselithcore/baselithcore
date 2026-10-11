@@ -1,6 +1,6 @@
 """``Agent`` continues a conversation (``history=``) and streams typed events.
 
-A conversational host (Baselithbot's assistant) needs both: every turn resumes
+A conversational host (a chat assistant plugin) needs both: every turn resumes
 the stored conversation, and the UI renders tool activity while the loop runs.
 """
 
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.agent import (
+from baselith.core.agent import (
     Agent,
     AgentResult,
     Completed,
@@ -19,9 +19,9 @@ from core.agent import (
     ToolCallFinished,
     ToolCallStarted,
 )
-from core.reasoning.react import ToolDefinition
-from core.services.llm.messages import Message, ToolUseBlock, to_anthropic
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.messages import Message, ToolUseBlock, to_anthropic
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 def _service(results):

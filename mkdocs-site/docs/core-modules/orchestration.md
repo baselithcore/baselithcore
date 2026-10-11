@@ -4,15 +4,15 @@ description: Orchestrator, Intent Classifier, and Flow Router
 ---
 <!-- markdownlint-disable MD046 -->
 
-The `core/orchestration` module manages request routing to appropriate plugins.
+The `baselith/core/orchestration` module manages request routing to appropriate plugins.
 
 ## Module Structure
 
 !!! info "Exports resolve on first access"
     `__init__.py` maps each exported name to the submodule that defines it and
     resolves it on first read ([PEP 562](https://peps.python.org/pep-0562/),
-    via `core._lazy.lazy_exports`). Import sites are unchanged — `from core.orchestration
-    import AutonomyPolicy` and `core.orchestration.checkpoint` both still work — but importing one name no
+    via `baselith.core._lazy.lazy_exports`). Import sites are unchanged — `from baselith.core.orchestration
+    import AutonomyPolicy` and `baselith.core.orchestration.checkpoint` both still work — but importing one name no
     longer costs the whole package. Reaching `AutonomyPolicy` used to pull the whole handler graph and the LLM service with it — 3 209 modules; it now loads 95.
 
     Adding an export means adding it to **both** `_EXPORTS` and the literal
@@ -21,7 +21,7 @@ The `core/orchestration` module manages request routing to appropriate plugins.
     [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
 
 ```text
-core/orchestration/
+baselith/core/orchestration/
 ├── __init__.py              # Public exports
 ├── orchestrator.py          # Main Orchestrator (mixin-composed)
 ├── intent_classifier.py     # IntentClassifier + ClassificationResult
@@ -43,6 +43,9 @@ core/orchestration/
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
 ├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── checkpoint_scope.py      # Child scopes for composite runners + the ambient checkpoint
+├── run_ids.py               # Stable run ids for retrying entry points (chat, queued jobs)
+├── run_completion.py        # Notify a run's originator when the recovery sweep finishes it
 ├── call_keys.py             # Content-addressed call keys: tool + args + occurrence
 ├── idempotency.py           # Cross-process tool ledger: derive key, claim, replay
 ├── idempotency_postgres.py  # Postgres-backed ToolLedger (tool_invocations)
@@ -59,7 +62,7 @@ core/orchestration/
 └── handlers/                # Built-in flow handlers (incl. streaming RAG twin)
 ```
 
-Public exports (`from core.orchestration import ...`): `Orchestrator`,
+Public exports (`from baselith.core.orchestration import ...`): `Orchestrator`,
 `IntentClassifier`, `BaseFlowHandler`, `BaseStreamHandler`, the protocols
 (`AgentProtocol`, `FlowHandler`, `StreamHandler`, `IntentClassifierProtocol`,
 `OrchestratorProtocol`), and the efficiency modules (`ParallelToolExecutor`,
@@ -84,7 +87,7 @@ entry points are `process()` and `process_stream()` (provided by
 `ExecutionMixin`).
 
 ```python
-from core.orchestration import Orchestrator
+from baselith.core.orchestration import Orchestrator
 
 orchestrator = Orchestrator()
 
@@ -109,7 +112,7 @@ the `AutonomyPolicy` at `context["autonomy_policy"]` (see
 [Runtime guardrails](#runtime-guardrails)).
 
 These primitives are **enforced**, not just injected. Handlers call the
-chokepoint helpers in `core/orchestration/enforcement.py`:
+chokepoint helpers in `baselith/core/orchestration/enforcement.py`:
 
 - `enforce_iteration(context)` — one `LoopBudget.tick()` per loop step.
 - `await enforce_tool_invocation(context, tool_name, category, cost_usd=...,
@@ -142,7 +145,8 @@ break the tool path. See
     `_memory_writes_dropped` and in the Prometheus counter
     `mas_memory_writes_dropped_total`, with a WARNING at most once a minute
     per process — memory is best-effort and the request path is not, but a
-    lost turn must be visible.
+    lost turn must be visible. The answer written is the output-guarded one
+    (PII already redacted), as on the streaming path.
 
 !!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
     Those background writes are awaited by nobody on the request path, so an
@@ -232,7 +236,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
 `process_stream` yields real, guarded output on every path:
 
 - **Streaming handler registered** — `stream_with_loop_controls`
-  (`core/orchestration/mixins/_streaming.py`) runs the handler under the same
+  (`baselith/core/orchestration/mixins/_streaming.py`) runs the handler under the same
   per-request controls as `process()`: a fresh `LoopBudget` bound at
   `context["loop_budget"]` and as the ambient budget — so the token/USD caps
   (charged when the LLM stream ends) and the `max_seconds` deadline of the LLM
@@ -240,15 +244,16 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   modality annotation, memory recall (when the orchestrator has a memory
   manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
   injection. Chunks pass through the streaming output guard
-  (`core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
+  (`baselith/core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
   streaming moderation) before they reach the caller; see
   [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
   memory manager, the background memory write is scheduled only when the
   stream **completes** — a stream that errors or is abandoned by the client
   records nothing. A budget breach ends the stream with
   `Request aborted: <reason>`; text still held in the output guard's holdback
-  window at that point is not flushed. Durable checkpointing stays on the
-  non-streaming path: a half-sent stream cannot be resumed by replaying it.
+  window at that point is not flushed. With a checkpoint store the stream is
+  a **checkpointed run** too — see
+  [durable streams](#durable-streams-process_stream-with-a-run-id).
 - **No streaming handler** — the query runs through the full non-streaming
   `process()` pipeline (memory, budget, checkpoint, output guard) and the
   final `response` is emitted as a single chunk: a real answer delivered late
@@ -256,7 +261,7 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   never.
 
 The default `qa_docs` intent streams out of the box. `StandardRagStreamHandler`
-(`core/orchestration/handlers/rag_stream.py`) is the streaming twin of
+(`baselith/core/orchestration/handlers/rag_stream.py`) is the streaming twin of
 `StandardRagHandler`, registered automatically alongside it — only when the
 builtin flow handler is used; a plugin overriding `qa_docs` owns its own
 streaming story. Retrieval is delegated to `StandardRagHandler.retrieve()` and
@@ -275,7 +280,7 @@ source of facts, and retrieval runs on the raw query.
 
 The history itself is untrusted too: an earlier assistant turn can quote a
 tool result or a document. `build_rag_user_prompt` renders it through
-`render_history_context` (`core/orchestration/history_context.py`), which
+`render_history_context` (`baselith/core/orchestration/history_context.py`), which
 scans it with `scan_external_content` (source `conversation_history`, same
 `BASELITH_SANITIZE_EXTERNAL_CONTENT` policy) and seals it in **one**
 `<untrusted_tool_output tool="conversation_history">` envelope, keeping the
@@ -309,18 +314,18 @@ current Question is the user's request.
 
 Labels can lie — a browser's `Content-Type` is whatever the client sent, a
 filename whatever the uploader chose — so
-`core/orchestration/modality_router.py` detects what an attachment *actually*
+`baselith/core/orchestration/modality_router.py` detects what an attachment *actually*
 is, layered by trustworthiness: **magic bytes** first (raster images, `%PDF`,
 audio/video containers incl. RIFF and ISO-BMFF disambiguation), then the
 declared **MIME type**, then the **filename extension**, and finally `"text"`
 for anything undetectable. The PDF and audio signatures are delegated to
-`core/utils/media.py` (`sniff_document_type`, `sniff_audio_type`) — the same
+`baselith/core/utils/media.py` (`sniff_document_type`, `sniff_audio_type`) — the same
 sniffers the vision service's
 [native document/audio path](services.md#native-documents-audio) fails closed
 on, so the signature knowledge lives in exactly one place.
 
 ```python
-from core.orchestration import Modality, annotate_context, detect_modality
+from baselith.core.orchestration import Modality, annotate_context, detect_modality
 
 detect_modality(raw_bytes, filename="report.pdf", mime="application/pdf")
 # -> "image" | "pdf" | "audio" | "video" | "text"
@@ -349,7 +354,7 @@ runs a tiered pipeline: LLM (if enabled and above the confidence threshold) →
 keyword pattern match → default intent.
 
 ```python
-from core.orchestration import IntentClassifier
+from baselith.core.orchestration import IntentClassifier
 
 classifier = IntentClassifier()
 
@@ -379,7 +384,7 @@ whenever an intent is registered or unregistered); a failed or unparseable
 call (`None`) is never cached, so a provider blip does not pin that input to
 the default intent.
 The swarm task-decomposition prompt
-(`core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
+(`baselith/core/orchestration/handlers/swarm_agents.py`, `build_decomposition_prompt`)
 is catalog-served the same way.
 
 ### Registering intents
@@ -418,7 +423,7 @@ when the `Orchestrator` builds the classifier itself; see
 
 ## Router
 
-`core/orchestration/router.py` provides a semantic `Router` that maps a query
+`baselith/core/orchestration/router.py` provides a semantic `Router` that maps a query
 to candidate agents using vector similarity. It is a separate component from
 the `Orchestrator` (there is no `FlowRouter`).
 
@@ -427,8 +432,8 @@ the `Orchestrator` (there is no `FlowRouter`).
     in the default app constructs one. Use it from your own handler.
 
 ```python
-from core.orchestration.router import Router, RouteRequest
-from core.config import get_router_config
+from baselith.core.orchestration.router import Router, RouteRequest
+from baselith.core.config import get_router_config
 
 router = Router(
     config=get_router_config(),
@@ -455,7 +460,7 @@ Handlers implement the `FlowHandler` protocol. `handle` is async and returns a
 
 ```python
 from typing import Any, AsyncGenerator
-from core.orchestration.protocols import FlowHandler, StreamHandler
+from baselith.core.orchestration.protocols import FlowHandler, StreamHandler
 
 
 class MyFlowHandler:  # structural match for FlowHandler
@@ -500,7 +505,7 @@ gates through the same `/approvals` API) like any other handler — see
 `OrchestrationConfig` uses the `ORCHESTRATOR_` env prefix.
 
 ```python
-from core.config import get_orchestration_config
+from baselith.core.config import get_orchestration_config
 
 config = get_orchestration_config()
 
@@ -553,7 +558,7 @@ fire before any tool is dispatched and any LLM call leaves the process.
 ### Content guard pipeline (`guard_pipeline.py`)
 
 Every `Orchestrator.process` call passes through
-`core/orchestration/guard_pipeline.py` (on by default,
+`baselith/core/orchestration/guard_pipeline.py` (on by default,
 `BASELITH_ORCHESTRATOR_GUARDRAILS=false` to bypass): inbound queries hit
 `InputGuard`'s synchronous regex validation **before any budget or LLM spend**
 — a blocked query returns a structured result
@@ -562,7 +567,7 @@ Every `Orchestrator.process` call passes through
 harmful-content patterns) with redaction counts surfaced under
 `result["guardrails"]`. The always-on loop path is deterministic and adds
 well under a millisecond at the default input cap; the opt-in LLM layers
-below supersede the deprecated `InputGuard.validate_async`.
+below superseded `InputGuard.validate_async`, removed in 1.0.
 
 The inbound gate is `guard_input_async` — a three-layer pipeline, cheapest
 first, each layer running only on what the previous one passed:
@@ -586,13 +591,22 @@ Moderator and classifier failures are **fail-open** — an outage degrades to
 unguarded service, never a chat outage.
 
 The outbound gate is `guard_output_async`, awaited by `process()` on the final
-result. The synchronous `guard_output` (PII redaction, harmful-content
+result. `FLOW_COMPLETED` is emitted only **after** it
+(`baselith/core/orchestration/mixins/_flow_events.py`): `_process_with_budget`
+stages the payload on the request context and `process()` completes it with
+the guarded `response` and the guard's `guardrails` verdicts, so subscribers
+(online evaluation above all) see what the user received; the payload also
+carries `tenant_id`, `cost_usd` and `tokens`. A guard that raises discards the
+staged event. `process_stream` emits it once a stream completes
+(`streamed: true`); an abandoned stream emits nothing. The synchronous `guard_output` (PII redaction, harmful-content
 patterns) always applies first. The **groundedness rail** then applies when
 enabled (`BASELITH_OUTPUT_GROUNDEDNESS=off` default | `annotate` | `block` —
-`core/orchestration/guard_groundedness.py`): a response whose result dict
-carries non-empty retrieved source material (`sources` or `context`) is
+`baselith/core/orchestration/guard_groundedness.py`): a response whose result dict
+carries non-empty retrieved source material (`sources`, `context`, or the
+private `_grounding_context` key; a `sources` list of descriptors without
+text yields to the text keys) is
 judged against it by `FaithfulnessEvaluator` — one extra LLM call per sourced
-response, which is why the default is off. `annotate` surfaces
+response, which is why the default is off. Whatever the rails decide, `guard_output_async` removes `_grounding_context` (`GROUNDING_CONTEXT_KEY`) from the result before it leaves the orchestrator. `annotate` surfaces
 `{score, should_refine}` under `result["guardrails"]["groundedness"]`;
 `block` additionally replaces a response scoring below
 `BASELITH_OUTPUT_GROUNDEDNESS_THRESHOLD` (default `0.6`) with a
@@ -611,7 +625,7 @@ surfaced under `result["guardrails"]["moderation"]` (`blocked`, `provider`,
 `Orchestrator.process_stream` applies the same inbound gate (regex + optional
 moderation) before intent classification — a blocked query yields a single
 blocked chunk and terminates. On the way out, every stream handler is wrapped in
-`guard_stream` (`core/orchestration/stream_guard.py`): the same `OutputGuard`
+`guard_stream` (`baselith/core/orchestration/stream_guard.py`): the same `OutputGuard`
 (PII redaction, harmful-content patterns, cumulative output-length cap)
 applied on the wire, chunk by chunk, with a **holdback window**
 (`DEFAULT_HOLDBACK = 128` characters). Text is emitted only once it is at
@@ -641,7 +655,7 @@ as everywhere else in the pipeline.
 
 ### `LoopBudget` — iteration, cost + token cap
 
-`core/orchestration/limits.py` enforces hard caps so a runaway loop
+`baselith/core/orchestration/limits.py` enforces hard caps so a runaway loop
 cannot burn budget. A fresh `LoopBudget` is instantiated per request
 by `ExecutionMixin.process` — and by `process_stream` when the intent has a
 stream handler (see [Streaming pipeline](#streaming-pipeline)) — and exposed as
@@ -667,8 +681,8 @@ per-call timeout (`ToolCall.timeout_seconds`, else the executor default) at
 already clamped the same way. Override at construction:
 
 ```python
-from core.orchestration import Orchestrator
-from core.orchestration.limits import LoopLimits
+from baselith.core.orchestration import Orchestrator
+from baselith.core.orchestration.limits import LoopLimits
 
 orchestrator = Orchestrator(
     loop_limits=LoopLimits(
@@ -693,7 +707,7 @@ budget.charge(0.0008)                  # after each LLM completion
 `LLMService`) records every call's input+output tokens against the budget for
 **all** models — including self-hosted/unpriced ones absent from the pricing
 table — so `max_tokens` is enforced even where `budget_usd` can't be. Token
-counting uses the tiered tokenizer in `core/utils/tokens` (tiktoken when
+counting uses the tiered tokenizer in `baselith/core/utils/tokens` (tiktoken when
 installed, a content-aware heuristic otherwise), the same counter memory context
 assembly (`HierarchicalMemory.get_context`) now budgets by — replacing the old
 character-length heuristic.
@@ -754,11 +768,11 @@ a snapshot of the state at the breach.
 
 #### Ambient budget & enforced USD cost
 
-`core/orchestration/budget_context.py` publishes the per-request `LoopBudget`
+`baselith/core/orchestration/budget_context.py` publishes the per-request `LoopBudget`
 as a `ContextVar`. `ExecutionMixin.process` binds it at request start, so code
 far from the handler — notably `LLMService` — can charge against it without
 threading the budget through every call. After each generation `LLMService`
-charges the call's **real USD cost** (via `core/models/pricing`), which makes
+charges the call's **real USD cost** (via `baselith/core/models/pricing`), which makes
 `LoopLimits.budget_usd` an **enforced** cap rather than advisory. The charge
 follows the model that actually **served** the turn, which is not always the one
 the caller asked for: with `LLM_FALLBACK_CHAIN` configured, another provider's
@@ -795,20 +809,21 @@ still just reuses the ambient budget.
 ### Durable checkpointing & resume
 
 A crash mid-request otherwise loses the entire run and re-runs side effects on
-retry. `core/orchestration/checkpoint.py` adds a durable checkpoint (wired on
+retry. `baselith/core/orchestration/checkpoint.py` adds a durable checkpoint (wired on
 by default in the app — see
 [below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)): a
 JSON-serializable snapshot of run state (query, intent, budget, trajectory,
-per-step results) persisted to a pluggable `CheckpointStore`, plus a
-`CheckpointManager` that makes each tool step idempotent via deterministic
-replay (modelled on LangGraph's checkpointer / Temporal's event history).
+plugin data, the request inputs, per-step results) persisted to a pluggable
+`CheckpointStore`, plus a `CheckpointManager` that makes each tool step
+idempotent via deterministic replay (modelled on LangGraph's checkpointer /
+Temporal's event history).
 
 Wire a store into the orchestrator; `process()` then persists run state and
 supports `resume`:
 
 ```python
-from core.orchestration import InMemoryCheckpointStore, Orchestrator
-from core.orchestration.checkpoint_postgres import PostgresCheckpointStore
+from baselith.core.orchestration import InMemoryCheckpointStore, Orchestrator
+from baselith.core.orchestration.checkpoint_postgres import PostgresCheckpointStore
 
 store = PostgresCheckpointStore()      # durable across restarts
 await store.initialize()               # idempotent CREATE TABLE IF NOT EXISTS
@@ -821,6 +836,274 @@ await orch.process("analyze X", run_id="run-42")
 # counters continue from the snapshot instead of resetting.
 await orch.process("analyze X", run_id="run-42", resume=True)
 ```
+
+**What a crash keeps, and what a resume restores.** Every step save writes the
+whole run state except the two collections that grow per step, to which it
+appends — so the stored run after step *n* is exactly what a full save would
+have written, on every backend:
+
+| Restored on resume | Not restored |
+|--------------------|--------------|
+| Recorded tool results (replayed, never re-executed) | Work in flight when the process died: a step whose result was not yet saved runs again (the [tool ledger](#cross-process-tool-idempotency-idempotencypy) is what dedupes an effectful one) |
+| Budget counters — iterations, tool calls, cost, tokens, context tokens — as of the last step save (the `LoopBudget` snapshot rides on every save, not only on completion) | The wall-clock deadline (`ORCHESTRATOR_LOOP_MAX_SECONDS`): it is per attempt and restarts |
+| Classified intent, `plugin_data`, trajectory, step counter | Live objects: tool callables, the memory manager, approval channels — rebuilt by the resuming process |
+| The request inputs (`Checkpoint.inputs`, below) | Secrets and raw attachment bytes — never captured |
+
+A replayed pass re-ticks the budget for the turns it replays, on top of the
+restored counters, so a resumed run is charged conservatively (it can hit a
+cap earlier, never later). Cost and tokens are not re-charged: they are
+charged by the provider call, and a replayed model turn or tool step makes
+none.
+
+**Request inputs (`checkpoint_inputs.py`).** A fresh run records a JSON-safe,
+size-bounded subset of the caller's context in `Checkpoint.inputs`
+(`capture_run_inputs`), and every resume path — the recovery sweep,
+`POST /approvals/{run_id}/resume`, a direct `process(..., resume=True)` —
+restores it (`restore_run_inputs`), filling only the keys the resuming caller
+left unset. Before this, a resume re-entered with nothing but the tenant, so a
+run started with `strategy="react"` and a tool list came back without either
+and quietly ran Tree-of-Thoughts.
+
+- **Kept:** any JSON-serializable value up to 64 KiB (256 KiB in total) —
+  strategy and engine knobs, `history_text` / history messages, attachment
+  *references* (paths, URLs, names, MIME types), user and conversation ids.
+- **Never kept:** keys naming a credential (`token`, `secret`, `password`,
+  `api_key`, `authorization`, `cookie`, … at any nesting depth), raw
+  attachment bytes (`attachment_data`, `image_data`), the runtime objects the
+  orchestrator rebuilds on every attempt, and `tenant_id` (the checkpoint
+  carries it; the resume caller binds it). What was skipped, and why, is
+  listed under `inputs["_dropped"]`.
+- **Tools** are callables and cannot be persisted: `react_tools` and
+  `tool_registry` are stored as names and rebuilt through the resolver you
+  install with `set_resume_tool_resolver(lambda name: tools.get(name))`.
+  A tool the resolver cannot find is listed under
+  `context["resume_unresolved_tools"]`, and the reasoning handler answers
+  `resume_tools_unresolved` instead of running a different engine.
+  `tool_calls` (plain dataclasses) round-trip.
+
+#### Composite runners: child scopes and what each one records
+
+A tool step is keyed by `(tool, args, occurrence)` within the run. That is the
+right identity for one agent loop and the wrong one for a runner made of
+units: a crew whose task 2 makes the same call task 1 made would, on resume,
+match task 1's record once task 1 replays instead of re-running. Composite
+runners therefore record under a **child scope**
+(`baselith/core/orchestration/checkpoint_scope.py`):
+
+```python
+scope = manager.scope("crew", {"tasks": [...], "inputs": {...}})   # CheckpointScope
+task = scope.scope("crew_task", {"index": 2, "prompt": "<hash>"})
+await task.run_step("search", {"q": "x"}, call)   # key: crew:…:0/crew_task:…:0/search
+```
+
+A scope is a namespaced view of the run's manager: same checkpoint, lease and
+version counter, its own occurrence counter, so a unit's keys depend only on
+what it is and how many identical units preceded it under the same parent —
+never on what its siblings did. `scope.ledger_run_id` (`<run_id>/<path>`) is
+what an agent running inside the scope uses for its idempotency-ledger keys,
+for the same reason. Approvals and resume still address the run
+(`scope.run_id` is the run's id).
+
+**The ambient checkpoint.** While a flow handler runs, the orchestrator binds
+the run's manager as the ambient checkpoint (`current_checkpoint()` /
+`bind_checkpoint()`), and a runner re-binds its own scope while a unit runs.
+A crew, group chat or Tree-of-Thoughts search started anywhere inside a
+handler therefore records itself without the call site passing anything; each
+also takes an explicit `checkpoint=` that wins over the ambient one.
+`durable_step(checkpoint, name, args, fn)` is the helper for code that is
+durable only when a checkpoint exists: it runs `fn` directly otherwise.
+
+**Concurrent units.** Every store write of a manager is serialised by one
+lock, so units that run concurrently (a parallel crew, swarm sub-tasks, ToT
+evaluations) execute in parallel and only their saves queue — two concurrent
+saves of one checkpoint would otherwise race the compare-and-swap on
+`version`.
+
+What each runner records (a step is replayed on resume, never re-executed):
+
+| Runner | Recorded step | Granularity on resume |
+|--------|---------------|-----------------------|
+| `Agent.run(checkpoint=…)` | every model turn (the whole response: text, tool-call requests, thinking blocks) and every approved tool call | recorded turns replay without calling the model and recorded tool results without calling the tools; the run continues from the first unrecorded turn |
+| `Crew` (sequential / parallel) | each task's agent call (output, text) | finished tasks replay; the interrupted task re-runs, its tool calls replay |
+| `Crew` (hierarchical) | the manager's brief and review, the worker run, the revision — four separate steps | a crash after the review re-runs nothing recorded |
+| `GroupChat` | each round: chosen speaker + what they said | recorded rounds replay without calling the selector or a participant |
+| Workflow node | the node visit (all its retries) | finished nodes replay; an interrupted AGENT node's agent / crew / colony and an interrupted SUBGRAPH node's inner nodes resume from their own records (see [Workflows](workflows.md#durable-execution-checkpoint-replay)) |
+| `Colony.execute_batch` (ambient checkpoint) | per task: the auction (bids + winner) and the result `execute_fn` returned | no task is re-auctioned; finished tasks replay; an unfinished one runs on its recorded winner (see [Swarm](swarm.md#durable-colony-batches)) |
+| Streamed run (`process_stream`) | whatever its handler records, plus the delivered answer and its chunk boundaries on completion | a completed stream replays its events; an interrupted one replays its steps and regenerates the answer (see [durable streams](#durable-streams-process_stream-with-a-run-id)) |
+| Swarm handler | the LLM decomposition, each sub-task result, the synthesis | a resumed swarm gets the same sub-tasks back and runs only the unfinished ones |
+| Tree-of-Thoughts / MCTS | each generation call (with its sandbox runs) and each evaluation | the search rebuilds the same tree from the record (see [Reasoning](reasoning.md)) |
+| Plugin agents | see the [coding / browser agents](agents.md) and [reasoning agent](../plugins/reasoning-agent.md) pages | |
+
+A step records only a **successful** call: a failure raises out of the step
+unrecorded, so a resumed run retries it rather than replaying the error. A
+unit's identity hashes its prompt or state, and a prompt embeds earlier
+replayed outputs verbatim, so a resumed run lands on the same keys; where a
+unit's input changed (a fail-open manager brief that succeeds on the retry),
+its key changes and it simply runs again — correctness before savings.
+
+#### Stable run ids for chat requests and queued jobs
+
+Resume only helps an entry point that asks for the same run twice. The chat
+service used to call `process()` without a `run_id`, and every RQ attempt of
+an agent-run job started a new run, so a retry re-paid every LLM call and the
+idempotency ledger had nothing to match.
+
+- **`POST /chat`** names its run after the request's `Idempotency-Key`
+  header, through `derive_run_id("chat", key, tenant_id=…, principal=…)` —
+  scoped to the tenant and the user, so two principals reusing a key never
+  share a run or each other's answers. Only an authenticated, non-anonymous
+  principal gets a replayable run: every anonymous caller shares one
+  principal id. Without the key, or anonymously, the run id is random and a
+  retry starts over. `X-Request-ID` is not used: the client picks it, and
+  responses, logs and error reports echo it.
+- **`POST /chat/stream`** derives the id the same way and opens the run
+  through `open_stream_run` (`stream_runs.py`) — see
+  [durable streams](#durable-streams-process_stream-with-a-run-id).
+- **RQ agent-run jobs** use the job id: every attempt of a job is the same run
+  (`agent_job_run_id(job_id)`).
+
+`process_with_stable_run_id(orchestrator, query, context, run_id)`
+(`run_ids.py`) decides what an attempt does: no checkpoint yet → a fresh run
+under the id; `completed` → its recorded answer, nothing executes, passed
+through the output guard again (the checkpoint records the answer after
+the guard, but a checkpoint written by an earlier release holds it raw);
+`running` / `failed` → `resume=True`; `awaiting_approval` → the pause,
+unchanged (decisions go through `/approvals`); a checkpoint recorded for a
+**different query** → left alone, the attempt runs fresh under a new id. A
+run whose lease another live executor holds raises `CheckpointLeaseHeldError`
+— `POST /chat` answers **409**, an RQ attempt fails and is retried later.
+
+**A sweep-resumed job still reports.** When a worker dies mid-run, the API's
+recovery sweep may finish the run before (or instead of) an RQ retry. The job
+records a completion notifier in the run's inputs
+(`completion_notify: {"kind": "task_queue.agent_run", "task_id": …}`), and
+after a sweep-resumed run returns, `notify_resumed_completion`
+(`run_completion.py`) updates the TaskTracker and fires the
+`agent.completed` / `agent.failed` webhook exactly as the job would have.
+Kinds resolve through a registry (`register_completion_notifier`), never an
+import path read from the stored row. Delivery is at-least-once: a later RQ
+retry of the same job returns the recorded answer and notifies again.
+
+#### Durable streams (`process_stream` with a run id)
+
+`process_stream(query, context, run_id=None, resume=False)` used to have no
+checkpoint at all. With a store configured it now opens one like `process()`
+does — under the given `run_id` (or a generated one), owned by the attempt's
+lease with its heartbeat — exposes the manager as `context["checkpoint"]` and
+binds it as the ambient checkpoint while the stream handler runs, so every
+durable unit the handler starts (a typed agent's turns and tool calls, a crew,
+a search) records. The checkpoint write overlaps memory recall rather than
+adding a round trip before the first token, and the stream costs one more
+write when it completes.
+
+A token stream cannot be resumed **mid-generation**: the provider's
+generation is gone, and appending a regenerated answer to text already
+delivered would produce something no model wrote. So the granularity is:
+
+| Interrupted stream | On the next attempt under the same id |
+|--------------------|----------------------------------------|
+| completed (answer recorded with its chunk boundaries under `plugin_data["stream_chunks"]`) | the recorded chunks are re-emitted as the same events; nothing runs |
+| crashed, drained or abandoned mid-answer | `resume=True`: recorded steps replay (a model turn that had finished is not paid again), and the answer is generated again |
+| still owned by a live executor | `CheckpointLeaseHeldError` before any byte is sent (`/chat/stream` answers 409) |
+| paused `awaiting_approval` | the pause notice |
+
+A stream the client abandons is recorded like a cancelled `process()`
+(`failed` with `cancelled`, resumable by a retry); one cut by a drain stays
+`running` with the yielded marker and its lease released. The chain of stream
+generators is closed deterministically (`aclosing`), so the record and the
+lease release happen when the client leaves, not when the garbage collector
+finalises the generator. A crashed stream left `running` is also picked up by
+the recovery sweep once its lease expires: the sweep finishes it through
+`process()`, and a client retrying afterwards gets that answer replayed as one
+chunk (through the output guard, since it was recorded before it). How the SSE
+layer maps all this onto `Last-Event-ID` is in
+[REST › chat streaming](../api/rest.md).
+
+`open_stream_run(orchestrator, query, context, run_id)` (`stream_runs.py`) is
+the streaming twin of `process_with_stable_run_id`; it returns a `StreamRun`
+(`run_id`, `mode` — `fresh`, `resumed`, `replayed` or `paused` — and the chunk
+`source`).
+
+#### What is still not durable
+
+- **Work in flight at the crash.** A step records only once it finishes: the
+  model call or tool call that was running re-runs (the
+  [tool ledger](#cross-process-tool-idempotency-idempotencypy) dedupes an
+  effectful tool that already committed).
+- **A streamed answer mid-generation** is regenerated, never continued (above).
+- **A browser session mid-task.** The live page state dies with the process;
+  an interrupted task that already clicked or typed returns a failed
+  "interrupted" result instead of acting twice (see
+  [Agents › BrowserAgent](agents.md#durability-in-a-checkpointed-run)).
+- **MCP task work.** With `MCP_TASK_STORE_BACKEND=postgres` the task handle
+  and its outcome survive a restart, but the work itself is not resumed: a task
+  interrupted by a restart is failed as orphaned (see [MCP](mcp.md)).
+
+#### Concurrency: compare-and-swap writes and per-run leases
+
+**Writes are compare-and-swap on `version`, fenced on the lease owner.**
+`save` and `save_step` succeed only while the stored version still equals the
+writer's copy **and** the run is unowned or owned by the writer, then bump the
+version; anything else gets `CheckpointConflictError` and nothing is written.
+The owner fence matters for a replica that lost its lease and reloads the run:
+its version is current again, but it still cannot write over the new owner's
+state or take the run back by writing its own name. Taking a run over goes
+through `claim`, which checks the lease and bumps the version. The store
+fences on the owner the document names, so `CheckpointManager` stamps its own
+lease identity on the checkpoint before every write: a reloaded copy carries
+the new owner's name, and without the stamp it would pass the fence. Code that
+writes through a store directly (outside a manager) must set `owner` itself. The
+orchestrator turns a conflict into an error result
+(`{"error": true, "checkpoint_conflict": true}`) and **stops** — it does not
+call `fail()`, which would clobber the newer state. A fresh run whose `run_id`
+already exists raises the same error instead of overwriting the old run, and
+the stale-run sweep skips a run that moved after it read it. All three
+backends implement it (Postgres `... WHERE version = %s`, SQLite the same on
+its `version` column, memory in-process).
+
+**A lease decides who executes a run** (`checkpoint_lease.py`). Ownership used
+to be guessed from silence, so one LLM or tool call longer than
+`ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` let a second worker resume a run
+that was still executing. Now each attempt has a unique `owner` id and holds
+`owner` + `lease_expires_at` on the checkpoint:
+
+| Step | What happens |
+|------|--------------|
+| Start | A fresh run is created already owned by this attempt |
+| Resume | `claim(run_id, owner, ttl)` — one conditional update that succeeds only when the run is unowned, its lease has expired, or the caller owns it. A run another live executor holds raises `CheckpointLeaseHeldError` before anything executes. Taking over from another owner bumps `version`, so the previous owner's next write loses its compare-and-swap |
+| Run | Every `run_step` save carries a fresh expiry, a heartbeat task renews it every third of `ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS` (default 60 s), and before executing a tool the manager proves it still owns the run — a worker that lost its lease stops before the next side effect, not after it |
+| End | `process()` stops the heartbeat and releases the lease (owner-conditional), whatever the outcome |
+
+Renewal never touches `updated_at`, so the [stale-run
+sweep](#stale-run-sweep-sweep_stale_runs) still sees a wedged loop as silent.
+
+**Whose clock decides expiry** depends on the backend:
+
+- **Postgres — the database clock.** Every lease statement anchors time on the
+  server's `now()`: a claim, a renewal and a step save send the lease *length*
+  (or the seconds still left on it), never a timestamp from the replica, and
+  a claim tests "has it expired" against the server clock too. Reads return
+  the seconds left and the store turns them into a local-clock
+  `lease_expires_at`, so the manager's own checks (`ensure_lease`, the
+  recovery sweep's liveness test) stay consistent on a skewed replica. A
+  replica whose clock is minutes off can therefore neither take over a live
+  run (its clock would call the lease expired) nor write a lease that is
+  already expired for everyone else. No skew margin is needed or offered: the
+  only cross-host comparison happens on one clock. The `now=` argument of
+  `claim` / `renew_lease` survives for tests, applied as a shift of the
+  server clock.
+- **SQLite and in-memory — the process clock.** Both compare against
+  `time.time()` of the process that runs the statement. That is safe because
+  they are single-host by construction: the in-memory store lives in one
+  process, and an SQLite file is shared at most by processes on the host that
+  holds it, which all read the same clock. Do not share an SQLite checkpoint
+  file across hosts (a network filesystem) — use Postgres for multi-replica
+  deployments.
+
+A store without the three optional lease methods (`claim` / `renew_lease` / `release_lease`) keeps
+working without leases. On Postgres the lease lives in the `owner` /
+`lease_expires_at` columns that [migration 013](db.md) adds; an SQLite file
+created by an older release gains its columns on open.
 
 !!! info "Who creates the table"
     `initialize()` skips its DDL when `DB_RUNTIME_DDL` is off — the
@@ -846,12 +1129,15 @@ async def handle(self, query, context):
 
 | Component | Role |
 |-----------|------|
-| `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
-| `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
+| `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`); `inputs`, `owner`, `lease_expires_at` carry the request inputs and the lease |
+| `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable`; `save` is compare-and-swap on `version`. Optional: `save_step`, and the lease trio `claim` / `renew_lease` / `release_lease` |
+| `CheckpointConflictError` / `CheckpointLeaseHeldError` | A stale write was refused / a run is owned by another live executor (`checkpoint_errors`) |
 | `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out; optional `max_entries` retained-run bound (`None` = unbounded, the constructor default) |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
 | `SQLiteCheckpointStore` | Durable single-file backend (`checkpoint_sqlite`) — stdlib `sqlite3`, WAL journal, blocking statements hopped off the event loop via `run_in_executor` |
-| `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
+| `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail`; writes the `LoopBudget` snapshot with every save and holds the attempt's lease (heartbeat, fencing) |
+| `init_checkpoint` | Creates or claims-and-resumes the run, restores budget and inputs (`checkpoint_init`) |
+| `set_resume_tool_resolver` | Installs the `name -> tool` lookup resumed runs use to rebuild `react_tools` / `tool_registry` (`checkpoint_inputs`) |
 
 `ReActAgent` applies `run_step` automatically: with a checkpoint attached
 (orchestrated runs pass it via `context["checkpoint"]`), every tool invocation
@@ -865,7 +1151,7 @@ through `run_step` (see [Durable resume of the typed `Agent`](#durable-resume-of
 **Step keys are content-addressed, not positional.** A step is keyed
 `v2:<tool>:<args-hash>:<occurrence>`, where *occurrence* counts how many
 identical `(tool, args)` steps the current pass already requested
-(`core/orchestration/call_keys.py`). An LLM-driven loop does not replay
+(`baselith/core/orchestration/call_keys.py`). An LLM-driven loop does not replay
 deterministically — a resumed run regenerates its turns, and the model may ask
 for the same effects in another order or with an extra read in between. The
 old `(replay-cursor, tool, args-hash)` key re-executed every recorded step the
@@ -919,7 +1205,7 @@ deployment run lately*, completed and failed runs included. That is
 `list_runs`:
 
 ```python
-from core.orchestration import list_runs
+from baselith.core.orchestration import list_runs
 
 rows = await list_runs(store, tenant_id="acme", status=None, limit=50)
 # [{"run_id": ..., "query": ..., "status": "completed", "step": 4,
@@ -946,11 +1232,11 @@ redelivers, an operator replays a dead-lettered job, a second replica picks up
 the work. For a read that costs a wasted round trip. For a payment, an outbound
 webhook or an email-sending skill it is a defect the end user sees.
 
-`core/orchestration/idempotency.py` records the intent before the call and the
+`baselith/core/orchestration/idempotency.py` records the intent before the call and the
 outcome after it, keyed by a value derived from the call itself:
 
 ```python
-from core.orchestration.idempotency import CallOccurrences, derive_call_key
+from baselith.core.orchestration.idempotency import CallOccurrences, derive_call_key
 
 occurrences = CallOccurrences()                     # one per pass of the run
 n = occurrences.next(tool, args)                    # 0, then 1 for a repeat
@@ -1008,7 +1294,7 @@ pre-upgrade effect once — the positional key is the thing that cannot match
 it. The extra lookup costs one round trip per first-time effectful call and
 only matters until the ledger's retention window has passed.
 
-The table is created by `core/db/migrations/versions/009_tool_invocations.py`, is
+The table is created by `baselith/core/db/migrations/versions/009_tool_invocations.py`, is
 tenant-scoped with a row-level-security policy defined in the same migration,
 and is bounded by `purge_completed_before(max_age_seconds)` — a redelivery
 window, not an audit log. The sweep bounds `created_at` as well as
@@ -1041,17 +1327,34 @@ The ledger needs a durable backend to dedupe across a restart. A run that
 already has a checkpoint can resume through it instead — or as well:
 
 ```python
-from core.orchestration.checkpoint import init_checkpoint
+from baselith.core.orchestration.checkpoint import init_checkpoint
 
 manager = await init_checkpoint(store, prompt, {"tenant_id": "acme"}, None,
                                 budget, run_id="order-7", resume=True)
 result = await agent.run(prompt, checkpoint=manager)
 ```
 
+Each **model turn** is a step too (`baselith/core/agent/_durable_turns.py`),
+named `llm_turn` and keyed by the turn's index plus digests of the conversation
+sent for it and of the agent's definition (model, system prompt, tool names,
+output schema). The record is the whole response as JSON — text, tool-call
+requests with their provider ids, stop reason, usage and the assistant message
+with its thinking blocks — so a replayed turn appends exactly the message the
+original pass appended and the next turn's key matches again. A resumed
+`Agent.run` therefore walks its recorded turns **without calling the model**,
+replays their tool calls, and calls the model for the first time at the first
+turn that was never recorded (the one in flight at the crash); everything after
+it is new. An agent redefined between the crash and the resume misses the
+records and runs afresh. A replayed turn charges no cost or tokens (the
+provider is not called) but still ticks the iteration counter, as a replayed
+tool call still counts against `max_tool_calls`; with `run_events`, a replayed
+turn's text arrives as one `TextDelta`.
+
 Each approved call is recorded through `CheckpointManager.run_step` as
 `{"observation", "is_error"}`, and the ledger claim runs inside the step under
-the same occurrence. A resumed `Agent.run` regenerates its turns and replays
-every recorded call it asks for again, in any order. `run_id` defaults to the
+the same occurrence. A turn regenerated because it was never recorded may ask
+for the recorded calls again in another order: they replay wherever they
+appear. `run_id` defaults to the
 checkpoint's, and the ledger key uses the tenant recorded on the checkpoint
 rather than the ambient one, because a recovery sweep may resume with none
 bound. With a checkpoint, a multi-tool turn runs its calls one after another,
@@ -1069,10 +1372,10 @@ inside one worker — and stops helping with a second replica or after a
 restart, which is precisely when a redelivered task re-runs a payment or an
 outbound webhook. The gap only opens where it is hardest to notice.
 
-`core/orchestration/ledger_factory.py` makes the choice explicit:
+`baselith/core/orchestration/ledger_factory.py` makes the choice explicit:
 
 ```python
-from core.orchestration.ledger_factory import get_tool_ledger, reset_tool_ledger
+from baselith.core.orchestration.ledger_factory import get_tool_ledger, reset_tool_ledger
 
 ledger = get_tool_ledger()   # None when the ledger is switched off
 ```
@@ -1132,7 +1435,7 @@ channel exists:
 2. **Decide** — an operator (or approval UI) records the reviewer's verdict:
 
     ```python
-    from core.orchestration import ApprovalPrincipal, record_approval_decision
+    from baselith.core.orchestration import ApprovalPrincipal, record_approval_decision
 
     # HTTP surface: build the principal from the AUTHENTICATED identity
     await record_approval_decision(
@@ -1186,16 +1489,20 @@ calls and graph gates.
 active end-to-end in a stock deployment — durable runs, durable HITL pause,
 and the `/approvals` API. Set it to `false` to run without checkpointing:
 
-- `core/orchestration/checkpoint_factory.py` resolves a process-wide store —
+- `baselith/core/orchestration/checkpoint_factory.py` resolves a process-wide store —
   `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `sqlite`, `memory`, or
   `auto` (the default: postgres when Postgres storage is enabled, else
-  memory). The app lifespan runs the store's idempotent schema init at
-  startup. When the boot reachability probe
-  ([`core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
+  memory). When `auto` lands on memory the factory logs a
+  `checkpoint_backend_not_durable` **warning** at boot: runs, paused approvals
+  and their recorded steps will not survive a restart, and crash recovery is
+  off. Set the backend to `sqlite` (or enable Postgres) for durable runs, or to
+  `memory` to accept it explicitly. The app lifespan runs the store's
+  idempotent schema init at startup. When the boot reachability probe
+  ([`baselith.core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
   already saw PostgreSQL down, `initialize_default_checkpoint_store()` raises
   `CheckpointStoreUnavailableError` at once instead of waiting out
   `DB_POOL_TIMEOUT`; boot continues degraded and a background task
-  (`core.api._recovery_startup`) re-probes with backoff (2 s doubling to 30 s),
+  (`baselith.core.api._recovery_startup`) re-probes with backoff (2 s doubling to 30 s),
   initializes the store once the database answers, then starts the recovery
   sweep. `is_default_checkpoint_store_initialized()` reports which state the
   process is in.
@@ -1224,21 +1531,53 @@ and the `/approvals` API. Set it to `false` to run without checkpointing:
     - `POST /approvals/{run_id}/decision` — record
       `{"approved": true|false, "approver": ..., "reason": ...}`.
     - `POST /approvals/{run_id}/resume` — re-enter the loop; the gate
-      consumes the recorded decision and the run continues or aborts.
+      consumes the recorded decision and the run continues or aborts. The
+      run's request inputs are restored like on any resume; **409** when
+      another executor holds the run's lease.
 
 #### Crash recovery (`ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`)
 
-With checkpointing on, `core/orchestration/recovery.py` closes the always-on
+With checkpointing on, `baselith/core/orchestration/recovery.py` closes the always-on
 loop: `resume_interrupted_runs` consumes `list_resumable()` and re-enters
 runs left in the `running` state by a crash/restart (completed tool steps
 replay from the store, so recovery is idempotent). Runs paused
 `awaiting_approval` are never auto-resumed — they wait for the `/approvals`
-API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
-as a background task at app startup (default off).
+API.
 
-**Orphans are failed even with resume off.** Auto resume stays opt-in because
-re-entering a run repeats LLM calls and side effects. With it off, the startup
-wiring runs `stale_sweep_loop` (`core/api/_recovery_startup.py`) instead: every
+**On by default for a durable store.** `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`
+unset (the default) starts the recovery loop when the resolved backend is
+`postgres` or `sqlite`, and not for `memory` (there is nothing to resume after
+a restart). `true` / `false` force it either way; `false` is the off switch.
+The loop sweeps every `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS`.
+
+**Which runs it resumes.** A `running` run whose [lease](#concurrency-compare-and-swap-writes-and-per-run-leases)
+is still live is skipped, however long it has been silent — its worker is in
+a long call, not dead. A run whose lease has expired is resumed at the next
+sweep, so a crashed worker's run is picked up roughly one lease length plus
+one sweep interval after the crash. The resume claims the lease atomically
+before anything executes; when two sweeps race, the loser gets
+`CheckpointLeaseHeldError` and reports the run as skipped. Only a run that
+carries no lease at all (written before the upgrade, or by a store without
+lease support) falls back to the old silence guard,
+`ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`.
+
+**A graceful shutdown hands runs back.** A rolling deploy sends SIGTERM, the
+server waits out its graceful-shutdown timeout and then cancels whatever is
+still running. That cancellation used to fail every in-flight run with
+`cancelled` — for good. Now, when the cancellation arrives while the process
+is **draining** (`baselith.core.lifecycle.drain.is_draining()`, set by the
+first stop signal), the run is saved `running` with a
+`plugin_data["yielded_for_shutdown"]` marker, its budget snapshot written and
+its lease released. The next sweep on any replica resumes it immediately — the
+marker exempts it from the silence guard — and the resume clears the marker;
+recorded steps replay, so only the step that was in flight runs again. A
+cancellation outside a drain (a client disconnect, an explicit cancel, a
+request timeout) still fails the run with `cancelled`. The run-event stream
+reports `interrupted_by_shutdown` instead of `cancelled` for a yielded run.
+
+**Orphans are failed even with resume off.** With auto resume off (explicitly,
+or on the memory backend), the startup
+wiring runs `stale_sweep_loop` (`baselith/core/api/_recovery_startup.py`) instead: every
 `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` it calls `sweep_stale_runs` and
 marks a `running` checkpoint whose last progress is older than
 `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` (default 1800 s) as `failed`, with
@@ -1248,15 +1587,17 @@ Before this, a run interrupted by a crash stayed `running` forever. Set
 `ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED=false` to restore that.
 
 **One sweep per fleet, not per worker.** With `WEB_CONCURRENCY > 1` (or
-multiple replicas) every worker runs the startup sweep, and an unguarded sweep
-re-entered the same interrupted runs once per worker — duplicate agent
-executions and duplicate LLM spend. `resume_interrupted_runs` therefore takes
+multiple replicas) every worker runs the sweep. The per-run claim is what
+guarantees a run executes once; the sweep-wide lock below only saves replicas
+from scanning the same page in parallel, which is why its failing open is
+harmless. `resume_interrupted_runs` takes
 a keyword-only `lock` (anything `DistributedLock`-compatible:
 `acquire(blocking=False)` / `release()`): a worker that loses the non-blocking
 race skips the sweep entirely and returns an empty report, while an
 acquisition *error* fails **open** — the sweep still runs, because recovery
-matters more than exclusion and the worst case is the old duplicate sweep. The
-startup wiring in `core/api/_recovery_startup.py` (extracted from the app
+matters more than exclusion, and with leases the worst case is two replicas
+scanning the same page: each run is still claimed by exactly one of them. The
+startup wiring in `baselith/core/api/_recovery_startup.py` (extracted from the app
 lifespan) passes the Redis-backed `DistributedLock` named
 `checkpoint_recovery_sweep` (TTL 60 s, `auto_renew=True` — resumed runs
 re-enter full agent loops, so a sweep can legitimately hold the lock for
@@ -1276,22 +1617,26 @@ stores written against the older signature keep working.
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
 `CheckpointManager.run_step` uses it when present and falls back to the full
-`save()` otherwise. Both shipped stores implement it.
-`PostgresCheckpointStore` uses `jsonb_set`, patching only the new step (plus
-the scalar bookkeeping fields) into the JSONB row — cumulative bytes written
-over an n-step run drop from O(n²) to O(n), and a `load()` after incremental
-writes is identical to one after full saves (see
+`save()` otherwise. All three shipped stores implement it, and all three
+persist the **same state** on a step save:
+`PostgresCheckpointStore` appends the new step and trajectory element with
+`jsonb_set` and merges every other top-level field (budget, `plugin_data`,
+inputs, status, lease, …) with `||`, so the accumulated steps never cross the
+wire again — cumulative bytes over an n-step run stay O(n) in steps, and a
+`load()` after incremental writes is identical to one after full saves (see
 [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
-`InMemoryCheckpointStore` does the same in-process: only the new step entry
-and trajectory line are copied into the stored state (version/`updated_at`
-bookkeeping in lock-step with `save`), so cumulative copy work drops from
-O(n²) to O(n) over a run; history snapshots are still appended when enabled,
-and a run not yet in the store falls back to a full `save`.
+`InMemoryCheckpointStore` does the same in-process. `SQLiteCheckpointStore`
+rewrites the whole document (a single-file backend has no partial-update fast
+path worth the complexity). Earlier releases patched only the step
+bookkeeping on Postgres and memory and dropped `plugin_data` and the budget
+until the run finished; `test_checkpoint_store_contract.py` now drives the
+three backends through the same steps and a simulated crash and requires the
+identical recovered run.
 
 #### Stale-run sweep (`sweep_stale_runs`)
 
 Resume handles runs a crash left behind; `sweep_stale_runs` (also in
-`core/orchestration/recovery.py`) handles the other failure mode — a process
+`baselith/core/orchestration/recovery.py`) handles the other failure mode — a process
 that is still *alive* but wedged. A liveness probe answers HTTP while an agent
 loop hangs on a dead connection; the checkpoint knows better. A run's last
 progress is the **newer** of its `updated_at` (bumped on every step save) and
@@ -1304,7 +1649,7 @@ instead of an eternally "running" ghost. Runs `awaiting_approval` are **never**
 swept — they are waiting on a human, not stuck.
 
 ```python
-from core.orchestration.recovery import sweep_stale_runs
+from baselith.core.orchestration.recovery import sweep_stale_runs
 
 report = await sweep_stale_runs(
     store,                      # the shared CheckpointStore
@@ -1326,11 +1671,11 @@ the past is overwritten on every save. With
 `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=true` (requires
 `ORCHESTRATOR_CHECKPOINT_ENABLED`), both stores additionally append an
 **immutable snapshot at every version**, and
-`core/orchestration/checkpoint_history.py` turns them into LangGraph-style
+`baselith/core/orchestration/checkpoint_history.py` turns them into LangGraph-style
 time-travel primitives:
 
 ```python
-from core.orchestration import fork_run, get_state, get_state_history
+from baselith.core.orchestration import fork_run, get_state, get_state_history
 
 history = await get_state_history(store, "run-42")
 # [{"version": 1, "status": "running", "step": 0, "updated_at": ...}, ...]
@@ -1370,17 +1715,21 @@ The `api_routers` plugin mounts the operator-facing **`/runs` API** alongside
 ### Structured run-event streaming (astream-events equivalent)
 
 Token streaming tells a client what the agent is *saying*; the structured
-event stream tells it what the agent is *doing*. `core/orchestration/run_events.py`
-fans out `AgentEvent`s (`core/api/events.py`) per `run_id`: `run_started`,
+event stream tells it what the agent is *doing*. `baselith/core/orchestration/run_events.py`
+fans out `AgentEvent`s (`baselith/core/api/events.py`) per `run_id`: `run_started`,
 `tool_call` / `tool_result` (emitted by `CheckpointManager.run_step`,
 including replays flagged `replayed: true`), `final`, `error`, and `human`
-(durable approval pause). Publishing with zero subscribers is a no-op, so the
+(durable approval pause). `final` carries the answer after the output guard
+(PII redaction, harmful-content filter, opt-in moderation): `process()` guards
+a handler's answer once, before it writes it to memory, records it in the
+checkpoint and publishes it, so memory, subscribers, the checkpoint history
+and replays all hold the text the caller received. Publishing with zero subscribers is a no-op, so the
 loop pays nothing when nobody listens.
 
 Library-level consumption — run a query and iterate its events:
 
 ```python
-from core.orchestration import stream_run_events
+from baselith.core.orchestration import stream_run_events
 
 async for event in stream_run_events(orchestrator, "analyze X"):
     print(event.type, event.data)        # run_started → tool_call → ... → final
@@ -1415,17 +1764,17 @@ default 2+-replica HPA: `GET /runs/{run_id}/events` only saw events when the
 SSE connection happened to land on the replica executing the run. Setting
 `BASELITH_RUN_EVENTS_BRIDGE=redis` (documented in `.env.example`; read by the
 app lifespan at startup) starts `RedisRunEventsBridge`
-(`core/orchestration/run_events_bridge.py`), which closes the gap:
+(`baselith/core/orchestration/run_events_bridge.py`), which closes the gap:
 
 - **Publish** — the bridge installs itself as the stream's broadcaster
-  (`set_run_event_broadcaster` in `core.orchestration.run_events`); every
+  (`set_run_event_broadcaster` in `baselith.core.orchestration.run_events`); every
   `publish_run_event` is serialized and published to the Redis channel
   `events:run:<run_id>` as a fire-and-forget task off the running loop.
 - **Listen** — one pattern subscription per process re-injects every received
   event into the local stream, **including on the publishing replica**: one
   Redis round trip of latency buys symmetry with no dedup machinery, and any
   replica can serve any run's SSE feed. It reads via
-  `core.realtime.subscriptions.iter_messages`, not the raw
+  `baselith.core.realtime.subscriptions.iter_messages`, not the raw
   `pubsub.listen()`, so an idle gap can't trip the shared pool's
   `socket_timeout` and force a reconnect; each reconnect attempt also closes
   its old subscription (`close_pubsub`) so it returns its connection to the
@@ -1442,7 +1791,7 @@ single replica, and zero Redis traffic.
 
 ### `AgentContract` — declarative spec
 
-`core/orchestration/contract.py` loads a YAML file describing the
+`baselith/core/orchestration/contract.py` loads a YAML file describing the
 agent's identity, allowed/forbidden tools, output contract, and quality
 gates. When a contract is wired into the orchestrator, the runtime
 `ContractValidator` is exposed at `context["contract_validator"]`.
@@ -1465,8 +1814,8 @@ quality_gates:
 ```
 
 ```python
-from core.orchestration import Orchestrator
-from core.orchestration.contract import load_contract
+from baselith.core.orchestration import Orchestrator
+from baselith.core.orchestration.contract import load_contract
 
 contract = load_contract("agent.yaml")
 orchestrator = Orchestrator(agent_contract=contract)
@@ -1485,7 +1834,7 @@ validator construction.
 
 ### `AutonomyPolicy` — three-tier spectrum
 
-`core/orchestration/autonomy.py` provides a coarse-grained policy that
+`baselith/core/orchestration/autonomy.py` provides a coarse-grained policy that
 governs which tool categories require human approval.
 
 | Level | Read-only | Mutating | Destructive | External side-effect | Self-modify |
@@ -1508,7 +1857,7 @@ rate, red-team pass rate, and successful-run count all clear their
 thresholds (default 0.90 → 0.98).
 
 ```python
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     AutonomyLevel, AutonomyPolicy, AutonomyUpgradeGate,
 )
 
@@ -1527,13 +1876,13 @@ allowed, reasons = gate.can_upgrade_to(AutonomyLevel.FULLY_AUTONOMOUS)
 
 The matrix above is enforced (not just declared) via
 `enforce_approval(policy, category, tool_name, human_intervention=None)`,
-exported from `core.orchestration`. Semantics are **fail-closed**: when the
+exported from `baselith.core.orchestration`. Semantics are **fail-closed**: when the
 category requires approval at the active level, a missing approval channel or
 a human denial raises `ApprovalRequiredError` (a `PermissionError` subclass)
 instead of letting the tool run.
 
 ```python
-from core.orchestration import ApprovalRequiredError, enforce_approval
+from baselith.core.orchestration import ApprovalRequiredError, enforce_approval
 
 try:
     await enforce_approval(
@@ -1596,7 +1945,7 @@ with asymmetric semantics — by design:
   broken audit/lint hook can never break the agent loop.
 
 ```python
-from core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
+from baselith.core.orchestration.hooks import ToolHookEvent, get_tool_hook_registry
 
 async def forbid_demo_writes(event: ToolHookEvent) -> None:
     if event.tenant_id == "prod-demo":
@@ -1613,12 +1962,6 @@ registry placed on the orchestration context under `context["tool_hooks"]`
 overrides the process-wide default per request; with no registry the
 dispatch is a no-op, matching every other primitive the chokepoint consults.
 `reset_tool_hook_registry()` drops the default (tests / reconfiguration).
-
-The first production consumer of the `post` phase is Baselithbot's
-computer-use `fs_write`: it dispatches a post event carrying the
-compile-verification outcome of each written `.py` file, observed by a
-`*fs_write` logging hook — see
-[Baselithbot › Post-write verification](../plugins/baselithbot.md#post-write-verification-computer-use).
 
 ### Tool burst rate limit (`rate_limit.py`)
 
@@ -1670,7 +2013,7 @@ indirect prompt injection exploits. `wrap_untrusted` gives the content an
 explicit provenance boundary:
 
 ```python
-from core.orchestration.tool_output import (
+from baselith.core.orchestration.tool_output import (
     UNTRUSTED_OUTPUT_SYSTEM_RULE,
     sanitize_tool_output,
     truncate_tool_output,
@@ -1732,7 +2075,7 @@ Wiring the envelope without the rule is decoration.
 
 ### `TaskClassifier` — short-circuit deterministic tasks
 
-`core/orchestration/task_classifier.py` is a lightweight heuristic that
+`baselith/core/orchestration/task_classifier.py` is a lightweight heuristic that
 returns one of `AGENTIC` / `DETERMINISTIC` / `AMBIGUOUS` for a task
 description. It is conservative: when in doubt the recommendation is
 `AGENTIC`. Use it at the front of the orchestrator to skip the loop on
@@ -1743,7 +2086,7 @@ clearly deterministic requests.
     exists only where your handler or entry point invokes it.
 
 ```python
-from core.orchestration.task_classifier import (
+from baselith.core.orchestration.task_classifier import (
     RoutingRecommendation, TaskClassifier,
 )
 

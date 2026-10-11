@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.usage import Usage
 
 
 class TestUsageBasics:

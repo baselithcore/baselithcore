@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.middleware.optimization import SmartGzipMiddleware
+from baselith.core.middleware.optimization import SmartGzipMiddleware
 
 
 async def _sse_app(scope, receive, send) -> None:

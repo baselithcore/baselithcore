@@ -15,17 +15,17 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.config import get_core_config
-from core.lifecycle.deterministic import (
+from baselith.core.config import get_core_config
+from baselith.core.lifecycle.deterministic import (
     apply_deterministic_mode,
     get_llm_override_kwargs,
 )
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.service import LLMService
-from core.services.llm.stream_events import generate_stream_events
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.stream_events import generate_stream_events
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
 
 MODEL = "gpt-4o-mini"
 PIN = {"temperature": 0.0, "seed": 7, "top_p": 1.0}
@@ -48,12 +48,12 @@ def _no_tenant_gate(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "core.quotas.cost_enforcement.enforce_tenant_cost_budget", _allow
+        "baselith.core.quotas.cost_enforcement.enforce_tenant_cost_budget", _allow
     )
 
 
 def _service(*, native: bool = False, messages: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -83,7 +83,8 @@ async def test_message_path_is_pinned(deterministic):
         return_value=(LLMResult(text="hi", tokens_used=1), "openai", MODEL)
     )
     with patch(
-        "core.services.llm.fallback_runtime.maybe_run_messages_with_fallback", runner
+        "baselith.core.services.llm.fallback_runtime.maybe_run_messages_with_fallback",
+        runner,
     ):
         await generate_messages(service, [Message.user("q")], model=MODEL)
 
@@ -96,7 +97,7 @@ async def test_native_structured_path_is_pinned(deterministic):
         return_value=(LLMResult(text="hi", tokens_used=1), "openai", MODEL)
     )
     with patch(
-        "core.services.llm.fallback_runtime.maybe_run_structured_with_fallback",
+        "baselith.core.services.llm.fallback_runtime.maybe_run_structured_with_fallback",
         runner,
     ):
         await generate_structured(service, "q", model=MODEL)
@@ -115,7 +116,7 @@ async def test_text_stream_is_pinned(deterministic):
         seen.update(stream_kwargs)
         return _chunks(), None, "openai", model
 
-    with patch("core.services.llm._streaming.open_stream", _open):
+    with patch("baselith.core.services.llm._streaming.open_stream", _open):
         _ = [c async for c in service.generate_response_stream("q")]
 
     _assert_pinned(seen)
@@ -144,7 +145,8 @@ async def test_nothing_pinned_when_mode_off():
         return_value=(LLMResult(text="hi", tokens_used=1), "openai", MODEL)
     )
     with patch(
-        "core.services.llm.fallback_runtime.maybe_run_messages_with_fallback", runner
+        "baselith.core.services.llm.fallback_runtime.maybe_run_messages_with_fallback",
+        runner,
     ):
         await generate_messages(service, [Message.user("q")], model=MODEL)
 

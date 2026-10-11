@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from core.lifecycle import drain
+from baselith.core.lifecycle import drain
 
 
 @pytest.fixture(autouse=True)

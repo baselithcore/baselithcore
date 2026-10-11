@@ -14,7 +14,7 @@ The `HierarchicalMemory` module enables agents to manage context efficiently ove
     The automatic consolidation described below happens inside an instance you
     create — directly, or with
     `await get_lazy_registry().get_or_create("hierarchical_memory")`
-    (`core.di.lazy_registry`).
+    (`baselith.core.di.lazy_registry`).
 
 **Key Features**:
 
@@ -45,7 +45,7 @@ graph TD
     Search -- "provider.search() or keyword fallback" --> LTM
 ```
 
-All similarity computations use the shared `core.utils.similarity.cosine_similarity` (numpy-based).
+All similarity computations use the shared `baselith.core.utils.similarity.cosine_similarity` (numpy-based).
 
 ## Usage
 
@@ -54,7 +54,7 @@ All similarity computations use the shared `core.utils.similarity.cosine_similar
 The easiest way to partialy initialize the memory is via the lazy factory:
 
 ```python
-from core.bootstrap.lazy_init import initialize_hierarchical_memory
+from baselith.core.bootstrap.lazy_init import initialize_hierarchical_memory
 
 memory = await initialize_hierarchical_memory()
 ```
@@ -62,7 +62,7 @@ memory = await initialize_hierarchical_memory()
 ### Adding Memories
 
 ```python
-from core.memory.hierarchy import MemoryTier
+from baselith.core.memory.hierarchy import MemoryTier
 
 # Add to Short-Term Memory (default)
 await memory.add("User asked for better performance", tier=MemoryTier.STM)
@@ -124,7 +124,7 @@ context_str = memory.get_context(max_tokens=2000, query="kubernetes rollout")
 ```
 
 The orchestrator does this for you: `inject_memory_context`
-(`core/orchestration/mixins/_context_assembly.py`) inspects the manager's
+(`baselith/core/orchestration/mixins/_context_assembly.py`) inspects the manager's
 `get_context` signature and passes the current request as `query=` whenever the
 keyword is accepted, so a query-aware manager is gated by relevance while a
 manager whose signature predates the keyword is called exactly as before. The
@@ -137,7 +137,7 @@ size of the assembled block is then recorded on the request's `LoopBudget` as
 Configure the hierarchy via `HierarchyConfig`:
 
 ```python
-from core.memory.hierarchy import HierarchyConfig, TierConfig
+from baselith.core.memory.hierarchy import HierarchyConfig, TierConfig
 
 config = HierarchyConfig(
     stm=TierConfig(max_items=10),
@@ -177,7 +177,7 @@ count = await memory.consolidate_stm(items_to_migrate=5)
 ### Lifecycle Policies (promotion, dedup, TTL)
 
 Consolidation applies the declarative `TierConfig` knobs
-(`core/memory/lifecycle.py`):
+(`baselith/core/memory/lifecycle.py`):
 
 - **Importance-weighted promotion** — the oldest items always leave STM (the
   working-set window keeps rolling), but only those whose `importance`
@@ -187,7 +187,7 @@ Consolidation applies the declarative `TierConfig` knobs
 - **Write-side dedup** — an item whose *canonical* content already exists in
   MTM (the same key hybrid recall uses for read-side dedup) is dropped at
   promotion time instead of accumulating. The key is
-  `core.utils.text_canon.canonical_key`: NFKC-normalized, accent-stripped,
+  `baselith.core.utils.text_canon.canonical_key`: NFKC-normalized, accent-stripped,
   casefolded, punctuation- and whitespace-insensitive — `"Café aperto!"` and
   `"cafe  aperto"` are one memory.
 - **TTL enforcement** — `ttl_seconds` per tier is enforced: expired items are
@@ -242,6 +242,6 @@ Each tier uses a different search strategy:
 
 When an embedder is available, `add()` automatically caches the embedding alongside the memory item in STM and MTM. This avoids re-computing embeddings at recall time and enables sub-millisecond semantic search on in-memory tiers.
 
-The BM25 tokenizer canonicalizes before splitting (`core.utils.text_canon.canonicalize`, then a Unicode-aware `\w+` split): accented words index whole (`"perché"` → `perche`, not `perch`), an unaccented query still matches an accented memory, and CJK text is indexed instead of being dropped as non-ASCII.
+The BM25 tokenizer canonicalizes before splitting (`baselith.core.utils.text_canon.canonicalize`, then a Unicode-aware `\w+` split): accented words index whole (`"perché"` → `perche`, not `perch`), an unaccented query still matches an accented memory, and CJK text is indexed instead of being dropped as non-ASCII.
 
-The BM25 keyword pass of hybrid recall is memoized: per-document token statistics are cached (keyed by content, so mutations can never serve stale stats) and the whole index is reused when the corpus is unchanged between recalls — scoring stays bit-identical to a fresh build. Memory consolidation embeds items in a single batched `encode()` call rather than one model call per item. Past a 64-item corpus the fusion pass (tokenization + BM25 scoring + RRF — pure CPU) is offloaded to the dedicated inference executor instead of running inline on the event loop; and every embedder call goes through `core.memory.embedding_compat.encode_flexible`, so a sync embedder runs in a worker thread instead of blocking the loop (or silently degrading recall to keyword search).
+The BM25 keyword pass of hybrid recall is memoized: per-document token statistics are cached (keyed by content, so mutations can never serve stale stats) and the whole index is reused when the corpus is unchanged between recalls — scoring stays bit-identical to a fresh build. Memory consolidation embeds items in a single batched `encode()` call rather than one model call per item. Past a 64-item corpus the fusion pass (tokenization + BM25 scoring + RRF — pure CPU) is offloaded to the dedicated inference executor instead of running inline on the event loop; and every embedder call goes through `baselith.core.memory.embedding_compat.encode_flexible`, so a sync embedder runs in a worker thread instead of blocking the loop (or silently degrading recall to keyword search).

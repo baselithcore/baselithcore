@@ -1,7 +1,7 @@
 """In-process memory tiers must not pool tenants together.
 
 ``AgentMemory`` and ``HierarchicalMemory`` are routinely process-wide
-singletons (``core.memory.get_memory``), yet their tiers were plain instance
+singletons (``baselith.core.memory.get_memory``), yet their tiers were plain instance
 lists: whatever one tenant's turn appended, the next tenant's context builder
 read straight back out. The tiers are now keyed by the bound tenant.
 """
@@ -11,14 +11,14 @@ from contextlib import contextmanager
 
 import pytest
 
-from core import context as core_context
-from core.context import (
+from baselith.core import context as core_context
+from baselith.core.context import (
     TenantContextError,
     reset_tenant_context,
     set_tenant_context,
 )
-from core.memory.hierarchy import HierarchicalMemory, MemoryTier
-from core.memory.manager import AgentMemory
+from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
+from baselith.core.memory.manager import AgentMemory
 
 
 @contextmanager

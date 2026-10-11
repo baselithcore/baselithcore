@@ -3,7 +3,7 @@ title: Real-time PubSub
 description: Event-driven communication and SSE support via Redis, plus the duplex voice session contract
 ---
 
-The `core/realtime` module provides the infrastructure for real-time event broadcasting within the BaselithCore framework. It primarily uses Redis Pub/Sub to facilitate Server-Sent Events (SSE) for the frontend dashboard and inter-service communication. It also hosts the transport-agnostic
+The `baselith/core/realtime` module provides the infrastructure for real-time event broadcasting within the BaselithCore framework. It primarily uses Redis Pub/Sub to facilitate Server-Sent Events (SSE) for the frontend dashboard and inter-service communication. It also hosts the transport-agnostic
 [duplex voice session contract](#duplex-voice-sessions-duplexvoicesession)
 that provider adapters in plugins implement.
 
@@ -27,7 +27,7 @@ Use the `PubSubManager` to broadcast events to the system. Every event is a
 `EventType` member.
 
 ```python
-from core.realtime import EventType, PubSubManager, RealtimeEvent
+from baselith.core.realtime import EventType, PubSubManager, RealtimeEvent
 
 pubsub = PubSubManager(redis_url="redis://localhost:6379")
 
@@ -62,7 +62,7 @@ the database.
 `PubSubManager` keeps **one long-lived publisher client** for the process,
 built lazily on first publish behind an `asyncio.Lock` (double-checked, so a
 burst of concurrent first-publishes creates exactly one). It comes from
-`core.cache.redis_cache.create_redis_client`, which hands out clients backed by
+`baselith.core.cache.redis_cache.create_redis_client`, which hands out clients backed by
 the process-wide **bounded** connection pool — the same pool the cache layer
 uses, with `max_connections`, health checks and socket deadlines already
 configured.
@@ -86,7 +86,7 @@ Release the publisher on shutdown (idempotent — safe to call twice, and a late
 await pubsub.close()
 ```
 
-A short-lived manager — the indexing job in `core/task_queue/jobs/indexing.py`
+A short-lived manager — the indexing job in `baselith/core/task_queue/jobs/indexing.py`
 builds one per invocation, whenever a caller enqueues it — does not have to close: the client hands its
 connections back to the process-wide pool, so an unclosed manager leaks neither
 a pool nor a socket. Call `close()` when you own the lifecycle explicitly.
@@ -108,14 +108,14 @@ global broadcasts alongside its own channels. Redis channel names carry the
 `events:` prefix (`events:global`, `events:session-123`); pass the bare name
 to both `publish()` and `subscribe()`.
 
-### Reading a subscription: `core.realtime.subscriptions`
+### Reading a subscription: `baselith.core.realtime.subscriptions`
 
 Anything that consumes a raw `PubSub` — this module included — goes through
 two helpers, because the shared pool makes the obvious loop wrong in two ways
 that both fail silently.
 
 ```python
-from core.realtime import close_pubsub, iter_messages
+from baselith.core.realtime import close_pubsub, iter_messages
 
 pubsub = client.pubsub()
 await pubsub.subscribe("events:global")
@@ -166,7 +166,7 @@ sequenceDiagram
 
 ## Event model (`RealtimeEvent`, `EventType`)
 
-`RealtimeEvent` (`core/realtime/events.py`, re-exported from `core.realtime`)
+`RealtimeEvent` (`baselith/core/realtime/events.py`, re-exported from `baselith.core.realtime`)
 is the pydantic model every publisher sends; `publish()` serialises it with
 `model_dump_json()`, so anything in `payload` must be JSON-serialisable.
 
@@ -184,7 +184,7 @@ is the pydantic model every publisher sends; `publish()` serialises it with
 
 | Member            | Wire value      | Emitted by                                                                                        |
 | ----------------- | --------------- | ------------------------------------------------------------------------------------------------- |
-| `JOB_STARTED`     | `job_started`   | The indexing job (`core/task_queue/jobs/indexing.py`) when a run begins — `payload={"type": "indexing", "incremental": …}`. Fires only when a caller enqueues that job (see note below) |
+| `JOB_STARTED`     | `job_started`   | The indexing job (`baselith/core/task_queue/jobs/indexing.py`) when a run begins — `payload={"type": "indexing", "incremental": …}`. Fires only when a caller enqueues that job (see note below) |
 | `JOB_PROGRESS`    | `job_progress`  | No core producer today; use it for incremental updates from your own jobs                         |
 | `JOB_COMPLETED`   | `job_completed` | The indexing job — `payload={"processed_docs": n}`                                                |
 | `JOB_FAILED`      | `job_failed`    | The indexing job — `payload={"error": str}` before the exception is re-raised                     |
@@ -211,7 +211,7 @@ is the pydantic model every publisher sends; `publish()` serialises it with
 
 ## Duplex voice sessions (`DuplexVoiceSession`)
 
-`core/realtime/duplex.py` defines the event vocabulary and the
+`baselith/core/realtime/duplex.py` defines the event vocabulary and the
 `DuplexVoiceSession` protocol for full-duplex, low-latency voice
 conversations: user audio streaming up while assistant audio streams down,
 with barge-in support. The contract is deliberately transport- and
@@ -219,7 +219,7 @@ provider-agnostic — WebSocket adapters, WebRTC bridges, or in-process fakes
 all satisfy the same protocol, and consumers (playback loops, telephony
 bridges, tests) depend only on this module.
 
-The protocol (all symbols exported from `core.realtime`):
+The protocol (all symbols exported from `baselith.core.realtime`):
 
 | Member | Purpose |
 |--------|---------|
@@ -253,8 +253,4 @@ async for event in await session.events():
 
 Only the protocol belongs in core. Domain-specific adapters — the OpenAI
 Realtime WebSocket session, audio device plumbing, and the barge-in
-playback loop — live under `plugins/` per the Sacred Core rule. The
-shipped implementation is in the `baselithbot` plugin
-(`OpenAIRealtimeSession`, `RealtimeVoiceLoop`, opt-in via
-`BASELITHBOT_VOICE_REALTIME_ENABLED`): see
-[Baselithbot — Realtime duplex voice](../plugins/baselithbot.md#realtime-duplex-voice).
+playback loop — live under `plugins/` per the Sacred Core rule.

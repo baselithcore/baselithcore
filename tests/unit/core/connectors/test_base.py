@@ -9,7 +9,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.connectors import (
+from baselith.core.connectors import (
     ActionResult,
     ActionSpec,
     BaseConnector,

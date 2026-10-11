@@ -11,9 +11,9 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from core.auth.oidc import OIDCVerifier
-from core.auth.types import AuthRole, InvalidTokenError
-from core.config.security import SecurityConfig
+from baselith.core.auth.oidc import OIDCVerifier
+from baselith.core.auth.types import AuthRole, InvalidTokenError
+from baselith.core.config.security import SecurityConfig
 
 ISSUER = "https://idp.example.com"
 AUDIENCE = "baselith-api"
@@ -149,9 +149,9 @@ class TestVerification:
 class TestAuthManagerFallback:
     @pytest.mark.asyncio
     async def test_bearer_falls_back_to_oidc(self, oidc_config, rsa_key):
-        from core.auth.manager import AuthManager
+        from baselith.core.auth.manager import AuthManager
 
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis
@@ -169,9 +169,9 @@ class TestAuthManagerFallback:
 
     @pytest.mark.asyncio
     async def test_local_token_still_works_with_oidc_enabled(self, oidc_config):
-        from core.auth.manager import AuthManager
+        from baselith.core.auth.manager import AuthManager
 
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis
@@ -183,9 +183,9 @@ class TestAuthManagerFallback:
 
     @pytest.mark.asyncio
     async def test_invalid_bearer_returns_anonymous(self, oidc_config, rsa_key):
-        from core.auth.manager import AuthManager
+        from baselith.core.auth.manager import AuthManager
 
-        with patch("core.auth.jwt.create_redis_client") as factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as factory:
             redis = AsyncMock()
             redis.get.return_value = None
             factory.return_value = redis
@@ -223,7 +223,8 @@ class TestJwksFetchThrottle:
     def test_unknown_kids_refresh_at_most_once_per_cooldown(self, oidc_config, rsa_key):
         v = OIDCVerifier(config=oidc_config)
         with patch(
-            "core.auth.oidc._pinned_get", return_value=self._jwks_response(rsa_key)
+            "baselith.core.auth.oidc._pinned_get",
+            return_value=self._jwks_response(rsa_key),
         ) as get:
             assert v._resolve_signing_key(self._forged("k1")) is not None
             # Initial fetch just happened: a forged kid inside the cooldown
@@ -236,7 +237,8 @@ class TestJwksFetchThrottle:
     def test_refresh_allowed_after_cooldown(self, oidc_config, rsa_key):
         v = OIDCVerifier(config=oidc_config)
         with patch(
-            "core.auth.oidc._pinned_get", return_value=self._jwks_response(rsa_key)
+            "baselith.core.auth.oidc._pinned_get",
+            return_value=self._jwks_response(rsa_key),
         ) as get:
             v._fetch_jwk_set()
             v._last_fetch_at -= 61
@@ -246,7 +248,7 @@ class TestJwksFetchThrottle:
     def test_failed_fetch_backs_off(self, oidc_config):
         v = OIDCVerifier(config=oidc_config)
         with patch(
-            "core.auth.oidc._pinned_get", side_effect=RuntimeError("idp down")
+            "baselith.core.auth.oidc._pinned_get", side_effect=RuntimeError("idp down")
         ) as get:
             with pytest.raises(RuntimeError):
                 v._fetch_jwk_set()

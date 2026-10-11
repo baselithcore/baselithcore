@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.doc_sources.filesystem import FilesystemDocumentSource
-from core.doc_sources.web import WebDocumentSource
+from baselith.core.doc_sources.filesystem import FilesystemDocumentSource
+from baselith.core.doc_sources.web import WebDocumentSource
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ async def test_filesystem_iter_items(mock_root):
 
 @pytest.mark.asyncio
 async def test_web_source_lifecycle():
-    with patch("core.doc_sources.web.httpx.AsyncClient") as mock_client_cls:
+    with patch("baselith.core.doc_sources.web.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client_cls.return_value = mock_client
         source = WebDocumentSource(["https://example.com"])

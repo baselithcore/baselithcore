@@ -5,11 +5,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.middleware.security import require_admin_or_job
-from core.plugins.exporters.router import (
+from baselith.core.middleware.security import require_admin_or_job
+from baselith.core.plugins.exporters.router import (
     router as backstage_router,
 )
-from core.plugins.exporters.router import (
+from baselith.core.plugins.exporters.router import (
     set_backstage_provider,
 )
 
@@ -225,7 +225,7 @@ async def test_get_software_template_success(client, tmp_path):
     template = tmp_path / "software-template.yaml"
     template.write_text(template_content)
 
-    with patch("core.plugins.exporters.router._TEMPLATE_PATH", template):
+    with patch("baselith.core.plugins.exporters.router._TEMPLATE_PATH", template):
         response = client.get("/api/backstage/software-template.yaml")
 
         assert response.status_code == 200
@@ -238,7 +238,7 @@ def test_get_software_template_not_found(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     missing = tmp_path / "absent" / "software-template.yaml"
 
-    with patch("core.plugins.exporters.router._TEMPLATE_PATH", missing):
+    with patch("baselith.core.plugins.exporters.router._TEMPLATE_PATH", missing):
         response = client.get("/api/backstage/software-template.yaml")
 
         assert response.status_code == 404
@@ -248,7 +248,7 @@ def test_get_software_template_not_found(client, tmp_path, monkeypatch):
 
 def test_templates_resolve_to_the_checkout_tree():
     """The packaged path points at the repository's templates/backstage/."""
-    from core.plugins.exporters import router as router_mod
+    from baselith.core.plugins.exporters import router as router_mod
 
     repo_root = Path(__file__).resolve().parents[3]
     assert router_mod._TEMPLATE_PATH == (
@@ -265,7 +265,9 @@ def test_template_found_in_checkout_around_cwd(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     missing = tmp_path / "absent" / "publish-template.yaml"
 
-    with patch("core.plugins.exporters.router._PUBLISH_TEMPLATE_PATH", missing):
+    with patch(
+        "baselith.core.plugins.exporters.router._PUBLISH_TEMPLATE_PATH", missing
+    ):
         response = client.get("/api/backstage/publish-template.yaml")
 
     assert response.status_code == 200
@@ -330,8 +332,10 @@ def test_publish_github_exchange_ignores_caller_registry_url(client):
 
     with (
         patch("httpx.AsyncClient", return_value=mock_http),
-        patch("core.config.get_plugin_config", return_value=plugin_config),
-        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+        patch("baselith.core.config.get_plugin_config", return_value=plugin_config),
+        patch(
+            "baselith.core.plugins.exporters.router.PluginPublisher"
+        ) as mock_publisher_cls,
     ):
         mock_publisher_cls.return_value.publish = AsyncMock(
             return_value={"status": "ok"}
@@ -356,7 +360,7 @@ def test_publish_fails_closed_when_workspace_root_unset(client):
     plugin_config = MagicMock()
     plugin_config.publish_workspace_root = None
 
-    with patch("core.config.get_plugin_config", return_value=plugin_config):
+    with patch("baselith.core.config.get_plugin_config", return_value=plugin_config):
         response = client.post(
             "/api/backstage/publish",
             json={"plugin_path": "/etc", "auth_token": "jwt-123"},
@@ -372,7 +376,7 @@ def test_publish_rejects_path_outside_workspace_root(client):
     plugin_config = MagicMock()
     plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
 
-    with patch("core.config.get_plugin_config", return_value=plugin_config):
+    with patch("baselith.core.config.get_plugin_config", return_value=plugin_config):
         response = client.post(
             "/api/backstage/publish",
             json={
@@ -391,8 +395,10 @@ def test_publish_allows_path_inside_workspace_root(client):
     plugin_config.publish_workspace_root = Path("/srv/scaffolder-workspace")
 
     with (
-        patch("core.config.get_plugin_config", return_value=plugin_config),
-        patch("core.plugins.exporters.router.PluginPublisher") as mock_publisher_cls,
+        patch("baselith.core.config.get_plugin_config", return_value=plugin_config),
+        patch(
+            "baselith.core.plugins.exporters.router.PluginPublisher"
+        ) as mock_publisher_cls,
     ):
         mock_publisher_cls.return_value.publish = AsyncMock(
             return_value={"status": "ok"}

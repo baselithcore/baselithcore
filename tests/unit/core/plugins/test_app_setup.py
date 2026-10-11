@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from core.plugins.app_setup import apply_plugin_app_middleware
+from baselith.core.plugins.app_setup import apply_plugin_app_middleware
 
 
 class _FakeApp:
@@ -35,11 +35,15 @@ def _clean_modules():
     manifest lookups, Prometheus registration, and re-imports suite-wide.
     """
     before = {
-        name for name in sys.modules if name == "plugins" or name.startswith("plugins.")
+        name
+        for name in sys.modules
+        if name == "plugins" or name.startswith("baselith.plugins.")
     }
     yield
     for name in list(sys.modules):
-        if (name == "plugins" or name.startswith("plugins.")) and name not in before:
+        if (
+            name == "plugins" or name.startswith("baselith.plugins.")
+        ) and name not in before:
             del sys.modules[name]
 
 
@@ -47,7 +51,7 @@ def test_hook_applied_for_declaring_plugin(tmp_path):
     _write_plugin(
         tmp_path / "mw_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class _Marker:
@@ -76,7 +80,7 @@ def test_plugin_without_hook_is_skipped(tmp_path):
     _write_plugin(
         tmp_path / "plain_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class PlainPlugin(Plugin):
@@ -98,7 +102,7 @@ def test_missing_plugins_dir_returns_zero(tmp_path):
 
 
 _HOOK_PLUGIN = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class _Marker:
@@ -164,7 +168,7 @@ def test_failing_hook_does_not_raise(tmp_path):
     _write_plugin(
         tmp_path / "boom_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class BoomPlugin(Plugin):
@@ -189,7 +193,7 @@ def test_signature_gate_blocks_unsigned_plugin(tmp_path, monkeypatch):
     _write_plugin(
         tmp_path / "unsigned_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class _Marker:
@@ -209,7 +213,9 @@ class UnsignedPlugin(Plugin):
         refused.append(plugin_name)
         return False
 
-    monkeypatch.setattr("core.plugins.app_setup.enforce_plugin_signature", _deny)
+    monkeypatch.setattr(
+        "baselith.core.plugins.app_setup.enforce_plugin_signature", _deny
+    )
 
     app = _FakeApp()
     applied = apply_plugin_app_middleware(app, plugins_dir=tmp_path, plugin_configs={})
@@ -223,7 +229,7 @@ def test_signature_gate_allows_signed_plugin(tmp_path, monkeypatch):
     _write_plugin(
         tmp_path / "signed_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class _Marker:
@@ -238,7 +244,7 @@ class SignedPlugin(Plugin):
     )
 
     monkeypatch.setattr(
-        "core.plugins.app_setup.enforce_plugin_signature",
+        "baselith.core.plugins.app_setup.enforce_plugin_signature",
         lambda *args, **kwargs: True,
     )
 
@@ -252,13 +258,13 @@ class SignedPlugin(Plugin):
 def test_explicit_plugins_path_setting_is_scanned(tmp_path, monkeypatch):
     # Regression: PLUGIN_PLUGINS_PATH steered marketplace installs only; the
     # runtime loaders kept scanning plugins/, so installed plugins never ran.
-    import core.config.plugins as plugin_config_module
-    from core.config.plugins import PluginConfig
+    import baselith.core.config.plugins as plugin_config_module
+    from baselith.core.config.plugins import PluginConfig
 
     _write_plugin(
         tmp_path / "custom_root" / "mw_plugin",
         """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class _Marker:

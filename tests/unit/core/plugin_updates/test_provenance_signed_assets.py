@@ -7,10 +7,10 @@ from pathlib import Path
 
 import httpx
 
-from core.plugin_updates.cache import UpdateCache
-from core.plugin_updates.checker import run_check
-from core.plugin_updates.models import Refusal
-from core.plugins.signing import generate_keypair_hex
+from baselith.core.plugin_updates.cache import UpdateCache
+from baselith.core.plugin_updates.checker import run_check
+from baselith.core.plugin_updates.models import Refusal
+from baselith.core.plugins.signing import generate_keypair_hex
 
 from .provenance_fake import FakeGitHub, _release, _source
 from .test_checker import _signed_tarball

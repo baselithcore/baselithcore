@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.db.rls_posture import (
+from baselith.core.db.rls_posture import (
     ALLOW_BYPASS_ENV,
     RlsBypassError,
     RlsPosture,
@@ -191,8 +191,8 @@ class _Storage:
 
 def _arrange(monkeypatch, *, storage: _Storage, posture: RlsPosture | None) -> None:
     """Point the enforcement at a fake storage config and a fake probe."""
-    import core.config as config_module
-    import core.db.rls_posture as module
+    import baselith.core.config as config_module
+    import baselith.core.db.rls_posture as module
 
     monkeypatch.setattr(
         config_module, "get_storage_config", lambda: storage, raising=False
@@ -218,7 +218,7 @@ def _arrange(monkeypatch, *, storage: _Storage, posture: RlsPosture | None) -> N
         async def __aexit__(self, *exc: object) -> bool:
             return False
 
-    import core.db.connection as conn_module
+    import baselith.core.db.connection as conn_module
 
     monkeypatch.setattr(conn_module, "system_tenant_scope", lambda: _Scope())
     monkeypatch.setattr(conn_module, "get_async_connection", lambda: _Conn())
@@ -232,7 +232,7 @@ def _capture_errors(monkeypatch) -> list[str]:
     the suite reconfigure — so a capsys assertion passes alone and fails in a
     full run, for a reason that has nothing to do with the code under test.
     """
-    import core.db.rls_posture as module
+    import baselith.core.db.rls_posture as module
 
     messages: list[str] = []
 
@@ -265,7 +265,7 @@ async def test_enforcement_is_a_noop_without_postgres(monkeypatch) -> None:
 async def test_production_refuses_a_bypassing_role(monkeypatch) -> None:
     """The whole point: a deployment that believes in isolation must not boot
     quietly without it."""
-    import core.utils.runtime_env as runtime_env
+    import baselith.core.utils.runtime_env as runtime_env
 
     _arrange(
         monkeypatch,
@@ -282,7 +282,7 @@ async def test_production_refuses_a_bypassing_role(monkeypatch) -> None:
 
 
 async def test_production_opt_out_downgrades_to_an_error_log(monkeypatch) -> None:
-    import core.utils.runtime_env as runtime_env
+    import baselith.core.utils.runtime_env as runtime_env
 
     _arrange(
         monkeypatch,
@@ -298,7 +298,7 @@ async def test_production_opt_out_downgrades_to_an_error_log(monkeypatch) -> Non
 
 
 async def test_outside_production_it_only_logs(monkeypatch) -> None:
-    import core.utils.runtime_env as runtime_env
+    import baselith.core.utils.runtime_env as runtime_env
 
     _arrange(
         monkeypatch,
@@ -314,7 +314,7 @@ async def test_outside_production_it_only_logs(monkeypatch) -> None:
 
 
 async def test_a_sound_posture_passes_in_production(monkeypatch) -> None:
-    import core.utils.runtime_env as runtime_env
+    import baselith.core.utils.runtime_env as runtime_env
 
     _arrange(
         monkeypatch,
@@ -327,8 +327,8 @@ async def test_a_sound_posture_passes_in_production(monkeypatch) -> None:
 
 async def test_an_unreachable_database_never_blocks_boot(monkeypatch) -> None:
     """A transient outage is the health check's business, not a refusal."""
-    import core.db.connection as conn_module
-    import core.utils.runtime_env as runtime_env
+    import baselith.core.db.connection as conn_module
+    import baselith.core.utils.runtime_env as runtime_env
 
     _arrange(
         monkeypatch,

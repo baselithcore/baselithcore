@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.api import _recovery_startup
-from core.orchestration.checkpoint import (
+from baselith.core.api import _recovery_startup
+from baselith.core.orchestration.checkpoint import (
     STATUS_FAILED,
     STATUS_RUNNING,
     Checkpoint,
@@ -92,7 +92,7 @@ async def test_resume_off_schedules_only_the_stale_sweep(
 
     with (
         patch(
-            "core.config.orchestration.get_orchestration_config",
+            "baselith.core.config.orchestration.get_orchestration_config",
             return_value=_config(**overrides),
         ),
         patch.object(_recovery_startup, "stale_sweep_loop", _fake_loop),
@@ -106,3 +106,36 @@ async def test_resume_off_schedules_only_the_stale_sweep(
     if scheduled:
         assert started[0][0] is store
         assert started[0][1]["stale_after_seconds"] == 1800.0
+
+
+async def test_a_durable_store_resumes_by_default(tmp_path) -> None:
+    """Unset resume flag + sqlite store: the full recovery loop, not fail-only."""
+    from baselith.core.orchestration.checkpoint_sqlite import SQLiteCheckpointStore
+
+    tasks: set[asyncio.Task[Any]] = set()
+    stale_started: list[Any] = []
+
+    async def _fake_stale(store: Any, **kwargs: Any) -> None:
+        stale_started.append(store)
+
+    store = SQLiteCheckpointStore(tmp_path / "c.db")
+    try:
+        with (
+            patch(
+                "baselith.core.config.orchestration.get_orchestration_config",
+                return_value=_config(
+                    checkpoint_resume_on_startup=None,
+                    recovery_resume_after_seconds=300.0,
+                    checkpoint_lease_seconds=60.0,
+                ),
+            ),
+            patch.object(_recovery_startup, "stale_sweep_loop", _fake_stale),
+        ):
+            _recovery_startup._schedule_recovery_sweep(store, tasks)
+        assert len(tasks) == 1
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        assert stale_started == []
+    finally:
+        store.close()

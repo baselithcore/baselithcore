@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.orchestration.handlers.vision import VisionHandler
-from core.services.vision import ImageContent, VisionResponse
+from baselith.core.orchestration.handlers.vision import VisionHandler
+from baselith.core.services.vision import ImageContent, VisionResponse
 
 
 @pytest.fixture
@@ -37,10 +37,12 @@ async def test_vision_handler_flow(mock_vision_service):
     # Patch the service inside the handler AND the ImageContent.from_file
     with (
         patch(
-            "core.orchestration.handlers.vision.VisionService",
+            "baselith.core.orchestration.handlers.vision.VisionService",
             return_value=mock_vision_service,
         ),
-        patch("core.services.vision.models.ImageContent.from_file") as mock_from_file,
+        patch(
+            "baselith.core.services.vision.models.ImageContent.from_file"
+        ) as mock_from_file,
     ):
         # Setup mock image content
         mock_from_file.return_value = ImageContent(
@@ -68,7 +70,7 @@ async def test_vision_handler_flow(mock_vision_service):
 @pytest.mark.asyncio
 async def test_vision_handler_no_image():
     """Verify error when no image is provided."""
-    with patch("core.orchestration.handlers.vision.VisionService"):
+    with patch("baselith.core.orchestration.handlers.vision.VisionService"):
         handler = VisionHandler()
         result = await handler.handle("Describe", {})
         assert result.get("error")

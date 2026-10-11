@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.orchestration.handlers.swarm_handler import SwarmHandler
-from core.swarm.colony import Colony
-from core.swarm.types import AgentProfile
+from baselith.core.orchestration.handlers.swarm_handler import SwarmHandler
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.types import AgentProfile
 
 
 @pytest.mark.asyncio

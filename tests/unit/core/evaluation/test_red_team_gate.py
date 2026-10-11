@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.evaluation.red_team import (
+from baselith.core.evaluation.red_team import (
     RedTeamCase,
     RedTeamLoadError,
     load_red_team_cases,

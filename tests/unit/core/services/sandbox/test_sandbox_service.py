@@ -2,15 +2,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.config.sandbox import get_sandbox_config
-from core.services.sandbox.policy import build_sandbox_runtime_kwargs
-from core.services.sandbox.service import SandboxService
+from baselith.core.config.sandbox import get_sandbox_config
+from baselith.core.services.sandbox.policy import build_sandbox_runtime_kwargs
+from baselith.core.services.sandbox.service import SandboxService
 
 
 @pytest.fixture
 def mock_docker_pkg():
     # Patch the docker package where it is imported in docker_factory
-    with patch("core.services.sandbox.docker_factory.docker") as mock_docker:
+    with patch("baselith.core.services.sandbox.docker_factory.docker") as mock_docker:
         # User defined exception for testing
         class MockDockerException(Exception):
             pass

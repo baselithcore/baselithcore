@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.observability.audit import (
+from baselith.core.observability.audit import (
     AuditEvent,
     AuditEventType,
     AuditLogger,
@@ -45,7 +45,9 @@ async def test_file_audit_sink_runs_in_executor(tmp_path):
     # Use tmp_path to allow directory creation in init
     log_path = tmp_path / "audit.log"
 
-    with patch("core.observability.audit.asyncio.get_running_loop") as mock_get_loop:
+    with patch(
+        "baselith.core.observability.audit.asyncio.get_running_loop"
+    ) as mock_get_loop:
         mock_loop = MagicMock()
         mock_get_loop.return_value = mock_loop
         # Make run_in_executor return a Future-like object (awaitable)

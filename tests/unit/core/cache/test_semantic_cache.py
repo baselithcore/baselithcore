@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from core.cache.semantic_cache import SemanticLLMCache
+from baselith.core.cache.semantic_cache import SemanticLLMCache
 
 
 class TestSemanticLLMCache:
     @pytest.fixture
     def mock_embedder(self):
-        with patch("core.nlp.models.get_embedder") as mock_get:
+        with patch("baselith.core.nlp.models.get_embedder") as mock_get:
             embedder = MagicMock()
             # Default behavior: return a normalized vector
             embedder.encode.return_value = np.array([1.0, 0.0, 0.0])
@@ -270,7 +270,7 @@ class TestSemanticLLMCache:
 
 
 class TestSemanticCacheAsyncEmbedder:
-    """Regression: the production embedder (core.nlp.CachedEmbedder) exposes an
+    """Regression: the production embedder (baselith.core.nlp.CachedEmbedder) exposes an
     async ``encode``. Awaiting it is what makes the cache store anything at all
     — a coroutine reaching ``np.linalg.norm`` raised TypeError, which the broad
     ``except`` swallowed, so every ``set()`` was a no-op and every

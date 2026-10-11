@@ -14,15 +14,15 @@ from pathlib import Path
 
 import pytest
 
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import announce
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.announce import (
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import announce
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.announce import (
     REDIS_KEY_PREFIX,
     AnnouncementGate,
     build_announcement_gate,
 )
-from core.plugin_updates.models import CheckReport, UpdateCandidate
+from baselith.core.plugin_updates.models import CheckReport, UpdateCandidate
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -30,7 +30,7 @@ _CHILD = textwrap.dedent(
     """
     import os, sys, time
     from pathlib import Path
-    from core.plugin_updates.announce import AnnouncementGate
+    from baselith.core.plugin_updates.announce import AnnouncementGate
     root, key, go, ready = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
     (ready / str(os.getpid())).touch()
     deadline = time.monotonic() + 60
@@ -148,7 +148,7 @@ async def test_unwritable_cache_announces_rather_than_loses(
 def test_build_gate_uses_redis_only_when_the_backend_is_redis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import core.config as config_pkg
+    import baselith.core.config as config_pkg
 
     def storage(backend: str, url: str) -> types.SimpleNamespace:
         return types.SimpleNamespace(cache_backend=backend, cache_redis_url=url)
@@ -322,7 +322,7 @@ _TAKEOVER_CHILD = textwrap.dedent(
     """
     import os, sys, time
     from pathlib import Path
-    from core.plugin_updates.announce import AnnouncementGate
+    from baselith.core.plugin_updates.announce import AnnouncementGate
     root, key, go, ready = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
     gate = AnnouncementGate(root, lease_seconds=600)
     (ready / str(os.getpid())).touch()
@@ -420,7 +420,7 @@ def test_stale_takeover_guard_is_cleared_after_a_crash(tmp_path: Path) -> None:
 def test_empty_namespace_with_redis_warns_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    import core.config as config_pkg
+    import baselith.core.config as config_pkg
 
     monkeypatch.delenv("APP_BASE_URL", raising=False)
     monkeypatch.setattr(announce, "_warned_empty_namespace", False)

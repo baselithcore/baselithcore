@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 _ICON = {"src": "https://example.com/icon.png", "mimeType": "image/png"}
 

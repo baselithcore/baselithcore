@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     ApprovalPrincipal,
     Checkpoint,
     CheckpointManager,
@@ -21,7 +21,7 @@ from core.orchestration.checkpoint import (
     init_checkpoint,
     record_approval_decision,
 )
-from core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
 pytestmark = [pytest.mark.unit]
 
@@ -61,7 +61,7 @@ async def test_resume_tolerates_a_legacy_snapshot_without_tokens() -> None:
 
 
 async def test_restored_tokens_keep_the_cap_in_force() -> None:
-    from core.orchestration.limits import BudgetExceededError
+    from baselith.core.orchestration.limits import BudgetExceededError
 
     store = InMemoryCheckpointStore()
     checkpoint = Checkpoint(run_id="run-cap")
@@ -144,7 +144,7 @@ class TestRecordApprovalDecision:
         assert decision["approver_auth_method"] == "programmatic"
 
     async def test_decision_emits_an_audit_event(self, monkeypatch) -> None:
-        from core.observability.audit import AuditEventType
+        from baselith.core.observability.audit import AuditEventType
 
         recorded: list[dict] = []
 
@@ -153,7 +153,7 @@ class TestRecordApprovalDecision:
                 recorded.append({"event_type": event_type, **kwargs})
 
         monkeypatch.setattr(
-            "core.observability.audit.get_audit_logger", lambda: _Audit()
+            "baselith.core.observability.audit.get_audit_logger", lambda: _Audit()
         )
         store, checkpoint = _store_with_pending()
         await _pending(store, checkpoint)
@@ -183,7 +183,7 @@ class TestRecordApprovalDecision:
                 raise RuntimeError("sink down")
 
         monkeypatch.setattr(
-            "core.observability.audit.get_audit_logger", lambda: _BrokenAudit()
+            "baselith.core.observability.audit.get_audit_logger", lambda: _BrokenAudit()
         )
         store, checkpoint = _store_with_pending()
         await _pending(store, checkpoint)
@@ -200,7 +200,7 @@ class TestRecordApprovalDecision:
                 recorded.append(event_type)
 
         monkeypatch.setattr(
-            "core.observability.audit.get_audit_logger", lambda: _Audit()
+            "baselith.core.observability.audit.get_audit_logger", lambda: _Audit()
         )
         assert (
             await record_approval_decision(

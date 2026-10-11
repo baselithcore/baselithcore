@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
-from core.mcp.mrtr import InputRequired, get_input_responses
-from core.mcp.server import MCPServer
-from core.mcp.tasks import EXTENSION_ID
+from baselith.core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
+from baselith.core.mcp.mrtr import InputRequired, get_input_responses
+from baselith.core.mcp.server import MCPServer
+from baselith.core.mcp.tasks import EXTENSION_ID
 
 _ELICIT = {"method": "elicitation/create", "params": {"message": "confirm?"}}
 

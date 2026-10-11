@@ -100,8 +100,8 @@ Supermemory is never selected automatically — build the provider and hand it t
 whatever takes a `provider=` argument.
 
 ```python
-from core.memory import SupermemoryProvider, SupermemoryContextProvider, AgentMemory
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.memory import SupermemoryProvider, SupermemoryContextProvider, AgentMemory
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 # 1. Create a provider scoped to an agent or user (one container tag per
 #    instance — build one per tenant/user, never share one across tenants)
@@ -142,7 +142,7 @@ await memory.remember("User mentioned they are switching to Rust", memory_type=M
 `SupermemoryContextProvider` implements the `ContextProvider` ABC and produces a ready-to-use context string for LLM system prompts by combining the user profile with targeted search results.
 
 ```python
-from core.memory import SupermemoryContextProvider
+from baselith.core.memory import SupermemoryContextProvider
 
 ctx = SupermemoryContextProvider(
     container_tag="user_42",
@@ -210,7 +210,7 @@ await provider.delete(item_id="some-uuid")
 All settings use the `SUPERMEMORY_` prefix.
 
 ```python
-from core.config.memory import get_supermemory_config
+from baselith.core.config.memory import get_supermemory_config
 
 config = get_supermemory_config()
 ```
@@ -265,10 +265,10 @@ SUPERMEMORY_BASE_URL=https://memory.internal.example.com
 ## Module Structure
 
 ```text
-core/memory/
+baselith/core/memory/
 └── supermemory_provider.py   # SupermemoryProvider + SupermemoryContextProvider
 
-core/config/
+baselith/core/config/
 └── memory.py                  # SupermemoryConfig + get_supermemory_config()
 ```
 

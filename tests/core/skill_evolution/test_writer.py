@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.declarative import split_frontmatter
-from core.skill_evolution.types import SkillProposal
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.plugins.declarative import split_frontmatter
+from baselith.core.skill_evolution.types import SkillProposal
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 
 def _proposal(body: str = "Do the thing.", name: str = "fix-parser") -> SkillProposal:

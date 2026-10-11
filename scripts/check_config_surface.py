@@ -35,8 +35,8 @@ from scripts.config_surface import (  # noqa: E402
 
 #: Every template the project tells an operator to copy. ``.env.example`` is
 #: the root template; ``configs/.env.base`` is what ``baselith doctor`` prints
-#: ("cp configs/.env.base .env") and what the baselithbot docs call the
-#: reference template. Only the first was ever checked, so the second rotted
+#: ("cp configs/.env.base .env") and the reference template.
+#: Only the first was ever checked, so the second rotted
 #: unobserved — it still advertised a removed OCR backend. A template nobody
 #: validates is worse than no template: following it sets nothing and says so
 #: to no one.
@@ -49,8 +49,8 @@ REFERENCE_PAGE = (
 )
 
 #: Families whose full name is built at runtime, so no literal exists to match:
-#: ``BASELITH_FLAG_<FLAG>`` (core/feature_flags/manager.py) and
-#: ``BASELITH_PROMPT_VARIANTS_<PROMPT>`` (core/prompts/catalog.py).
+#: ``BASELITH_FLAG_<FLAG>`` (baselith/core/feature_flags/manager.py) and
+#: ``BASELITH_PROMPT_VARIANTS_<PROMPT>`` (baselith/core/prompts/catalog.py).
 DYNAMIC_ENV_PREFIXES: tuple[str, ...] = (
     "BASELITH_FLAG_",
     "BASELITH_PROMPT_VARIANTS_",

@@ -1,8 +1,8 @@
-"""Unit tests for ``core.evaluation.trajectory``."""
+"""Unit tests for ``baselith.core.evaluation.trajectory``."""
 
 from __future__ import annotations
 
-from core.evaluation.trajectory import (
+from baselith.core.evaluation.trajectory import (
     ToolCall,
     TrajectoryCase,
     TrajectoryEvaluator,

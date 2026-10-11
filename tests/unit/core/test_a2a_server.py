@@ -7,7 +7,7 @@ structures, the A2A server dispatch loop and the in-memory task store.
 
 import pytest
 
-from core.a2a import (
+from baselith.core.a2a import (
     A2AClient,
     AgentCard,
 )
@@ -53,7 +53,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_request(self):
         """Test JSONRPCRequest."""
-        from core.a2a import JSONRPCRequest
+        from baselith.core.a2a import JSONRPCRequest
 
         req = JSONRPCRequest(
             method="message/send",
@@ -69,7 +69,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_request_factories(self):
         """Test JSONRPCRequest factory methods."""
-        from core.a2a import JSONRPCRequest
+        from baselith.core.a2a import JSONRPCRequest
 
         # message_send
         msg_req = JSONRPCRequest.message_send(
@@ -90,7 +90,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_response_success(self):
         """Test successful JSONRPCResponse."""
-        from core.a2a import JSONRPCResponse
+        from baselith.core.a2a import JSONRPCResponse
 
         resp = JSONRPCResponse.success("req-1", result={"data": "value"})
 
@@ -100,7 +100,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_response_failure(self):
         """Test error JSONRPCResponse."""
-        from core.a2a import ErrorCode, JSONRPCError, JSONRPCResponse
+        from baselith.core.a2a import ErrorCode, JSONRPCError, JSONRPCResponse
 
         error = JSONRPCError(ErrorCode.METHOD_NOT_FOUND, "Not found")
         resp = JSONRPCResponse.failure("req-1", error)
@@ -110,7 +110,7 @@ class TestJSONRPC:
 
     def test_jsonrpc_error_factories(self):
         """Test JSONRPCError factory methods."""
-        from core.a2a import ErrorCode, JSONRPCError
+        from baselith.core.a2a import ErrorCode, JSONRPCError
 
         parse_err = JSONRPCError.parse_error()
         assert parse_err.code == ErrorCode.PARSE_ERROR
@@ -133,7 +133,7 @@ class TestA2AServer:
     @pytest.fixture
     def echo_server(self):
         """Create an echo server for testing."""
-        from core.a2a import AgentCard, EchoA2AServer
+        from baselith.core.a2a import AgentCard, EchoA2AServer
 
         card = AgentCard(
             name="echo",
@@ -215,7 +215,7 @@ class TestA2AServer:
 
     def test_agent_card_advertises_protocol_version(self):
         """AgentCard exposes protocolVersion (was missing → conformance gap)."""
-        from core.a2a import AgentCard
+        from baselith.core.a2a import AgentCard
 
         card = AgentCard(name="x", description="d")
         assert card.protocolVersion == "0.3.0"
@@ -307,7 +307,7 @@ class TestInMemoryTaskStore:
     @pytest.mark.asyncio
     async def test_save_and_get(self):
         """Test save and retrieve task."""
-        from core.a2a import InMemoryTaskStore, Task, TaskState
+        from baselith.core.a2a import InMemoryTaskStore, Task, TaskState
 
         store = InMemoryTaskStore()
         task = Task.create(TaskState.WORKING)
@@ -321,7 +321,7 @@ class TestInMemoryTaskStore:
     @pytest.mark.asyncio
     async def test_get_nonexistent(self):
         """Test get nonexistent task."""
-        from core.a2a import InMemoryTaskStore
+        from baselith.core.a2a import InMemoryTaskStore
 
         store = InMemoryTaskStore()
         result = await store.get("nonexistent")
@@ -331,7 +331,7 @@ class TestInMemoryTaskStore:
     @pytest.mark.asyncio
     async def test_delete(self):
         """Test delete task."""
-        from core.a2a import InMemoryTaskStore, Task
+        from baselith.core.a2a import InMemoryTaskStore, Task
 
         store = InMemoryTaskStore()
         task = Task.create()
@@ -354,12 +354,12 @@ class TestA2AErrorDisclosure:
     ``internal_error(str(e))`` put psycopg/redis internals and filesystem paths
     into the JSON-RPC ``data`` member, which ``to_dict`` serializes verbatim —
     the leak the HTTP surface deliberately avoids in
-    ``core.api.errors.unhandled_exception_handler``.
+    ``baselith.core.api.errors.unhandled_exception_handler``.
     """
 
     @pytest.fixture
     def failing_server(self):
-        from core.a2a import AgentCard, EchoA2AServer
+        from baselith.core.a2a import AgentCard, EchoA2AServer
 
         server = EchoA2AServer(AgentCard(name="echo", description="d"))
 

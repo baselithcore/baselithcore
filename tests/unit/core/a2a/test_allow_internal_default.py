@@ -10,20 +10,24 @@ from __future__ import annotations
 
 import pytest
 
-from core.a2a.client import _default_allow_internal_endpoints
+from baselith.core.a2a.client import _default_allow_internal_endpoints
 
 _ENV = "A2A_ALLOW_INTERNAL_ENDPOINTS"
 
 
 def test_denies_internal_by_default_in_production(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(_ENV, raising=False)
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: True
+    )
     assert _default_allow_internal_endpoints() is False
 
 
 def test_allows_internal_by_default_in_development(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(_ENV, raising=False)
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: False)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: False
+    )
     assert _default_allow_internal_endpoints() is True
 
 
@@ -32,7 +36,9 @@ def test_explicit_true_opts_in_even_in_production(
     value: str, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv(_ENV, value)
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: True
+    )
     assert _default_allow_internal_endpoints() is True
 
 
@@ -41,5 +47,7 @@ def test_explicit_false_locks_down_even_in_development(
     value: str, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv(_ENV, value)
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: False)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: False
+    )
     assert _default_allow_internal_endpoints() is False

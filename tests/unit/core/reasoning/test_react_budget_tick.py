@@ -11,8 +11,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 # An Action keeps the loop spinning (no action = output treated as final).
 _LOOPING_OUTPUT = "Thought: still thinking\nAction: probe()"
@@ -46,8 +50,8 @@ async def test_native_loop_ticks_budget_too(monkeypatch):
     budget."""
     from types import SimpleNamespace
 
-    from core.reasoning.react_native import run_native_loop
-    from core.services.llm.tool_calling import LLMResult, ToolCall
+    from baselith.core.reasoning.react_native import run_native_loop
+    from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
     budget = LoopBudget(LoopLimits(max_iterations=1, max_tool_calls=50))
     agent = ReActAgent(tools=[_probe_tool()], max_iterations=5, loop_budget=budget)

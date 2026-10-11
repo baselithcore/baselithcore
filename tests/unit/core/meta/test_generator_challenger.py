@@ -1,10 +1,10 @@
-"""Unit tests for ``core.meta.generator_challenger``."""
+"""Unit tests for ``baselith.core.meta.generator_challenger``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.meta.generator_challenger import (
+from baselith.core.meta.generator_challenger import (
     Critique,
     DebateOutcome,
     GeneratorChallengerProtocol,

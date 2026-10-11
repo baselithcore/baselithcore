@@ -69,8 +69,8 @@ python examples/demo_browser.py --autonomous
 Run a quick import check to verify all modules are working:
 
 ```bash
-python -c "from core.services.vision import VisionService; print('✅ Vision OK')"
-python -c "from core.services.voice import VoiceService; print('✅ Voice OK')"
-python -c "from core.agents import CodingAgent; print('✅ Coding OK')"
-python -c "from core.agents import BrowserAgent; print('✅ Browser OK')"
+python -c "from baselith.core.services.vision import VisionService; print('✅ Vision OK')"
+python -c "from baselith.core.services.voice import VoiceService; print('✅ Voice OK')"
+python -c "from baselith.core.agents import CodingAgent; print('✅ Coding OK')"
+python -c "from baselith.core.agents import BrowserAgent; print('✅ Browser OK')"
 ```

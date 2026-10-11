@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
+from baselith.core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
 
 
 @pytest.fixture(autouse=True)
 def _no_ambient_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Run from an empty cwd with none of the markers set.
 
-    `core.config` loads the repository .env into os.environ at import, so
+    `baselith.core.config` loads the repository .env into os.environ at import, so
     without this the developer's own values decide the result.
     """
     monkeypatch.chdir(tmp_path)

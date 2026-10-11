@@ -10,8 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from core.services.llm import policy as policy_mod
-from core.services.llm.policy import PluginLLMPolicy, bind_llm_policy, reset_llm_policy
+from baselith.core.services.llm import policy as policy_mod
+from baselith.core.services.llm.policy import (
+    PluginLLMPolicy,
+    bind_llm_policy,
+    reset_llm_policy,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +44,7 @@ class TestBoundPolicyRoundTrip:
 
 class TestFunnelPrecedence:
     def test_bound_policy_serves_when_no_resolver_answers(self):
-        from core.services.llm import runtime
+        from baselith.core.services.llm import runtime
 
         bound = PluginLLMPolicy(provider="ollama", model="llama3.2")
         bind_llm_policy(bound)
@@ -54,7 +58,7 @@ class TestFunnelPrecedence:
         for_policy.assert_called_once_with(bound)
 
     def test_live_resolver_wins_over_the_bound_fallback(self):
-        from core.services.llm import runtime
+        from baselith.core.services.llm import runtime
 
         resolved = PluginLLMPolicy(provider="openai", model="gpt-4o-mini")
         bind_llm_policy(PluginLLMPolicy(provider="ollama", model="llama3.2"))
@@ -68,7 +72,7 @@ class TestFunnelPrecedence:
         for_policy.assert_called_once_with(resolved)
 
     def test_no_policy_at_all_serves_the_default(self):
-        from core.services.llm import runtime
+        from baselith.core.services.llm import runtime
 
         with (
             patch.object(runtime, "resolve_active_llm_policy", return_value=None),

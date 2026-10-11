@@ -1,12 +1,12 @@
 """
-Tests for core.reasoning.self_correction module.
+Tests for baselith.core.reasoning.self_correction module.
 """
 
 from unittest.mock import Mock, patch
 
 import pytest
 
-from core.reasoning.self_correction import CorrectionResult, SelfCorrector
+from baselith.core.reasoning.self_correction import CorrectionResult, SelfCorrector
 
 
 class TestCorrectionResult:
@@ -79,7 +79,7 @@ class TestSelfCorrectorLlmServiceProperty:
 
         assert result == mock_service
 
-    @patch("core.services.llm.get_llm_service")
+    @patch("baselith.core.services.llm.get_llm_service")
     def test_lazy_loads_service(self, mock_get_service):
         """Test lazy loads service if not set."""
         # The import might fail, so we test the fallback case
@@ -100,7 +100,9 @@ class TestSelfCorrectorCorrect:
         corrector._llm_service = None
 
         # Ensure lazy load fails or returns None
-        with patch("core.services.llm.get_llm_service", side_effect=ImportError):
+        with patch(
+            "baselith.core.services.llm.get_llm_service", side_effect=ImportError
+        ):
             result = await corrector.correct("Test response")
 
         assert result.original == "Test response"

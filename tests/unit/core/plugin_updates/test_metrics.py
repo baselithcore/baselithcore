@@ -13,9 +13,9 @@ import pytest
 from prometheus_client import CollectorRegistry
 from prometheus_client.multiprocess import MultiProcessCollector
 
-from core.observability.metrics import UPDATE_AVAILABLE
-from core.plugin_updates.metrics import publish_update_metrics
-from core.plugin_updates.models import (
+from baselith.core.observability.metrics import UPDATE_AVAILABLE
+from baselith.core.plugin_updates.metrics import publish_update_metrics
+from baselith.core.plugin_updates.models import (
     CheckReport,
     SystemUpdate,
     UpdateCandidate,
@@ -117,8 +117,8 @@ def test_no_report_or_no_system_publishes_nothing() -> None:
 _WRITER = """
 import sys
 from datetime import UTC, datetime
-from core.plugin_updates.metrics import publish_update_metrics
-from core.plugin_updates.models import CheckReport, SystemUpdate, UpdateCandidate
+from baselith.core.plugin_updates.metrics import publish_update_metrics
+from baselith.core.plugin_updates.models import CheckReport, SystemUpdate, UpdateCandidate
 
 available = sys.argv[1] == "1"
 publish_update_metrics(CheckReport(

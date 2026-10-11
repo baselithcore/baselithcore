@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.connectors import (
+from baselith.core.connectors import (
     BaseConnector,
     ConnectorCapability,
     ConnectorConfigError,
@@ -17,8 +17,8 @@ from core.connectors import (
     get_connector_registry,
     reset_connector_registry,
 )
-from core.context import reset_tenant_context, set_tenant_context
-from core.exceptions import DuplicateRegistrationError
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.exceptions import DuplicateRegistrationError
 
 
 class Crm(BaseConnector):
@@ -132,7 +132,7 @@ async def test_create_unknown_connector_is_a_config_error():
 def test_open_egress_spec_is_warned_about_in_production(monkeypatch, caplog):
     import logging
 
-    from core.connectors import registry as registry_module
+    from baselith.core.connectors import registry as registry_module
 
     monkeypatch.setattr(registry_module, "is_production_env", lambda: True)
     with caplog.at_level(logging.WARNING):
@@ -143,7 +143,7 @@ def test_open_egress_spec_is_warned_about_in_production(monkeypatch, caplog):
 def test_open_egress_spec_is_silent_outside_production(monkeypatch, caplog):
     import logging
 
-    from core.connectors import registry as registry_module
+    from baselith.core.connectors import registry as registry_module
 
     monkeypatch.setattr(registry_module, "is_production_env", lambda: False)
     with caplog.at_level(logging.WARNING):

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
 # ---------------------------------------------------------------------------
 # prune_low_relevance (RelevanceCalculator wiring)
@@ -47,7 +47,7 @@ async def test_fresh_important_items_survive():
 
 
 async def test_decay_prune_runs_in_sweep_only_when_enabled(monkeypatch):
-    from core.memory.hierarchy import HierarchyConfig, TierConfig
+    from baselith.core.memory.hierarchy import HierarchyConfig, TierConfig
 
     # No TTL on MTM: only decay-prune (not the TTL sweep) may evict here.
     config = HierarchyConfig(mtm=TierConfig(max_items=50, ttl_seconds=None))
@@ -84,7 +84,7 @@ async def _memory_with_embedder(monkeypatch):
     observable when the reranker actually ran. Hybrid fusion is disabled to
     keep the pre-rerank order purely cosine-driven.
     """
-    import core.memory.hierarchy_search as hs
+    import baselith.core.memory.hierarchy_search as hs
 
     monkeypatch.setattr(hs, "_HYBRID_RECALL_ENABLED", False)
 
@@ -110,7 +110,7 @@ async def test_rerank_off_by_default(monkeypatch):
         calls["n"] += 1
         return FakeReranker()
 
-    import core.chat.dependencies as deps
+    import baselith.core.chat.dependencies as deps
 
     monkeypatch.setattr(deps, "get_reranker", fake_get_reranker)
     items = await memory.recall(QUERY, limit=2)
@@ -122,7 +122,7 @@ async def test_rerank_reorders_when_enabled(monkeypatch):
     monkeypatch.setenv("BASELITH_MEMORY_RERANK", "true")
     memory = await _memory_with_embedder(monkeypatch)
 
-    import core.chat.dependencies as deps
+    import baselith.core.chat.dependencies as deps
 
     monkeypatch.setattr(deps, "get_reranker", lambda: FakeReranker())
     items = await memory.recall(QUERY, limit=2)
@@ -134,7 +134,7 @@ async def test_rerank_fails_open(monkeypatch):
     monkeypatch.setenv("BASELITH_MEMORY_RERANK", "true")
     memory = await _memory_with_embedder(monkeypatch)
 
-    import core.chat.dependencies as deps
+    import baselith.core.chat.dependencies as deps
 
     def broken():
         raise RuntimeError("model not installed")

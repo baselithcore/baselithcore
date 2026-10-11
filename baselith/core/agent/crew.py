@@ -1,0 +1,414 @@
+"""Declarative multi-agent crews over the typed :class:`~baselith.core.agent.Agent`.
+
+The ten-line collaborative counterpart to the single-agent hello world:
+
+    from baselith.core.agent import Agent, Crew, Task
+
+    researcher = Agent(system_prompt="You are a meticulous researcher.")
+    writer = Agent(system_prompt="You write crisp executive summaries.")
+
+    crew = Crew(
+        agents=[researcher, writer],
+        tasks=[
+            Task("Research {topic} and list the key facts.", agent=researcher),
+            Task("Write a summary from the research.", agent=writer),
+        ],
+    )
+    result = await crew.run(inputs={"topic": "vector databases"})
+    result.final  # -> the last task's output
+
+Every task executes through :meth:`Agent.run`, so tools, ``output_type``
+validation, cost accounting, and the ambient ``LoopBudget`` all apply
+unchanged. A run with no ambient budget binds one shared crew-wide
+``LoopBudget`` (``Crew(loop_limits=...)``), so the dollar, token and
+wall-clock caps bound the whole crew rather than each task separately.
+``process="sequential"`` (default) threads each task's output into
+the next task's prompt as context; ``process="parallel"`` runs independent
+tasks concurrently; ``process="hierarchical"`` adds a ``manager`` agent that
+briefs, reviews, and may request one bounded revision per task (see
+:mod:`baselith.core.agent.crew_hierarchical`). Every task result carries its
+coordination tax — ``latency_ms`` and ``cost_usd`` — aggregated on
+:class:`CrewResult` (``total_latency_ms``, ``total_cost_usd``,
+:meth:`CrewResult.breakdown`). For richer coordination (auctions, handoffs,
+pheromones) drop down to :mod:`baselith.core.swarm`.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Final, cast
+
+from baselith.core.agent.agent import Agent, AgentResult
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.budget_context import DEFAULT_LIMITS, standalone_budget
+from baselith.core.utils.concurrency import bounded_gather
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from baselith.core.orchestration.limits import LoopLimits
+
+logger = get_logger(__name__)
+
+_PROCESSES = ("sequential", "parallel", "hierarchical")
+
+DEFAULT_CREW_MAX_PARALLEL: Final[int] = 8
+"""Fallback ceiling on concurrent tasks in ``process="parallel"`` crews."""
+
+
+def _configured_max_parallel() -> int:
+    """The deployment's crew fan-out ceiling (``ORCHESTRATOR_CREW_MAX_PARALLEL``).
+
+    Read at call time, not import time, so a test or a late config reload is
+    honoured; falls back to :data:`DEFAULT_CREW_MAX_PARALLEL` when the config
+    layer is unavailable.
+    """
+    try:
+        from baselith.core.config.orchestration import get_orchestration_config
+
+        return int(get_orchestration_config().crew_max_parallel)
+    except Exception:  # silent-ok: a missing/unloadable config layer must not break crews; the documented default is the safe answer
+        return DEFAULT_CREW_MAX_PARALLEL
+
+
+CostFn = Callable[["Task", Any], float]
+"""Optional injected cost estimator: ``cost_fn(task, output) -> float`` USD."""
+
+
+class _SafeFormatDict(dict):
+    """Leave unknown ``{placeholders}`` intact instead of raising KeyError."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+@dataclass
+class Task:
+    """One unit of crew work.
+
+    Attributes:
+        description: The task prompt. ``{placeholders}`` are filled from
+            ``Crew.run(inputs=...)``; unknown placeholders are left intact.
+        agent: The agent responsible. Optional only when the crew has exactly
+            one agent (auto-assigned).
+        name: Optional label used in :class:`TaskResult` (defaults to
+            ``task-<index>``).
+        expected_output: Optional description of the expected deliverable,
+            appended to the prompt.
+    """
+
+    description: str
+    agent: Agent | None = None
+    name: str | None = None
+    expected_output: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskResult:
+    """Outcome of one crew task.
+
+    Attributes:
+        name: Task label.
+        output: The task agent's validated output (``output_type`` instance
+            when the agent declares one, plain text otherwise).
+        text: The raw final text of the task.
+        agent_index: Index of the executing agent in ``Crew.agents``.
+        latency_ms: Wall-clock milliseconds spent on the whole task cycle —
+            in ``hierarchical`` mode this includes the manager's delegation
+            and review turns (the coordination tax), not just the worker call.
+        cost_usd: Estimated USD cost of the task (``Crew.cost_fn`` when
+            injected, ``0.0`` otherwise).
+        review: Manager review outcome in ``hierarchical`` mode —
+            ``"approved"`` (first output accepted, or fail-open) or
+            ``"revised"`` (one feedback round happened). ``None`` for
+            sequential/parallel runs.
+    """
+
+    name: str
+    output: Any
+    text: str
+    agent_index: int
+    latency_ms: int = 0
+    cost_usd: float = 0.0
+    review: str | None = None
+
+
+@dataclass(frozen=True)
+class AgentUsage:
+    """Per-agent coordination-tax totals (see :meth:`CrewResult.breakdown`)."""
+
+    latency_ms: int = 0
+    cost_usd: float = 0.0
+    task_count: int = 0
+
+
+@dataclass(frozen=True)
+class CrewResult:
+    """Outcome of one :meth:`Crew.run` call, in task order."""
+
+    task_results: list[TaskResult] = field(default_factory=list)
+
+    @property
+    def final(self) -> Any:
+        """The last task's output — the crew's deliverable."""
+        return self.task_results[-1].output if self.task_results else None
+
+    @property
+    def total_latency_ms(self) -> int:
+        """Sum of per-task ``latency_ms`` across the whole run."""
+        return sum(result.latency_ms for result in self.task_results)
+
+    @property
+    def total_cost_usd(self) -> float:
+        """Sum of per-task ``cost_usd`` across the whole run."""
+        return sum(result.cost_usd for result in self.task_results)
+
+    def breakdown(self) -> dict[int, AgentUsage]:
+        """Aggregate latency/cost/task-count per ``agent_index``.
+
+        Returns:
+            Mapping from each executing agent's index in ``Crew.agents``
+            (``-1`` for off-roster agents) to its :class:`AgentUsage` totals.
+        """
+        totals: dict[int, AgentUsage] = {}
+        for result in self.task_results:
+            prev = totals.get(result.agent_index, AgentUsage())
+            totals[result.agent_index] = AgentUsage(
+                latency_ms=prev.latency_ms + result.latency_ms,
+                cost_usd=prev.cost_usd + result.cost_usd,
+                task_count=prev.task_count + 1,
+            )
+        return totals
+
+
+class Crew:
+    """A set of agents executing a task list.
+
+    Args:
+        agents: The crew members. A task without an explicit ``agent`` is
+            auto-assigned only when there is exactly one member.
+        tasks: The work, executed in order (``sequential``) or concurrently
+            (``parallel``).
+        process: ``"sequential"`` (default — each task's prompt receives the
+            accumulated outputs of prior tasks as context), ``"parallel"``
+            (independent tasks, no cross-task context), or ``"hierarchical"``
+            (a ``manager`` agent briefs each worker, reviews its output, and
+            may request exactly one revision — see
+            :mod:`baselith.core.agent.crew_hierarchical`).
+        manager: The managing agent, required (and only used) when
+            ``process="hierarchical"``.
+        cost_fn: Optional ``cost_fn(task, output) -> float`` USD estimator
+            applied to each task's accepted output. Defaults to ``0.0`` per
+            task when omitted; latency is always measured.
+        max_parallel: Ceiling on concurrently running tasks in
+            ``process="parallel"``. Defaults to
+            ``OrchestrationConfig.crew_max_parallel`` (8). Each task is a
+            full LLM call, so the whole task list must never be gathered at
+            once. ``<= 0`` degrades to serial execution.
+        loop_limits: Caps for one ``LoopBudget`` shared by the whole
+            :meth:`run` when no budget is ambient. By default the crew shares
+            one built from the orchestrator's dollar, token and wall-clock
+            caps, with the iteration and tool-call counters lifted (every
+            task's ticks land on the shared budget; each agent keeps its own
+            ``max_iterations`` — see
+            :func:`baselith.core.agent._safety.shared_loop_limits`). An explicit
+            ``LoopLimits`` replaces those caps; ``None`` binds none, so each
+            task's ``Agent.run`` falls back to its own per-run budget. An
+            ambient budget (an orchestrated request, or an enclosing
+            standalone run) always wins. An agent's own explicit
+            ``loop_limits`` still apply to its task, as a child budget that
+            also charges the crew's.
+
+    Raises:
+        ValueError: Empty task list, unknown ``process``, hierarchical
+            process without a ``manager``, or a task without an agent in a
+            multi-agent crew.
+    """
+
+    def __init__(
+        self,
+        agents: Sequence[Agent],
+        tasks: Sequence[Task],
+        *,
+        process: str = "sequential",
+        manager: Agent | None = None,
+        cost_fn: CostFn | None = None,
+        max_parallel: int | None = None,
+        loop_limits: LoopLimits | None = DEFAULT_LIMITS,
+    ) -> None:
+        if not tasks:
+            raise ValueError("Crew needs at least one task.")
+        if process not in _PROCESSES:
+            raise ValueError(
+                f"Unknown process {process!r}; expected one of {_PROCESSES}."
+            )
+        if process == "hierarchical" and manager is None:
+            raise ValueError(
+                "process='hierarchical' requires a manager agent "
+                "(Crew(..., manager=Agent(...)))."
+            )
+        self.agents = list(agents)
+        self.tasks = list(tasks)
+        self.process = process
+        self.manager = manager
+        self.cost_fn = cost_fn
+        self.max_parallel = max_parallel
+        self.loop_limits = loop_limits
+        for index, task in enumerate(self.tasks):
+            if task.agent is None:
+                if len(self.agents) == 1:
+                    task.agent = self.agents[0]
+                else:
+                    raise ValueError(
+                        f"Task {task.name or index} has no agent assigned; "
+                        "explicit assignment is required when the crew has "
+                        "more than one agent."
+                    )
+
+    # -- internals ---------------------------------------------------------
+
+    def _task_prompt(
+        self, task: Task, inputs: dict[str, Any], context: list[tuple[str, str]]
+    ) -> str:
+        prompt = task.description.format_map(_SafeFormatDict(inputs))
+        if task.expected_output:
+            prompt += f"\n\nExpected output: {task.expected_output}"
+        if context:
+            rendered = "\n\n".join(
+                f"[{name}]\n{text}" for name, text in context if text
+            )
+            prompt += f"\n\nContext from previous tasks:\n{rendered}"
+        return prompt
+
+    def _agent_index(self, agent: Agent) -> int:
+        for index, member in enumerate(self.agents):
+            if member is agent:
+                return index
+        return -1  # assigned agent outside the roster — allowed, flagged as -1
+
+    def _task_cost(self, task: Task, output: Any) -> float:
+        return self.cost_fn(task, output) if self.cost_fn is not None else 0.0
+
+    async def _timed_agent_run(
+        self, task: Task, prompt: str, scope: Any = None, index: int = 0
+    ) -> tuple[AgentResult[Any], int]:
+        """Run the task's agent and return (result, elapsed milliseconds).
+
+        Under a checkpoint ``scope`` the call is a recorded step (see
+        :mod:`baselith.core.agent._crew_durable`); a replayed one costs ~0 ms.
+        """
+        from baselith.core.agent._crew_durable import durable_agent_run
+
+        assert task.agent is not None  # guaranteed by __init__
+        start = time.perf_counter()
+        result = await durable_agent_run(
+            task.agent, prompt, scope, role="task", index=index
+        )
+        return result, int((time.perf_counter() - start) * 1000)
+
+    async def _run_task(
+        self,
+        index: int,
+        task: Task,
+        inputs: dict[str, Any],
+        context: list[tuple[str, str]],
+        scope: Any = None,
+    ) -> TaskResult:
+        assert task.agent is not None  # guaranteed by __init__
+        name = task.name or f"task-{index}"
+        prompt = self._task_prompt(task, inputs, context)
+        logger.debug("crew_task_start name=%s", name)
+        result, latency_ms = await self._timed_agent_run(task, prompt, scope, index)
+        return TaskResult(
+            name=name,
+            output=result.output,
+            text=result.text,
+            agent_index=self._agent_index(task.agent),
+            latency_ms=latency_ms,
+            cost_usd=self._task_cost(task, result.output),
+        )
+
+    # -- public API --------------------------------------------------------
+
+    def _crew_limits(self) -> LoopLimits | None:
+        """The caps the run binds when nothing is ambient (see ``loop_limits``)."""
+        if self.loop_limits is DEFAULT_LIMITS:
+            from baselith.core.agent._safety import shared_loop_limits
+
+            return shared_loop_limits()
+        return self.loop_limits
+
+    async def run(
+        self,
+        inputs: dict[str, Any] | None = None,
+        *,
+        checkpoint: Any | None = None,
+    ) -> CrewResult:
+        """Execute the task list and return per-task results in order.
+
+        The whole run — every task, and in ``hierarchical`` mode every manager
+        turn — shares one ambient ``LoopBudget`` (see ``loop_limits``); a
+        breach of its dollar, token or wall-clock cap aborts the crew with
+        :class:`~baselith.core.orchestration.limits.BudgetExceededError`.
+
+        Args:
+            inputs: Template inputs for the task descriptions.
+            checkpoint: Optional
+                :class:`~baselith.core.orchestration.checkpoint.CheckpointManager`
+                (or a scope of one), mirroring ``Agent.run(checkpoint=...)``.
+                Defaults to the run's ambient checkpoint, which the
+                orchestrator binds while a flow handler runs. With one, every
+                agent call of the crew is a recorded step under a child scope:
+                a resumed crew replays completed tasks' outputs instead of
+                re-running them, and the interrupted task's tool calls replay
+                too (see :mod:`baselith.core.agent._crew_durable`). Without
+                one nothing changes.
+        """
+        from baselith.core.agent._crew_durable import crew_scope
+
+        resolved = inputs or {}
+        scope = crew_scope(self, resolved, checkpoint)
+        with standalone_budget(self._crew_limits()):
+            return await self._run(resolved, scope)
+
+    async def _run(self, inputs: dict[str, Any], scope: Any = None) -> CrewResult:
+        if self.process == "hierarchical":
+            from baselith.core.agent.crew_hierarchical import run_hierarchical
+
+            return await run_hierarchical(self, inputs, scope)
+        if self.process == "parallel":
+            # Bounded, not a bare gather: every task is a full LLM call, so a
+            # caller-sized task list would otherwise open that many
+            # simultaneous provider calls. Order is preserved.
+            limit = (
+                _configured_max_parallel()
+                if self.max_parallel is None
+                else self.max_parallel
+            )
+            results = await bounded_gather(
+                [
+                    self._run_task(i, task, inputs, [], scope)
+                    for i, task in enumerate(self.tasks)
+                ],
+                limit=limit,
+            )
+            return CrewResult(task_results=cast(list[TaskResult], results))
+
+        context: list[tuple[str, str]] = []
+        task_results: list[TaskResult] = []
+        for index, task in enumerate(self.tasks):
+            task_result = await self._run_task(index, task, inputs, context, scope)
+            task_results.append(task_result)
+            context.append((task_result.name, task_result.text))
+        return CrewResult(task_results=task_results)
+
+
+__all__ = [
+    "DEFAULT_CREW_MAX_PARALLEL",
+    "AgentUsage",
+    "CostFn",
+    "Crew",
+    "CrewResult",
+    "Task",
+    "TaskResult",
+]

@@ -1,5 +1,12 @@
 # v0.3.x → v0.4.0 Migration Guide
 
+<!-- ns-migrate: skip-file (a historical guide: it quotes the 0.x module names) -->
+
+!!! note "Historical"
+    This guide covers the v0.3.x → v0.4.0 module moves and uses the module
+    names of that time. Since 1.0, `core` is `baselith.core` and `plugins` is
+    `baselith.plugins`; see [Migrating to 1.0](migrating-to-1-0.md).
+
 ## Overview
 
 BaselithCore v0.4.0 completes the architectural refactoring to enforce the **Sacred Core** principle. This guide helps users migrate plugins and applications from v0.3.x to v0.4.0.
@@ -250,7 +257,7 @@ upgrade, so nothing forces the rewrite.
 **Explanation**: that is the compatibility shim — `core.agents.browser_agent`
 imports `BrowserAgent` from `plugins.browser_agent.agent`, so both paths refer
 to the same class. Move to the plugin path anyway so your code does not depend
-on the deprecated layer:
+on the deprecated layer (1.0 removes `core.agents` and `core.goals`):
 
 ```python
 from plugins.browser_agent import BrowserAgent

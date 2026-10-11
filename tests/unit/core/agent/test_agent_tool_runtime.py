@@ -25,9 +25,9 @@ from typing import Any
 
 import pytest
 
-from core.agent.agent import Agent
-from core.reasoning.react import ToolDefinition
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.agent.agent import Agent
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class _ScriptedService:
@@ -118,9 +118,12 @@ class TestDeadline:
         assert "failed" in observation.lower()
 
     async def test_budget_deadline_shrinks_the_cap(self) -> None:
-        from core.agent._tool_runtime import effective_tool_timeout
-        from core.orchestration.budget_context import activate_budget, deactivate_budget
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.agent._tool_runtime import effective_tool_timeout
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         agent = Agent(tool_timeout=100.0)
         budget = LoopBudget(limits=LoopLimits(max_seconds=1.0))
@@ -134,7 +137,7 @@ class TestDeadline:
         assert bounded <= 1.0
 
     async def test_no_cap_and_no_budget_means_no_deadline(self) -> None:
-        from core.agent._tool_runtime import effective_tool_timeout
+        from baselith.core.agent._tool_runtime import effective_tool_timeout
 
         assert effective_tool_timeout(Agent(tool_timeout=None)) is None
 
@@ -204,7 +207,7 @@ class TestOverlap:
 class TestGateOrderIsPreserved:
     async def test_a_refusal_aborts_the_turn_before_later_tools_run(self) -> None:
         """Fail-closed refusals must not race the calls that follow them."""
-        from core.orchestration.limits import BudgetExceededError
+        from baselith.core.orchestration.limits import BudgetExceededError
 
         ran: list[str] = []
 
@@ -223,8 +226,8 @@ class TestGateOrderIsPreserved:
             llm_service=_ScriptedService([_call("first"), _call("second")]),
         )
 
-        import core.agent._tool_dispatch as dispatch
-        from core.orchestration.limits import LoopBudget
+        import baselith.core.agent._tool_dispatch as dispatch
+        from baselith.core.orchestration.limits import LoopBudget
 
         original = dispatch._gate
         snapshot = LoopBudget().snapshot()

@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.orchestration.contract import (
+from baselith.core.orchestration.contract import (
     AgentContract,
     ContractValidator,
     ContractViolationError,
@@ -103,7 +103,7 @@ def test_load_contract_missing_schema_ref_fails_closed(tmp_path):
 
 
 def test_max_dynamic_subtasks_default_and_env(monkeypatch):
-    from core.orchestration.handlers.swarm_agents import max_dynamic_subtasks
+    from baselith.core.orchestration.handlers.swarm_agents import max_dynamic_subtasks
 
     assert max_dynamic_subtasks() == 4
     monkeypatch.setenv("BASELITH_SWARM_MAX_SUBTASKS", "2")
@@ -117,7 +117,7 @@ def test_max_dynamic_subtasks_default_and_env(monkeypatch):
 async def test_decomposition_truncates_model_output(monkeypatch):
     import json
 
-    from core.orchestration.handlers.swarm_handler import SwarmHandler
+    from baselith.core.orchestration.handlers.swarm_handler import SwarmHandler
 
     handler = SwarmHandler()
 

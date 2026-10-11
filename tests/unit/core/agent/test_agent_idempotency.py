@@ -7,10 +7,10 @@ same ``run_id`` and asserts the count did not move.
 
 import pytest
 
-from core.agent import Agent
-from core.orchestration.idempotency import InMemoryToolLedger, ToolOutcome
-from core.reasoning.react import ToolDefinition
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.agent import Agent
+from baselith.core.orchestration.idempotency import InMemoryToolLedger, ToolOutcome
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 from tests.unit.core.agent.test_agent import _mock_service
 
 
@@ -168,10 +168,10 @@ class TestWhenTheLedgerIsBypassed:
     @pytest.mark.asyncio
     async def test_the_ledger_can_be_switched_off(self, monkeypatch):
         """An operator can still choose to record nothing, explicitly."""
-        from core.orchestration.ledger_factory import reset_tool_ledger
+        from baselith.core.orchestration.ledger_factory import reset_tool_ledger
 
         monkeypatch.setenv("ORCHESTRATOR_TOOL_LEDGER", "off")
-        import core.config.orchestration as orchestration_config
+        import baselith.core.config.orchestration as orchestration_config
 
         monkeypatch.setattr(orchestration_config, "_orchestration_config", None)
         reset_tool_ledger()

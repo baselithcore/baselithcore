@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-import core.prompts.registry as registry_module
-from core.chat.prompt import (
+import baselith.core.prompts.registry as registry_module
+from baselith.core.chat.prompt import (
     _CATALOG_FILE,
     _SYSTEM_PROMPT_PREFIX,
     _SYSTEM_PROMPT_SUFFIX,
@@ -14,7 +14,7 @@ from core.chat.prompt import (
     _system_prompt,
     build_prompt,
 )
-from core.prompts.loader import parse_prompt_file
+from baselith.core.prompts.loader import parse_prompt_file
 
 
 @pytest.fixture(autouse=True)

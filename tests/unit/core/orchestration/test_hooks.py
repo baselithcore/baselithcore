@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.hooks import (
+from baselith.core.orchestration.hooks import (
     ToolHookEvent,
     ToolHookRegistry,
     get_tool_hook_registry,

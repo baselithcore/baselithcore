@@ -34,8 +34,8 @@ class TestPluginBulkOps:
         )
         _make_config(tmp_path, {})
 
-        from core.cli.commands.plugin import local as local_mod
-        from core.cli.commands.plugin import local_shared
+        from baselith.core.cli.commands.plugin import local as local_mod
+        from baselith.core.cli.commands.plugin import local_shared
 
         with patch.object(
             local_shared, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -64,8 +64,8 @@ class TestPluginBulkOps:
         )
         _make_config(tmp_path, {})
 
-        from core.cli.commands.plugin import local as local_mod
-        from core.cli.commands.plugin import local_shared
+        from baselith.core.cli.commands.plugin import local as local_mod
+        from baselith.core.cli.commands.plugin import local_shared
 
         with patch.object(
             local_shared, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -91,7 +91,7 @@ class TestPluginCreateInteractive:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "plugins").mkdir()
 
-        from core.cli.commands.plugin.create import create_plugin
+        from baselith.core.cli.commands.plugin.create import create_plugin
 
         result = create_plugin("my-new-plugin", "agent")
         assert result == 0
@@ -114,7 +114,7 @@ class TestPluginCreateInteractive:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "plugins").mkdir()
 
-        from core.cli.commands.plugin.create import create_plugin
+        from baselith.core.cli.commands.plugin.create import create_plugin
 
         assert create_plugin("weather_agent", "agent") == 0
         plugin_py = (tmp_path / "plugins" / "weather_agent" / "plugin.py").read_text()
@@ -128,7 +128,7 @@ class TestPluginCreateInteractive:
         monkeypatch.chdir(tmp_path)
         (tmp_path / "plugins").mkdir()
 
-        from core.cli.commands.plugin.create import create_plugin
+        from baselith.core.cli.commands.plugin.create import create_plugin
 
         assert create_plugin("testplugin", "router") == 0
 
@@ -147,7 +147,7 @@ class TestPluginCreateInteractive:
         plugin_dir = tmp_path / "plugins" / "existing-plugin"
         plugin_dir.mkdir(parents=True)
 
-        from core.cli.commands.plugin.create import create_plugin
+        from baselith.core.cli.commands.plugin.create import create_plugin
 
         result = create_plugin("existing-plugin", "agent")
         assert result == 1
@@ -158,7 +158,7 @@ class TestPluginCreateInteractive:
         (tmp_path / "plugins").mkdir()
         _make_config(tmp_path, {})
 
-        from core.cli.commands.plugin import create as create_mod
+        from baselith.core.cli.commands.plugin import create as create_mod
 
         # Mock user inputs for the wizard
         inputs = iter(
@@ -193,38 +193,38 @@ class TestPluginDispatcher:
 
     def test_cli_plugin_deps_dispatch(self):
         """Test CLI dispatches to plugin deps command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["baselith", "plugin", "deps", "check", "my-plugin"]):
-            with patch("core.cli.__main__.cmd_plugin", return_value=0) as mock:
+            with patch("baselith.core.cli.__main__.cmd_plugin", return_value=0) as mock:
                 main()
                 mock.assert_called_once()
 
     def test_cli_plugin_config_dispatch(self):
         """Test CLI dispatches to plugin config command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["baselith", "plugin", "config", "show"]):
-            with patch("core.cli.__main__.cmd_plugin", return_value=0) as mock:
+            with patch("baselith.core.cli.__main__.cmd_plugin", return_value=0) as mock:
                 main()
                 mock.assert_called_once()
 
     def test_cli_plugin_logs_dispatch(self):
         """Test CLI dispatches to plugin logs command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch(
             "sys.argv", ["baselith", "plugin", "logs", "my-plugin", "--lines", "20"]
         ):
-            with patch("core.cli.__main__.cmd_plugin", return_value=0) as mock:
+            with patch("baselith.core.cli.__main__.cmd_plugin", return_value=0) as mock:
                 main()
                 mock.assert_called_once()
 
     def test_cli_plugin_tree_dispatch(self):
         """Test CLI dispatches to plugin tree command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["baselith", "plugin", "tree"]):
-            with patch("core.cli.__main__.cmd_plugin", return_value=0) as mock:
+            with patch("baselith.core.cli.__main__.cmd_plugin", return_value=0) as mock:
                 main()
                 mock.assert_called_once()

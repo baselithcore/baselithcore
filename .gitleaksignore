@@ -4,7 +4,7 @@
 # real secret in a NEW commit at the same path still fails the gate.
 ff48f7d19f508ebb9f503db7db8b3ed35a90d7b9:tests/unit/plugins_tests/test_baselithbot_plugin_inbound.py:generic-api-key:130
 1b6386b3821f9283f8641d342466ba5da025d103:mkdocs-site/docs/api/rest.md:curl-auth-header:56
-595298f00a8725442ef4f6aff05bd9a85a291ea4:core/world_model/mandates.py:generic-api-key:130
+595298f00a8725442ef4f6aff05bd9a85a291ea4:baselith/core/world_model/mandates.py:generic-api-key:130
 37c4b83377465046d16f3067267f6dfed2715c93:tests/unit/plugins_tests/test_baselithbot_plugin.py:generic-api-key:1220
 d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:tests/unit/core/services/vision/test_vision_service.py:generic-api-key:23
 d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:stripe-access-token:49
@@ -27,10 +27,10 @@ d4a44a8600ab18efae18b5db5ef58ebe4cbdb184:mkdocs-site/docs/api/rest.md:curl-auth-
 2cccc127c9cbab30603705ffcd746360e1d27ce2:mkdocs-site/docs/api/rest.md:curl-auth-header:528
 
 # Triaged false positives (2026-09-13): a fake test fixture value, and a
-# dict-key name constant in core/plugins/manifest_rewrite.py (a field name,
+# dict-key name constant in baselith/core/plugins/manifest_rewrite.py (a field name,
 # not a credential) both trip the entropy heuristic on the word "KEY".
 31897c2eae3dbb9f358de0c2454e4a3adfd1815c:tests/unit/core/task_queue/test_dead_letter_hardening.py:generic-api-key:176
-ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generic-api-key:30
+ce05817f025e1f05dc8e12dce18302224bb51c53:baselith/core/plugins/manifest_rewrite.py:generic-api-key:30
 
 # Triaged false positive (2026-09-13): a 40-hex git commit hash quoted in a
 # work-log note trips the entropy heuristic; it is not a credential. Flagged
@@ -43,3 +43,10 @@ ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generi
 # commit that added it. Reworded going forward (no more quoted literal); this
 # one historical commit stays allowlisted since it is already pushed.
 9fa7fed3de1b681046b02294bbf31867180c9802:.gitleaksignore:generic-api-key:30
+
+# The namespace move rewrote the two entries above from core/ to
+# baselith/core/, but a fingerprint names the path as it was in that commit,
+# so those rewritten entries no longer match. Same two false positives, under
+# their historical paths.
+ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generic-api-key:30
+595298f00a8725442ef4f6aff05bd9a85a291ea4:core/world_model/mandates.py:generic-api-key:130

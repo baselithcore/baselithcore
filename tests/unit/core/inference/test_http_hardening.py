@@ -6,8 +6,8 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from core.config.inference import EmbeddingConfig, RerankConfig
-from core.services.inference import EmbeddingService, InferenceError
+from baselith.core.config.inference import EmbeddingConfig, RerankConfig
+from baselith.core.services.inference import EmbeddingService, InferenceError
 
 
 @pytest.mark.parametrize(

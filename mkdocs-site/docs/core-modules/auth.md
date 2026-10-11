@@ -3,7 +3,7 @@ title: Authentication & Authorization
 description: Identity management and access control system
 ---
 
-The `core/auth` module provides a secure, flexible system for managing user identity and controlling access to system resources. It supports JWT-based authentication, API key validation, and Role-Based Access Control (RBAC).
+The `baselith/core/auth` module provides a secure, flexible system for managing user identity and controlling access to system resources. It supports JWT-based authentication, API key validation, and Role-Based Access Control (RBAC).
 
 ## Architecture
 
@@ -28,15 +28,15 @@ each concern can be read (and reviewed) on its own:
 
 | Module | Responsibility |
 | --- | --- |
-| `core.auth.jwt` | `JWTHandler` itself: construction, the **verification** path (decode → blacklist → family → epoch), revocation, rotation and the short-lived in-process verify cache. |
-| `core.auth._jwt_issue` | `TokenIssuanceMixin` — **minting**: assembling the claim set for access and refresh tokens and handing it to the key ring. Never touches Redis. |
-| `core.auth._jwt_keys` | `JWTKeyRing` — signing/verification key material, `kid` selection, algorithm safety. |
-| `core.auth._jwt_claims` | The reserved-claim set and the `extra_claims` sanitizer. |
-| `core.auth._token_epoch` | `TokenEpochMixin` — per-user token epochs for bulk invalidation. |
+| `baselith.core.auth.jwt` | `JWTHandler` itself: construction, the **verification** path (decode → blacklist → family → epoch), revocation, rotation and the short-lived in-process verify cache. |
+| `baselith.core.auth._jwt_issue` | `TokenIssuanceMixin` — **minting**: assembling the claim set for access and refresh tokens and handing it to the key ring. Never touches Redis. |
+| `baselith.core.auth._jwt_keys` | `JWTKeyRing` — signing/verification key material, `kid` selection, algorithm safety. |
+| `baselith.core.auth._jwt_claims` | The reserved-claim set and the `extra_claims` sanitizer. |
+| `baselith.core.auth._token_epoch` | `TokenEpochMixin` — per-user token epochs for bulk invalidation. |
 
 The public surface is unchanged: `create_token`, `create_refresh_token`,
 `verify_token`, `revoke_token` and `rotate_refresh_token` are all methods on
-`JWTHandler`, imported as `from core.auth import JWTHandler`.
+`JWTHandler`, imported as `from baselith.core.auth import JWTHandler`.
 
 ---
 
@@ -94,7 +94,7 @@ system: with HMAC, **every service that can verify a token can also mint one**,
 and **rotating the key invalidates every live session at once** — so in practice
 it never gets rotated.
 
-A *key ring* (`core.auth._jwt_keys.JWTKeyRing`) removes both. Verification
+A *key ring* (`baselith.core.auth._jwt_keys.JWTKeyRing`) removes both. Verification
 accepts any key in the ring, chosen by the token's `kid` header, while signing
 uses exactly one:
 
@@ -223,8 +223,8 @@ When a token is revoked (e.g., during logout):
     identity, so protected routes answer **401** while Redis is down. Two
     deliberate exceptions: a verification still held in the in-process cache
     (≤5 s) keeps working, and the per-user **epoch** read degrades to "no
-    epoch" instead of raising (`core/auth/_token_epoch.py`) so token *minting*
-    never blocks on the cache. The API-key denylist (`core/auth/api_keys.py`)
+    epoch" instead of raising (`baselith/core/auth/_token_epoch.py`) so token *minting*
+    never blocks on the cache. The API-key denylist (`baselith/core/auth/api_keys.py`)
     is governed by its own setting instead — see
     [`API_KEY_REVOCATION_FAIL_MODE`](#api-key-revocation-on-a-denylist-outage)
     below.
@@ -237,7 +237,7 @@ When a token is revoked (e.g., during logout):
 
 ### API key revocation on a denylist outage
 
-The API-key path (`core/auth/api_keys.py`) has its own shared **Redis
+The API-key path (`baselith/core/auth/api_keys.py`) has its own shared **Redis
 denylist**, separate from the JWT blacklist above — used only when the
 deployment declares a Redis cache backend (`CACHE_BACKEND=redis`) — and its own
 policy for what to do when that denylist cannot be read:
@@ -289,7 +289,7 @@ Access-token verification performs no family lookups (no added latency).
 
 ## Role-Based Access Control (RBAC)
 
-BaselithCore uses the `AuthRole` enum (`core/auth/types.py`) to control access to API endpoints and internal services:
+BaselithCore uses the `AuthRole` enum (`baselith/core/auth/types.py`) to control access to API endpoints and internal services:
 
 | Role        | Description                                                                 |
 | ----------- | --------------------------------------------------------------------------- |
@@ -306,7 +306,7 @@ BaselithCore uses the `AuthRole` enum (`core/auth/types.py`) to control access t
 You can enforce role requirements in FastAPI routes using the `enforce_auth` utility:
 
 ```python
-from core.middleware.security import SecurityManager
+from baselith.core.middleware.security import SecurityManager
 
 security = SecurityManager()
 
@@ -327,7 +327,7 @@ API keys can be registered with an optional `expires_at` timestamp. The `APIKeyV
 
 ```python
 from datetime import datetime, timedelta, timezone
-from core.auth.manager import get_auth_manager
+from baselith.core.auth.manager import get_auth_manager
 
 auth = get_auth_manager()
 expires = datetime.now(timezone.utc) + timedelta(days=30)
@@ -347,7 +347,7 @@ Roles are coarse. For least-privilege access — "this key may only publish to
 webhooks, nothing else" — BaselithCore layers **capability scopes** on top of
 roles. A scope is a `resource:action` string (e.g. `chat:write`,
 `webhooks:write`, `tenants:manage`). The grammar and the default role→scope map
-live in `core/auth/scopes.py`.
+live in `baselith/core/auth/scopes.py`.
 
 ### Grammar
 
@@ -397,8 +397,8 @@ Use the manager at any choke point — a route handler, a tool gate, a service
 call — independent of HTTP routing:
 
 ```python
-from core.auth.manager import get_auth_manager
-from core.auth.types import AuthUser
+from baselith.core.auth.manager import get_auth_manager
+from baselith.core.auth.types import AuthUser
 
 auth = get_auth_manager()
 
@@ -455,8 +455,8 @@ token = await auth.create_token(
 
 ## OAuth 2.1 authorization-server primitives
 
-`core.auth.oidc` is the *relying party* side: it verifies tokens minted by
-someone else. `core.auth.oauth` is the opposite direction — the primitives for
+`baselith.core.auth.oidc` is the *relying party* side: it verifies tokens minted by
+someone else. `baselith.core.auth.oauth` is the opposite direction — the primitives for
 **issuing** tokens others verify. It is pure protocol: no database, no HTTP
 framework, no user interface, and no dependency outside the standard library,
 `cryptography` and PyJWT. Everything stateful — a client registry, authorization
@@ -464,7 +464,7 @@ code storage, signing-key persistence, routes — is deliberately left to the
 consumer, which is what lets the same rules serve any storage or transport.
 
 ```python
-from core.auth.oauth import (
+from baselith.core.auth.oauth import (
     ClientType, GrantType, OAuthClient, AuthorizationRequest,
     validate_authorization_request, validate_redirect_uri, resolve_scope,
     assert_grant_allowed, verify_code_challenge, derive_code_challenge,
@@ -563,7 +563,7 @@ consumer; this module only decides whether the exchange is allowed and how
 narrow the result must be.
 
 ```python
-from core.auth.oauth import (
+from baselith.core.auth.oauth import (
     SubjectTokenContext, TokenExchangeRequest,
     validate_exchange_request, validate_delegation, resolve_exchange_scope,
     build_actor_claim, build_may_act_claim,
@@ -769,7 +769,7 @@ AUDIT | AUTH | unauthorized | error=InvalidTokenError reason=Invalid token ip=1.
 AUDIT | AUTH | forbidden    | user=u-123 roles=['user'] ip=10.0.0.5 path=/admin
 ```
 
-The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers, and the `reason` field goes through `core.utils.logsafe.sanitize_log_value` for the same reason (it can carry caller-controlled text, such as an unrecognised `kid`).
+The `user-agent` field is truncated to 200 characters to prevent log injection via oversized headers, and the `reason` field goes through `baselith.core.utils.logsafe.sanitize_log_value` for the same reason (it can carry caller-controlled text, such as an unrecognised `kid`).
 
 ---
 
@@ -791,7 +791,7 @@ Both 401 paths in `enforce_auth` — a credential that raised an `AuthError`, an
 An **expired** token is the deliberate exception: it still raises `TokenExpiredError("Token has expired")`, a fixed string of our own (never PyJWT's), because a client needs to distinguish "refresh and retry" from "re-authenticate".
 
 !!! warning "Don't reintroduce the leak"
-    Any new code that turns an auth exception into an HTTP response must send a fixed message, not `str(exc)`. Route-level handlers get this for free through the RFC 9457 envelope in `core/api/errors.py`.
+    Any new code that turns an auth exception into an HTTP response must send a fixed message, not `str(exc)`. Route-level handlers get this for free through the RFC 9457 envelope in `baselith/core/api/errors.py`.
 
 ---
 
@@ -801,14 +801,14 @@ When a protected endpoint is called, `enforce_auth` writes the authenticated `Au
 
 ```python
 # In any service called from a protected endpoint:
-from core.context import get_current_tenant_id
+from baselith.core.context import get_current_tenant_id
 
 tenant = get_current_tenant_id()  # Always correct — set by enforce_auth
 ```
 
 ### Reserved tenant ids cannot be minted
 
-`core.context.RESERVED_TENANT_IDS` (currently `{"system"}`) names identities the
+`baselith.core.context.RESERVED_TENANT_IDS` (currently `{"system"}`) names identities the
 framework binds for its own maintenance work — see
 [`system_tenant_scope()`](db.md#row-level-security-session-binding) and
 [Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security).
@@ -816,14 +816,14 @@ Migration `010_system_tenant_rls_exemption` grants the `system` tenant
 visibility of **every** tenant's rows, so a token that asserted it would be a
 total-access credential.
 
-Both `JWTHandler.create_token` and `create_refresh_token` (`core.auth._jwt_issue`)
+Both `JWTHandler.create_token` and `create_refresh_token` (`baselith.core.auth._jwt_issue`)
 check `tenant_id` against this set before embedding it and raise
-`core.context.ReservedTenantError` (a `ValueError` subclass) if it matches —
+`baselith.core.context.ReservedTenantError` (a `ValueError` subclass) if it matches —
 refusing the claim at issuance, rather than relying on every verifier to reject
 it later. The request boundary applies the same refusal on the way in:
-`enforce_auth` (`core/middleware/security.py`) and `TenantMiddleware`
-(`core/middleware/tenant.py`) bind a principal's tenant via
-`core.context.bind_principal_tenant`, which raises the same
+`enforce_auth` (`baselith/core/middleware/security.py`) and `TenantMiddleware`
+(`baselith/core/middleware/tenant.py`) bind a principal's tenant via
+`baselith.core.context.bind_principal_tenant`, which raises the same
 `ReservedTenantError` rather than let a token or API key that names `system`
 be bound to the request context.
 
@@ -831,7 +831,7 @@ be bound to the request context.
 
 ## Configuration
 
-Settings are managed via `SecurityConfig` in `core/config/security.py`.
+Settings are managed via `SecurityConfig` in `baselith/core/config/security.py`.
 
 | Variable               | Default | Description                                                  |
 | ---------------------- | ------- | ------------------------------------------------------------ |

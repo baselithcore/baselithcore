@@ -7,8 +7,8 @@ the user context at the tenant/auth chokepoints.
 
 import pytest
 
-from core.auth import AuthRole, AuthUser
-from core.context import (
+from baselith.core.auth import AuthRole, AuthUser
+from baselith.core.context import (
     get_current_tenant_id,
     get_current_user_id,
     reset_tenant_context,
@@ -19,8 +19,8 @@ from core.context import (
     set_tenant_context,
     set_user_context,
 )
-from core.middleware.tenant import TenantMiddleware
-from core.plugins.interface import Plugin, PluginMetadata
+from baselith.core.middleware.tenant import TenantMiddleware
+from baselith.core.plugins.interface import Plugin, PluginMetadata
 
 
 class TestUserContext:

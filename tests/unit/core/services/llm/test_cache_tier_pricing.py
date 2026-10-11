@@ -3,7 +3,7 @@
 The providers report three prompt-side buckets — fresh input, cache reads
 (~0.1x input) and cache writes (~1.25x input) — and ``Usage`` has carried all
 three for a while. The resolver every accounting site used
-(``usage_split``, now :func:`~core.services.llm.usage.billed_usage`) folded
+(``usage_split``, now :func:`~baselith.core.services.llm.usage.billed_usage`) folded
 them into one "input" number, and each site then forwarded that as
 ``prompt_tokens`` while taking the ``cache_read_tokens=0`` default. So a cache
 read was billed at the *full* input rate in the ``LoopBudget``, in the tenant
@@ -23,13 +23,13 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.service import LLMService
-from core.services.llm.stream_events import StreamEnd, generate_stream_events
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
-from core.services.llm.usage import Usage, billed_usage
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.stream_events import StreamEnd, generate_stream_events
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.usage import Usage, billed_usage
 
 pytestmark = [pytest.mark.unit]
 
@@ -55,7 +55,7 @@ def _isolated_token_ledger():
     so anything reported here would accumulate for the rest of the session
     and trip its 10 000-token agent cap in unrelated tests.
     """
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -65,7 +65,7 @@ def _isolated_token_ledger():
 
 
 def _service(*, native: bool = False, messages: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -92,7 +92,9 @@ def booked(monkeypatch):
     async def _record(usd, **_kwargs):
         recorded.append(usd)
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
     return recorded
 
 
@@ -100,7 +102,7 @@ class TestThePriceOfTheReviewersCall:
     """The arithmetic the rest of the module asserts through the paths."""
 
     def test_the_cache_aware_and_conflated_figures(self):
-        from core.models.pricing import estimate_cost
+        from baselith.core.models.pricing import estimate_cost
 
         cache_aware = estimate_cost(
             MODEL,
@@ -117,7 +119,7 @@ class TestThePriceOfTheReviewersCall:
         assert conflated / cache_aware == pytest.approx(4.83, abs=0.01)
 
     def test_the_same_ratio_on_a_second_family(self):
-        from core.models.pricing import estimate_cost
+        from baselith.core.models.pricing import estimate_cost
 
         cache_aware = estimate_cost(
             "gpt-4o-mini",
@@ -174,7 +176,7 @@ class TestEveryPathBooksTheCacheAwarePrice:
 
             return _chunks(), None, "openai", MODEL
 
-        with patch("core.services.llm._streaming.open_stream", _open_stream):
+        with patch("baselith.core.services.llm._streaming.open_stream", _open_stream):
             _ = [c async for c in service.generate_response_stream("q")]
 
         assert booked == [pytest.approx(CACHE_AWARE_USD)]
@@ -184,7 +186,7 @@ class TestEveryPathBooksTheCacheAwarePrice:
         result = LLMResult(text="hi", tokens_used=TOTAL_TOKENS, usage=CACHED_TURN)
 
         with patch(
-            "core.services.llm.structured._native_with_retry",
+            "baselith.core.services.llm.structured._native_with_retry",
             AsyncMock(return_value=result),
         ):
             await generate_structured(service, "q", model=MODEL)
@@ -209,7 +211,7 @@ class TestEveryPathBooksTheCacheAwarePrice:
         result = LLMResult(text="hi", tokens_used=TOTAL_TOKENS, usage=CACHED_TURN)
 
         with patch(
-            "core.services.llm.message_runtime._messages_with_retry",
+            "baselith.core.services.llm.message_runtime._messages_with_retry",
             AsyncMock(return_value=result),
         ):
             await generate_messages(service, HISTORY, model=MODEL)
@@ -235,8 +237,11 @@ class TestTheRequestBudgetSeesTheSamePrice:
         self, booked
     ):
         """``budget_usd`` between the two figures: the run must complete."""
-        from core.orchestration.budget_context import activate_budget, deactivate_budget
-        from core.orchestration.limits import LoopBudget, LoopLimits
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
         service = _service(native=True)
         result = LLMResult(text="hi", tokens_used=TOTAL_TOKENS, usage=CACHED_TURN)
@@ -244,7 +249,7 @@ class TestTheRequestBudgetSeesTheSamePrice:
         token = activate_budget(budget)
         try:
             with patch(
-                "core.services.llm.structured._native_with_retry",
+                "baselith.core.services.llm.structured._native_with_retry",
                 AsyncMock(return_value=result),
             ):
                 answer = await generate_structured(service, "q", model=MODEL)
@@ -257,7 +262,7 @@ class TestTheRequestBudgetSeesTheSamePrice:
 
 class TestTheSpanReportsTheBucketsSeparately:
     async def test_the_semconv_attributes_split_fresh_input_from_cache(self):
-        from core.services.llm._accounting import set_usage_span_attributes
+        from baselith.core.services.llm._accounting import set_usage_span_attributes
 
         attributes: dict = {}
         span = SimpleNamespace(set_attribute=lambda k, v: attributes.update({k: v}))

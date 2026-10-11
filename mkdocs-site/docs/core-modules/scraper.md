@@ -3,10 +3,10 @@ title: Web Scraper
 description: High-performance web scraping with HTTpx and Playwright support
 ---
 
-The canonical web scraping implementation now lives in the official plugin `plugins/web_scraper/`. The historical `core/scraper` surface remains available as a compatibility layer, but the framework no longer treats scraping as Sacred Core functionality.
+The canonical web scraping implementation now lives in the official plugin `baselith/plugins/web_scraper/`. The historical `baselith/core/scraper` surface remains available as a compatibility layer, but the framework no longer treats scraping as Sacred Core functionality.
 
 !!! info "Current State"
-    Use `plugins.web_scraper` for new code. Existing imports from `core.scraper` are maintained only to preserve backward compatibility during migration.
+    Use `baselith.plugins.web_scraper` for new code. Existing imports from `baselith.core.scraper` are maintained only to preserve backward compatibility during migration.
 
 ## Overview
 
@@ -51,7 +51,7 @@ by the plugin's `shutdown()` (call `await scraper.close()` explicitly to close
 it too, e.g. in a one-off script).
 
 ```python
-from plugins.web_scraper import Scraper
+from baselith.plugins.web_scraper import Scraper
 
 async with Scraper() as scraper:
     # 1. Scrape a single page (static)
@@ -93,7 +93,7 @@ The scraper uses a registry of specialized extractors to structure the raw HTML.
 | `SchemaOrgExtractor`   | `schema_org`   | Structured data in JSON-LD or Microdata format |
 | `CssSelectorExtractor` | `css_selector` | Custom extraction via CSS selectors            |
 
-All six classes are importable from `plugins.web_scraper.extractors`; the `Key`
+All six classes are importable from `baselith.plugins.web_scraper.extractors`; the `Key`
 column is each extractor's `name` attribute.
 
 ---
@@ -111,7 +111,7 @@ The scraper includes industry-standard protections against **Server-Side Request
 
 7. **Event-loop hygiene**: the DNS-resolving SSRF pin in `HttpxFetcher`, the pre-navigation check in `PlaywrightFetcher`, and extraction (BeautifulSoup parsing of up to 10 MB, once per extractor) all run in a worker thread. Redirect `Location` values of every relative form are joined against the current URL, and `ScrapedPage.final_url` names the host, not the pinned IP.
 
-The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_host` in `plugins.web_scraper.utils`) now delegate to the unified `core.security.ssrf` module shared with the rest of the framework — see [Security & Encryption §SSRF Protection](security.md#ssrf-protection) for the full API and the other adopted call sites.
+The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_host` in `baselith.plugins.web_scraper.utils`) now delegate to the unified `baselith.core.security.ssrf` module shared with the rest of the framework — see [Security & Encryption §SSRF Protection](security.md#ssrf-protection) for the full API and the other adopted call sites.
 
 ---
 
@@ -120,14 +120,14 @@ The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_h
 The scraper is configured via `ScraperConfig` (or environment variables).
 
 ```python
-from core.config.scraper import ScraperConfig
+from baselith.core.config.scraper import ScraperConfig
 
 config = ScraperConfig(
     cache_enabled=True,
     rate_limit_enabled=True,
     rate_limit_requests=20,          # max requests per period (default: 10)
     rate_limit_period_seconds=60.0,  # period length in seconds (default: 1.0)
-    user_agent="BaselithBot/1.0",
+    user_agent="MyBot/1.0",
 )
 
 scraper = Scraper(config=config)
@@ -159,4 +159,4 @@ scraper = Scraper(config=config)
     While the scraper provides tools, developers are responsible for complying with a site's `robots.txt` and terms of service.
 
 !!! note "Related Plugin"
-    Document ingestion and file readers were also moved out of the core and now live under `plugins/document_sources/`.
+    Document ingestion and file readers were also moved out of the core and now live under `baselith/plugins/document_sources/`.

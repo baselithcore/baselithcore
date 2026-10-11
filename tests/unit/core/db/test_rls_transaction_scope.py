@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from core.db import connection as db_connection
+from baselith.core.db import connection as db_connection
 
 TENANT = "tenant-a"
 

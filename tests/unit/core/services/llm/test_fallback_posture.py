@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.errors import LLMClientError, LLMServerError
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.fallback_runtime import (
+from baselith.core.services.llm.errors import LLMClientError, LLMServerError
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.fallback_runtime import (
     maybe_run_messages_with_fallback,
     maybe_run_structured_with_fallback,
     run_with_fallback,
@@ -28,8 +28,8 @@ from core.services.llm.fallback_runtime import (
 
 
 def _service(fallback_chain="openai:gpt-4o-mini"):
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider="ollama", model="llama3.2", fallback_chain=fallback_chain
@@ -57,7 +57,7 @@ class TestClientErrorIsFatal:
             patch(
                 # The name the chain actually calls: ``fallback_runtime``
                 # imported it, so patching the definition module is a no-op.
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=clone,
             ),
         ):
@@ -84,7 +84,7 @@ class TestClientErrorIsFatal:
             patch(
                 # The name the chain actually calls: ``fallback_runtime``
                 # imported it, so patching the definition module is a no-op.
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=clone,
             ),
         ):
@@ -96,7 +96,7 @@ class TestClientErrorIsFatal:
     async def test_structured_path_does_not_fall_through_on_client_error(self):
         service = _service()
         with patch(
-            "core.services.llm.structured._native_with_retry",
+            "baselith.core.services.llm.structured._native_with_retry",
             AsyncMock(side_effect=LLMClientError("unknown model", status_code=404)),
         ):
             with pytest.raises(LLMClientError):
@@ -105,7 +105,7 @@ class TestClientErrorIsFatal:
     async def test_messages_path_does_not_fall_through_on_client_error(self):
         service = _service()
         with patch(
-            "core.services.llm.message_runtime._messages_with_retry",
+            "baselith.core.services.llm.message_runtime._messages_with_retry",
             AsyncMock(side_effect=LLMClientError("bad request", status_code=400)),
         ):
             with pytest.raises(LLMClientError):
@@ -115,9 +115,11 @@ class TestClientErrorIsFatal:
 @pytest.mark.asyncio
 class TestFallbackIsCounted:
     async def test_serving_stage_increments_the_counter(self):
-        from core.services.llm._fallback_support import record_fallback_served
+        from baselith.core.services.llm._fallback_support import record_fallback_served
 
-        with patch("core.observability.metrics.LLM_FALLBACK_SERVED_TOTAL") as counter:
+        with patch(
+            "baselith.core.observability.metrics.LLM_FALLBACK_SERVED_TOTAL"
+        ) as counter:
             record_fallback_served(
                 primary="openai",
                 served_by="ollama",
@@ -134,7 +136,7 @@ class TestFallbackIsCounted:
                 service, "_generate_with_retry", AsyncMock(return_value=("hi", 1))
             ),
             patch(
-                "core.services.llm._fallback_support.record_fallback_served"
+                "baselith.core.services.llm._fallback_support.record_fallback_served"
             ) as recorded,
         ):
             await run_with_fallback(
@@ -143,9 +145,11 @@ class TestFallbackIsCounted:
         recorded.assert_not_called()
 
     async def test_metrics_failure_never_breaks_the_request(self):
-        from core.services.llm._fallback_support import record_fallback_served
+        from baselith.core.services.llm._fallback_support import record_fallback_served
 
-        with patch("core.observability.metrics.LLM_FALLBACK_SERVED_TOTAL") as counter:
+        with patch(
+            "baselith.core.observability.metrics.LLM_FALLBACK_SERVED_TOTAL"
+        ) as counter:
             counter.labels.side_effect = RuntimeError("registry exploded")
             record_fallback_served(
                 primary="openai", served_by="ollama", served_model="m", path="text"
@@ -169,7 +173,7 @@ class TestEveryFailureIsReported:
             patch(
                 # The name the chain actually calls: ``fallback_runtime``
                 # imported it, so patching the definition module is a no-op.
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=clone,
             ),
         ):
@@ -182,7 +186,7 @@ class TestEveryFailureIsReported:
 
     async def test_streaming_error_names_each_stage(self):
         """The regression: the local stage's refusal used to be the only clue."""
-        from core.services.llm._stream_fallback import open_stream
+        from baselith.core.services.llm._stream_fallback import open_stream
 
         service = _service()
 
@@ -201,7 +205,8 @@ class TestEveryFailureIsReported:
         clone.provider.generate_stream = _broken_fallback
 
         with patch(
-            "core.services.llm._stream_fallback._clone_service", return_value=clone
+            "baselith.core.services.llm._stream_fallback._clone_service",
+            return_value=clone,
         ):
             with pytest.raises(LLMProviderError) as excinfo:
                 await open_stream(service, "p", "llama3.2", {})

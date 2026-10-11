@@ -12,10 +12,10 @@ import asyncio
 
 import pytest
 
-from core.context import get_current_tenant_id, tenant_is_bound
-from core.db import connection
-from core.db.session_setup import SYSTEM_TENANT_ID
-from core.plugins.init_scope import plugin_init_scope
+from baselith.core.context import get_current_tenant_id, tenant_is_bound
+from baselith.core.db import connection
+from baselith.core.db.session_setup import SYSTEM_TENANT_ID
+from baselith.core.plugins.init_scope import plugin_init_scope
 
 
 def test_rls_off_binds_nothing(monkeypatch: pytest.MonkeyPatch) -> None:

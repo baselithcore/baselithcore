@@ -10,14 +10,14 @@ import certifi
 import httpx
 import pytest
 
-from core.config.inference import EmbeddingConfig, RerankConfig
-from core.services.inference import (
+from baselith.core.config.inference import EmbeddingConfig, RerankConfig
+from baselith.core.services.inference import (
     EmbeddingService,
     InferenceConfigError,
     InferenceError,
     RerankService,
 )
-from core.services.inference._http import tls_context
+from baselith.core.services.inference._http import tls_context
 
 
 def _emb(**kw: object) -> EmbeddingConfig:

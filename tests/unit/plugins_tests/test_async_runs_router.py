@@ -6,9 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.async_runs as async_runs_module
-from core.middleware import require_user
-from plugins.api_routers.async_runs import router
+import baselith.plugins.api_routers.async_runs as async_runs_module
+from baselith.core.middleware import require_user
+from baselith.plugins.api_routers.async_runs import router
 
 pytestmark = [pytest.mark.unit]
 

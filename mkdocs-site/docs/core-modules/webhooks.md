@@ -3,7 +3,7 @@ title: Webhooks
 description: Outbound event delivery with HMAC signing, retries, and dead-lettering
 ---
 
-The `core/webhooks` subsystem delivers framework events to external consumers
+The `baselith/core/webhooks` subsystem delivers framework events to external consumers
 over HTTP. It signs every payload (HMAC-SHA256), enforces an SSRF guard on
 target URLs, retries with backoff, and dead-letters deliveries that exhaust
 their attempts so they can be inspected and replayed.
@@ -38,13 +38,13 @@ where the `agent.*` events are emitted — so an endpoint registered through the
 API can silently never fire in a multi-process deployment.
 `get_webhook_service()` reads `WEBHOOK_STORE` once, when it builds the global
 service: `memory` (the default) keeps the in-memory store, `postgres` selects
-`PostgresWebhookStore` (`core/webhooks/store_postgres.py`).
+`PostgresWebhookStore` (`baselith/core/webhooks/store_postgres.py`).
 
 - **Schema.** The `webhook_endpoints` and `webhook_deliveries` tables are
-  created only by `core/db/migrations/versions/011_webhooks.py` — the store runs no DDL,
+  created only by `baselith/core/db/migrations/versions/011_webhooks.py` — the store runs no DDL,
   so apply the migration first. Both tables carry the `tenant_isolation`
   row-level-security policy, including the system-tenant escape, and are listed
-  in `core.db.ddl.RLS_PROTECTED_TABLES` (see
+  in `baselith.core.db.ddl.RLS_PROTECTED_TABLES` (see
   [Multi-Tenancy › Row-Level Security](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)).
 - **Secrets at rest.** An endpoint's signing `secret` and its `headers` (which
   routinely carry an `Authorization` value) are encrypted with the process field
@@ -65,7 +65,7 @@ service: `memory` (the default) keeps the in-memory store, `postgres` selects
 ```python
 import time
 
-from core.webhooks.store_postgres import PostgresWebhookStore
+from baselith.core.webhooks.store_postgres import PostgresWebhookStore
 
 store = PostgresWebhookStore()
 removed = await store.purge_deliveries_before(time.time() - 30 * 86400)
@@ -78,7 +78,7 @@ Set `WEBHOOKS_ENABLED=true`. Register endpoints over the API or in code.
 ### Programmatic
 
 ```python
-from core.webhooks import get_webhook_service
+from baselith.core.webhooks import get_webhook_service
 
 service = get_webhook_service()
 endpoint = await service.register_endpoint(
@@ -100,9 +100,17 @@ Framework components emit through the same seam:
 | `agent.completed` | The async agent-run job when a queued run finishes (see [Task Queue › Async agent runs](task-queue.md#async-agent-runs-agentasync)) | `task_id`, `answer`, `metadata` |
 | `agent.failed` | The async agent-run job when a queued run raises | `task_id`, `error` |
 | `workflow.failed` (conventional — the name is the workflow's `on_failure` field) | `WorkflowScheduler` when a scheduled run fails — the scheduler is not started by the default app (see [Workflows › Scheduled workflows](workflows.md#scheduled-workflows-workflowscheduler)) | `workflow_id`, `workflow_name`, `schedule`, `status`, `error` |
+| `evaluation.degraded` | The online-evaluation quality monitor when an intent's answer quality degrades — once per fleet with `CACHE_BACKEND=redis`, once per worker otherwise (see [Evaluation › Routing degradations to operators](evaluation.md#routing-degradations)) | `intent`, `source`, `state`, `window_mean`, `reference_mean`, `floor`, `samples`, `reason`, `scope` |
+| `evaluation.recovered` | The same monitor when the intent recovers past the hysteresis margin | same as `evaluation.degraded`, `reason: "recovered"` |
 
 All framework emissions are best-effort: a webhook outage never fails the run
 that triggered it.
+
+The `evaluation.*` events describe the deployment, not one tenant's request,
+so they go to the endpoints of a single operator tenant,
+`EVAL_ONLINE_WEBHOOK_TENANT` (default `default`): register the on-call
+endpoint from that tenant with `event_types` `["evaluation.degraded",
+"evaluation.recovered"]` (or `*`).
 
 ### Management API
 
@@ -151,7 +159,7 @@ shared secret and compare in constant time, rejecting stale timestamps to defeat
 replays. A verification helper ships with the SDK contract:
 
 ```python
-from core.webhooks import verify_signature
+from baselith.core.webhooks import verify_signature
 
 ok = verify_signature(
     secret="whsec_...",
@@ -196,7 +204,33 @@ rebinding: `resolve_pinned_target()` resolves the host once and returns a
 `(pinned_url, host)` pair, and the dispatcher POSTs to the pinned IP with `Host`
 and TLS `sni_hostname` set to the original hostname. Redirects are not followed
 (`follow_redirects=False`), so a `3xx` cannot bounce the delivery to an internal
-host. `validate_webhook_url()` remains the (registration-time) check.
+host.
+
+Both checks come from the shared guard in
+[`baselith.core.security.ssrf`](security.md#ssrf-protection):
+`WebhookService.register_endpoint()` runs `assert_url_safe()` at registration
+time (so an unsafe URL is refused before it is stored), and the dispatcher runs
+`resolve_pinned_target()` before every delivery (so a host that has since been
+re-pointed at an internal address fails closed). Both raise `SsrfError`.
+
+!!! warning "Deprecated: `baselith.core.webhooks.ssrf`"
+    `validate_webhook_url()`, `resolve_pinned_target(url, allow_internal=...)`
+    and `WebhookSSRFError` — importable from `baselith.core.webhooks.ssrf` and
+    re-exported by `baselith.core.webhooks` — are a compatibility shim,
+    **deprecated since 1.0 and removed in 2.0**. Nothing in the framework calls
+    them any more.
+
+| Deprecated | Use instead |
+| --- | --- |
+| `validate_webhook_url(url, allow_internal=x)` | `assert_url_safe(url, SsrfPolicy(allow_internal=x))` |
+| `resolve_pinned_target(url, allow_internal=x)` | `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` from `baselith.core.security.ssrf` |
+| `WebhookSSRFError` | `SsrfError` |
+
+The two functions emit a `DeprecationWarning` on every call.
+`WebhookSSRFError` does not: it is an alias — the same class object as
+`SsrfError`, which is why `except WebhookSSRFError` still catches what the
+new API raises — and a warning on the class would fire for every
+`SsrfError` the framework raises. Replace the name before 2.0 anyway.
 
 The management API never echoes the guard's reason: a rejected registration
 answers a fixed `400 Webhook URL is not an allowed destination.` and the
@@ -210,7 +244,7 @@ An endpoint's static `headers` are sent with every delivery, but a fixed set of
 names belongs to the dispatcher and can never be supplied by a subscriber:
 `X-Baselith-Signature`, `Host`, `Content-Type`, `Content-Length`,
 `Transfer-Encoding`, `Connection` and `User-Agent`
-(`core.webhooks.signing.RESERVED_DELIVERY_HEADERS`, matched case-insensitively).
+(`baselith.core.webhooks.signing.RESERVED_DELIVERY_HEADERS`, matched case-insensitively).
 The signature is the receiver's only proof of origin, the framing headers
 describe the signed body, and `Host` is the SSRF pin — letting any of them be
 overridden would let a tenant forge or strip exactly the guarantees the

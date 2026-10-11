@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.images import (
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.images import (
     GeneratedImage,
     decode_image_payload,
     generate_image,
@@ -103,9 +103,13 @@ class TestOpenAIImages:
         item.revised_prompt = "a lighthouse at dusk, wide"
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             image = await OpenAIProvider(api_key="sk-test").generate_image(
                 "a lighthouse", size="1536x1024", quality="low"
@@ -125,9 +129,13 @@ class TestOpenAIImages:
         item.b64_json = base64.b64encode(PNG).decode()
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             await OpenAIProvider(api_key="sk-test").generate_image("a lighthouse")
 
@@ -140,9 +148,13 @@ class TestOpenAIImages:
         item.b64_json = f"data:image/png;base64,{base64.b64encode(PNG).decode()}"
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             image = await OpenAIProvider(api_key="sk-test").generate_image("x")
 
@@ -155,9 +167,13 @@ class TestOpenAIImages:
         item.b64_json = base64.b64encode(WEBP).decode()
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             image = await OpenAIProvider(api_key="sk-test").generate_image("x")
 
@@ -170,9 +186,13 @@ class TestOpenAIImages:
         item.b64_json = base64.b64encode(b"nope, an error page").decode()
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             with pytest.raises(LLMProviderError) as exc:
                 await OpenAIProvider(api_key="sk-test").generate_image("x")
@@ -186,9 +206,13 @@ class TestOpenAIImages:
         item.b64_json = None
         mock_client.images.generate.return_value = MagicMock(data=[item])
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             with pytest.raises(LLMProviderError) as exc:
                 await OpenAIProvider(api_key="sk-test").generate_image("x")

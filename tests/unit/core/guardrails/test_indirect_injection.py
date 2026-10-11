@@ -1,6 +1,6 @@
 """Unit tests for the indirect prompt-injection scanner."""
 
-from core.guardrails import (
+from baselith.core.guardrails import (
     IndirectFindingKind,
     IndirectInjectionScanner,
     scan_external_content,

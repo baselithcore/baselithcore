@@ -13,10 +13,10 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.43.x  | :white_check_mark: |
-| < 0.43  | :x:                |
+| 1.0.x  | :white_check_mark: |
+| < 1.0  | :x:                |
 
-The exact version is recorded in [`core/_version.py`](core/_version.py). The
+The exact version is recorded in [`baselith/core/_version.py`](baselith/core/_version.py). The
 table above is rewritten by semantic-release on every release (see the
 `@semantic-release/exec` `prepareCmd` in [`.releaserc`](.releaserc)) — it used
 to be hand-maintained and had drifted three minors behind, telling operators
@@ -36,7 +36,7 @@ Report privately via either channel:
 Please include:
 
 1. A reproducer (script, `curl`, or minimal repo).
-2. Affected version (`core/_version.py`) and deployment surface (core API,
+2. Affected version (`baselith/core/_version.py`) and deployment surface (core API,
    a specific plugin, MCP/A2A, etc.).
 3. Expected vs. observed behavior and the security impact.
 4. A suggested severity (CVSS v3.1 vector if known).
@@ -102,7 +102,7 @@ Operator hardening checklist:
 
 ## Scope
 
-In scope: the `core/` framework and the official plugins under `plugins/`.
+In scope: the `baselith/core/` framework and the official plugins under `baselith/plugins/`.
 
 Out of scope:
 

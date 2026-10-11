@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.auth.oauth import (
+from baselith.core.auth.oauth import (
     InvalidRequestError,
     derive_code_challenge,
     verify_code_challenge,

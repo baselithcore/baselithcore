@@ -66,11 +66,11 @@ The core of the system is the **tenant context**, which automatically propagates
 ### How It Works
 
 For **HTTP requests**, the tenant context is derived by `TenantMiddleware`
-(`core/middleware/tenant.py`, a pure-ASGI middleware) from the authenticated
+(`baselith/core/middleware/tenant.py`, a pure-ASGI middleware) from the authenticated
 user. The flow is:
 
-1. The auth layer populates the request user (`scope['user']` / `request.state.user`) as an `AuthUser`. Route dependencies such as `require_user` / `require_admin` (exported from `core.middleware`) enforce authentication.
-2. `TenantMiddleware` reads that `AuthUser` and calls `set_tenant_context(user.tenant_id)`, falling back to `"default"` if no `AuthUser` is present. The token is retained for cleanup, and `tenant_id` is bound to structlog. It **also** binds the authenticated user id via `set_user_context(user.user_id)` — identity-derived, never a client header — so plugins can resolve a per-user tenant (see [Per-plugin tenancy](#per-plugin-tenancy-personal-vs-shared)). `SecurityManager` (`core/middleware/security.py`) binds the same pair on the auth path.
+1. The auth layer populates the request user (`scope['user']` / `request.state.user`) as an `AuthUser`. Route dependencies such as `require_user` / `require_admin` (exported from `baselith.core.middleware`) enforce authentication.
+2. `TenantMiddleware` reads that `AuthUser` and calls `set_tenant_context(user.tenant_id)`, falling back to `"default"` if no `AuthUser` is present. The token is retained for cleanup, and `tenant_id` is bound to structlog. It **also** binds the authenticated user id via `set_user_context(user.user_id)` — identity-derived, never a client header — so plugins can resolve a per-user tenant (see [Per-plugin tenancy](#per-plugin-tenancy-personal-vs-shared)). `SecurityManager` (`baselith/core/middleware/security.py`) binds the same pair on the auth path.
 3. The route handler and all downstream code see the correct `tenant_id` via `get_current_tenant_id()` and the user id via `get_current_user_id()`.
 4. `TenantMiddleware` calls `reset_tenant_context(token)` (and `reset_user_context(...)`) in its `finally` block.
 
@@ -78,10 +78,10 @@ For **background tasks and scripts**, you must set the context explicitly (see T
 
 When a request arrives with a valid token, the auth layer extracts the tenant ID from the authenticated user and sets it in the asynchronous context. Tenant-aware components (such as `SemanticLLMCache`, which partitions its entries by `get_tenant_or_default()`) then key off the current context.
 
-There is **no** general-purpose context-manager helper for an arbitrary tenant. `core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, `get_current_tenant_id()` and `tenant_is_bound()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
+There is **no** general-purpose context-manager helper for an arbitrary tenant. `baselith/core/context.py` exposes `set_tenant_context()` (which returns a token), `reset_tenant_context(token)`, `get_current_tenant_id()` and `tenant_is_bound()` — plus the parallel `set_user_context()` / `reset_user_context(token)` / `get_current_user_id()` for the authenticated **user** id. Set the context at the entry point and reset it with the returned token in a `finally` block:
 
 ```python
-from core.context import set_tenant_context, reset_tenant_context, get_current_tenant_id
+from baselith.core.context import set_tenant_context, reset_tenant_context, get_current_tenant_id
 
 # Set the tenant at the start of the request/task
 token = set_tenant_context("tenant-123")
@@ -99,14 +99,14 @@ finally:
 
 #### "Is a tenant bound at all?" — `tenant_is_bound()`
 
-`core/context.py` also exposes `tenant_is_bound() -> bool`, the public answer to
+`baselith/core/context.py` also exposes `tenant_is_bound() -> bool`, the public answer to
 "did someone upstream actually say which tenant this work belongs to?".
 
 `get_current_tenant_id()` cannot answer it: it conflates *unbound* with the
 `"default"` fallback unless `strict_tenant_isolation` happens to be on.
 
 ```python
-from core.context import get_current_tenant_id, tenant_is_bound
+from baselith.core.context import get_current_tenant_id, tenant_is_bound
 
 # With STRICT_TENANT_ISOLATION off and nothing bound upstream:
 tenant_is_bound()          # False  — nobody said
@@ -116,15 +116,15 @@ get_current_tenant_id()    # "default"  — indistinguishable from a real tenant
 Code that must fail closed **regardless of that unrelated switch** asks
 `tenant_is_bound()` instead of reaching into the module-private contextvar. The
 in-tree example is row-level security binding the DB session
-(`core/db/connection.py`): with `DB_RLS_ENABLED=true` and no tenant bound it
+(`baselith/core/db/connection.py`): with `DB_RLS_ENABLED=true` and no tenant bound it
 raises `TenantContextError` rather than silently binding `app.tenant_id` to
 `"default"` and serving another tenant's rows.
 
 !!! warning "Manual data-layer filtering"
     The data layer uses raw SQL (psycopg), not an ORM with automatic query
     rewriting. Repository queries that must be tenant-scoped include an explicit
-    `WHERE tenant_id = %s` clause (see `core/db/feedback.py`,
-    `core/db/documents.py`). `get_current_tenant_id()` is the source of truth for
+    `WHERE tenant_id = %s` clause (see `baselith/core/db/feedback.py`,
+    `baselith/core/db/documents.py`). `get_current_tenant_id()` is the source of truth for
     the value to filter on. Fully automatic, framework-wide query/cache/vector
     filtering is a **Roadmap** item, not a current guarantee.
 
@@ -133,7 +133,7 @@ raises `TenantContextError` rather than silently binding `app.tenant_id` to
 If you are developing a plugin, the tenant context is already set when your code executes (the auth layer set it for the request):
 
 ```python
-from core.context import get_current_tenant_id
+from baselith.core.context import get_current_tenant_id
 
 class MyPluginHandler(FlowHandler):
     async def handle(self, query: str, context: dict) -> dict:
@@ -184,7 +184,7 @@ class MyPlugin(Plugin):
         )
 ```
 
-Under the hood `tenant_key()` delegates to `core.context.resolve_plugin_tenant(mode)`:
+Under the hood `tenant_key()` delegates to `baselith.core.context.resolve_plugin_tenant(mode)`:
 
 - `"personal"` → `get_current_user_id()` when a user is bound; otherwise it falls
   back to `get_tenant_or_default()` (the non-raising deployment tenant) so
@@ -200,7 +200,7 @@ plugin's persistence but has no `self` to call it on cannot use it. Reaching for
 **and** any runtime override. Use the store-layer counterpart instead:
 
 ```python
-from core.context import resolve_plugin_tenant_key
+from baselith.core.context import resolve_plugin_tenant_key
 
 scope = resolve_plugin_tenant_key("my-plugin", declared_mode)  # declared_mode defaults to "shared"
 await cursor.execute("SELECT * FROM notes WHERE tenant_id = %s", (scope,))
@@ -228,7 +228,7 @@ The seam lives in core while the override source stays in plugin land, so the
 Sacred-Core boundary is never crossed:
 
 ```python
-from core.context import set_plugin_tenancy_resolver
+from baselith.core.context import set_plugin_tenancy_resolver
 
 # An admin-facing plugin registers a resolver at activation.
 # resolver(plugin_name) -> "shared" | "personal" to override, or None to inherit.
@@ -236,7 +236,7 @@ set_plugin_tenancy_resolver(my_override_lookup)
 ```
 
 `Plugin.tenant_key()` resolves the effective mode through
-`core.context.resolve_plugin_tenancy_mode(plugin_name, declared)`:
+`baselith.core.context.resolve_plugin_tenancy_mode(plugin_name, declared)`:
 
 - **No resolver registered** → the declared manifest mode is used verbatim, so a
   deployment that never registers one behaves exactly as before (zero behaviour
@@ -270,9 +270,9 @@ explicit `tenant_id` filter sourced from the current context. There is no ORM an
 no automatic query rewriting:
 
 ```python
-from core.context import get_current_tenant_id
+from baselith.core.context import get_current_tenant_id
 
-# Tenant-scoped query (see core/db/feedback.py, core/db/documents.py)
+# Tenant-scoped query (see baselith/core/db/feedback.py, baselith/core/db/documents.py)
 tenant_id = get_current_tenant_id()
 await cursor.execute(
     "SELECT * FROM chat_feedback WHERE tenant_id = %s",
@@ -280,7 +280,7 @@ await cursor.execute(
 )
 ```
 
-The core interaction store (`core/storage/postgres.py`) carries a `tenant_id`
+The core interaction store (`baselith/core/storage/postgres.py`) carries a `tenant_id`
 column on `interactions` and `feedback` (DEFAULT `'default'` for backward
 compatibility) and scopes every read/write to `get_current_tenant_id()`.
 
@@ -313,18 +313,20 @@ and what that means depends on the flag:
 
 The check asks `tenant_is_bound()`, not what `get_current_tenant_id()` resolves
 to, so it fails closed regardless of `strict_tenant_isolation`
-(`core/db/connection.py`). Work that legitimately runs outside a request declares
+(`baselith/core/db/connection.py`). Work that legitimately runs outside a request declares
 itself with [`system_tenant_scope()`](#system-tenant-scope) instead.
 
-**2. The policies.** `core/db/migrations/versions/008_row_level_security.py` enables RLS
+**2. The policies.** `baselith/core/db/migrations/versions/008_row_level_security.py` enables RLS
 and creates a `tenant_isolation` policy on every tenant-scoped table;
 `009_tool_invocations.py` adds the same policy to the table it creates, and
 `010_system_tenant_rls_exemption.py` widens the predicate across all seven.
 `011_webhooks.py` creates `webhook_endpoints` and `webhook_deliveries` with the
-widened policy (system-tenant escape included) from the start. The current
-list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
-`a2a_tasks`, `agent_checkpoints`, `tool_invocations`, `webhook_deliveries`,
-`webhook_endpoints` — lives in `core.db.ddl.RLS_PROTECTED_TABLES`.
+widened policy (system-tenant escape included) from the start, as do
+`013_online_eval_results.py` and `015_mcp_tasks.py` for their tables. The
+current list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
+`a2a_tasks`, `agent_checkpoints`, `mcp_tasks`, `online_eval_results`,
+`tool_invocations`, `webhook_deliveries`, `webhook_endpoints` — lives in
+`baselith.core.db.ddl.RLS_PROTECTED_TABLES`.
 
 The policy is symmetric: for an ordinary tenant a row is visible, **and may be
 written**, only when its `tenant_id` equals the session's. So a cross-tenant
@@ -372,7 +374,7 @@ every policy in place, `DB_RLS_ENABLED=true` in the config, and a role every one
 of those policies skips. Nothing in the logs, nothing in a health check, and a
 console that reports isolation is on.
 
-`core/db/rls_posture.py` reads the three exemptions back from the catalogs at
+`baselith/core/db/rls_posture.py` reads the three exemptions back from the catalogs at
 startup whenever `DB_RLS_ENABLED` is on — the role's `rolsuper` and
 `rolbypassrls`, and whether it owns a protected table that lacks
 `FORCE ROW LEVEL SECURITY` — plus whether the policies are enabled at all. In
@@ -459,15 +461,15 @@ Two supported paths, both idempotent and both keeping DDL with the owner:
     fresh data directory** — an existing volume never sees it, so provision the
     role by hand there with the SQL above.
 
-#### Plugin tables: `core.db.rls_policy` {#plugin-table-policies}
+#### Plugin tables: `baselith.core.db.rls_policy` {#plugin-table-policies}
 
 Core's tenant-scoped tables get their `tenant_isolation` policy from the
 migrations. A plugin that owns a table with a `tenant_id` column builds it in
 its own idempotent `init_schema()`, and gives it the **same** policy from
-`core.db.rls_policy` rather than a hand-written copy that drifts:
+`baselith.core.db.rls_policy` rather than a hand-written copy that drifts:
 
 ```python
-from core.db.rls_policy import tenant_isolation_ddl
+from baselith.core.db.rls_policy import tenant_isolation_ddl
 
 async def init_schema(self, config: dict | None = None) -> None:
     async with get_connection() as conn, conn.cursor() as cursor:
@@ -488,8 +490,8 @@ refused by the policy's `WITH CHECK`.
 
 `row_tenant_scope` binds only a key the bound identity can derive to — the
 bound tenant, or the bound user's id (the two keys
-`core.context.resolve_plugin_tenant_key` produces). Any other key raises
-`ForeignTenantKeyError` (`core.db.rls_policy`, a `ValueError`), so a plugin
+`baselith.core.context.resolve_plugin_tenant_key` produces). Any other key raises
+`ForeignTenantKeyError` (`baselith.core.db.rls_policy`, a `ValueError`), so a plugin
 cannot select another tenant's rows by passing that tenant's id; a reserved id
 that is not the bound tenant still raises `ReservedTenantError`. Outside a
 bound tenant the block runs unchanged.
@@ -501,14 +503,14 @@ caller is refused (above), so work that legitimately runs outside a request has 
 *say what it is* rather than be guessed at:
 
 ```python
-from core.db.connection import system_tenant_scope
+from baselith.core.db.connection import system_tenant_scope
 
 with system_tenant_scope():
     await run_maintenance()
 ```
 
 It binds the tenant context to `SYSTEM_TENANT_ID` (`"system"`,
-`core/db/session_setup.py`) for the whole block and restores the previous token on
+`baselith/core/db/session_setup.py`) for the whole block and restores the previous token on
 exit, including when the body raises. It is a plain `contextmanager`, so it works
 in sync and async code alike — `contextvars` propagate into awaited coroutines —
 and because it binds the *tenant context* rather than just the DB session,
@@ -519,13 +521,13 @@ Who uses it today:
 
 | Caller | Work |
 | --- | --- |
-| `core/bootstrap/lazy_init.py`, `core/db/schema.py`, `core/api/startup_checks.py` | Boot and schema paths |
-| `core/orchestration/checkpoint_postgres.py`, `core/a2a/task_store_postgres.py`, `core/prompts/store_postgres.py` | `initialize()` / DDL on first touch |
-| `core/task_queue/worker.py` | Wraps job execution — but only when RLS is on |
-| `core/plugins/init_scope.py` (`loader.py`, `bulk_load.py`, `hotreload.py`, `health.py`) | Every plugin's `initialize()` — but only when RLS is on |
-| `core/cli/handlers.py` | CLI commands that read the database |
-| `core/orchestration/recovery.py` | Crash-recovery and stale-run sweeps |
-| `core/services/tenant/purge.py` | GDPR erasure — cross-tenant by construction |
+| `baselith/core/bootstrap/lazy_init.py`, `baselith/core/db/schema.py`, `baselith/core/api/startup_checks.py` | Boot and schema paths |
+| `baselith/core/orchestration/checkpoint_postgres.py`, `baselith/core/a2a/task_store_postgres.py`, `baselith/core/prompts/store_postgres.py` | `initialize()` / DDL on first touch |
+| `baselith/core/task_queue/worker.py` | Wraps job execution — but only when RLS is on |
+| `baselith/core/plugins/init_scope.py` (`loader.py`, `bulk_load.py`, `hotreload.py`, `health.py`) | Every plugin's `initialize()` — but only when RLS is on |
+| `baselith/core/cli/handlers.py` | CLI commands that read the database |
+| `baselith/core/orchestration/recovery.py` | Crash-recovery and stale-run sweeps |
+| `baselith/core/services/tenant/purge.py` | GDPR erasure — cross-tenant by construction |
 
 Note what this is **not** for: it is schema, boot, maintenance and cross-tenant
 work, never a shortcut for reading one tenant's data. A request path that has a
@@ -539,7 +541,7 @@ tenant must bind that tenant.
     symmetric in `USING` and `WITH CHECK`. Neither knew about the `system`
     tenant, which did not exist yet.
 
-    `core/db/migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
+    `baselith/core/db/migrations/versions/010_system_tenant_rls_exemption.py` widens the predicate
     — it does not replace the policy. Same name, same permissive policy, same
     `COALESCE(..., 'default')` handling of an unset GUC, still no
     `FORCE ROW LEVEL SECURITY`:
@@ -554,7 +556,7 @@ tenant must bind that tenant.
     It covers the **seven** tables protected at that point (008's six plus
     `tool_invocations` from 009), and `downgrade()` restores 008/009's
     predicate byte-identically, so the chain is reversible. Migration 011's two
-    webhook tables are born with this predicate; `core.db.ddl.RLS_PROTECTED_TABLES`
+    webhook tables are born with this predicate; `baselith.core.db.ddl.RLS_PROTECTED_TABLES`
     is the union of all three lists.
 
     **Ordinary tenants are unchanged.** The escape compares the *session*, not
@@ -564,7 +566,7 @@ tenant must bind that tenant.
     tenant still cannot read or write another's rows.
 
     Why it is not a hole: `app.tenant_id` is set only by the pooled-checkout hook
-    in `core/db/connection.py`, from the tenant contextvar — never from client
+    in `baselith/core/db/connection.py`, from the tenant contextvar — never from client
     input. What keeps a request from *asking* to be `system` is a check, not an
     accident of wiring; see
     [Reserved tenant ids](#reserved-tenant-ids) below.
@@ -584,7 +586,7 @@ tenant must bind that tenant.
     across tenants but never *write* a row under a tenant it is not.
 
     **Migration 010 widens `WITH CHECK` too, and that published position was
-    wrong.** The stale-run sweep in `core/orchestration/recovery.py` writes back
+    wrong.** The stale-run sweep in `baselith/core/orchestration/recovery.py` writes back
     through an `INSERT … ON CONFLICT DO UPDATE` that re-sends the run's own
     `tenant_id` (`'acme'`, not `'system'`), so a strict `WITH CHECK` refuses it.
     The two clauses cover different verbs and both are needed:
@@ -619,11 +621,11 @@ tenant must bind that tenant.
 #### Reserved tenant ids {#reserved-tenant-ids}
 
 `system` is not just a convention — it is a **reserved identity**, because
-migration 010 gives it cross-tenant read and write. `core/context.py` names the
+migration 010 gives it cross-tenant read and write. `baselith/core/context.py` names the
 set and the predicate:
 
 ```python
-from core.context import RESERVED_TENANT_IDS, ReservedTenantError, is_reserved_tenant
+from baselith.core.context import RESERVED_TENANT_IDS, ReservedTenantError, is_reserved_tenant
 
 RESERVED_TENANT_IDS            # frozenset({"system"})
 is_reserved_tenant("system")   # True
@@ -639,12 +641,12 @@ minting a token that asserts it, provisioning a tenant record for it.
 !!! danger "Code that binds a tenant from a principal MUST use `bind_principal_tenant()`"
     A tenant that came from a caller's identity — a JWT or OIDC claim, an API-key
     record, anything a request, connection or token asserted — is bound with
-    `core.context.bind_principal_tenant()`, never the plain setter. It returns a
+    `baselith.core.context.bind_principal_tenant()`, never the plain setter. It returns a
     `contextvars.Token` exactly like `set_tenant_context()`, so it is a drop-in,
     and it raises `ReservedTenantError` if the id is reserved.
 
     ```python
-    from core.context import (
+    from baselith.core.context import (
         ReservedTenantError,
         bind_principal_tenant,
         reset_tenant_context,
@@ -674,13 +676,13 @@ two derive the value from a principal:
 
 | Binding site | Value comes from | How it binds |
 | --- | --- | --- |
-| `core/middleware/tenant.py` (`TenantMiddleware`) | The authenticated `AuthUser` | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
-| `core/middleware/security.py` (`SecurityManager.enforce_auth`) | The authenticated `AuthUser`, for every `HTTPConnection` — **WebSockets included** | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
-| `core/task_queue/worker.py` | RQ job metadata | `set_tenant_context()` — framework-owned |
-| `core/events/_dispatch.py`, `core/events/durable.py` | The event record | `set_tenant_context()` — framework-owned |
-| `core/orchestration/recovery.py` | The checkpoint row's own `tenant_id` | `set_tenant_context()` — framework-owned |
-| `core/services/tenant/purge.py` | The purge's target tenant, bound to count its rows | `set_tenant_context()` — framework-owned |
-| `core/db/session_setup.py` | `system_tenant_scope()` itself | `set_tenant_context()` — this *is* the system binding |
+| `baselith/core/middleware/tenant.py` (`TenantMiddleware`) | The authenticated `AuthUser` | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
+| `baselith/core/middleware/security.py` (`SecurityManager.enforce_auth`) | The authenticated `AuthUser`, for every `HTTPConnection` — **WebSockets included** | `bind_principal_tenant()` → 403 on `ReservedTenantError` |
+| `baselith/core/task_queue/worker.py` | RQ job metadata | `set_tenant_context()` — framework-owned |
+| `baselith/core/events/_dispatch.py`, `baselith/core/events/durable.py` | The event record | `set_tenant_context()` — framework-owned |
+| `baselith/core/orchestration/recovery.py` | The checkpoint row's own `tenant_id` | `set_tenant_context()` — framework-owned |
+| `baselith/core/services/tenant/purge.py` | The purge's target tenant, bound to count its rows | `set_tenant_context()` — framework-owned |
+| `baselith/core/db/session_setup.py` | `system_tenant_scope()` itself | `set_tenant_context()` — this *is* the system binding |
 
 Both middlewares call the helper rather than doing their own
 `if is_reserved_tenant(...)` first, which matters for more than tidiness: **the
@@ -696,7 +698,7 @@ the door through which a token claiming `tenant_id="system"` bound the privilege
 identity for the whole connection.
 
 Defence in depth sits one layer earlier, at **mint time**: the JWT issuer
-(`core/auth/_jwt_issue.py`) raises `ReservedTenantError` rather than signing a
+(`baselith/core/auth/_jwt_issue.py`) raises `ReservedTenantError` rather than signing a
 token that asserts a reserved tenant — for **access and refresh tokens alike**, so
 a refresh cannot launder one in. The middleware checks are what protect a
 deployment whose tokens come from somewhere else (a federated IdP, a token minted
@@ -724,7 +726,7 @@ before the check existed).
 #### CLI commands that deliberately run unbound
 
 `baselith` wraps most commands in `system_tenant_scope()`, but not the ones that
-are long-lived or touch no database (`core/cli/handlers.py`):
+are long-lived or touch no database (`baselith/core/cli/handlers.py`):
 
 | Exemption | Members | Why |
 | --- | --- | --- |
@@ -737,7 +739,7 @@ are long-lived or touch no database (`core/cli/handlers.py`):
     with `TenantContextError`. Bind one explicitly:
 
     ```python
-    from core.context import set_tenant_context, reset_tenant_context
+    from baselith.core.context import set_tenant_context, reset_tenant_context
 
     token = set_tenant_context("acme")          # or the tenant you mean
     try:
@@ -758,8 +760,8 @@ it is allowed outside production and refused when `APP_ENV=production`, where th
 migrations Job owns the schema. `tests/unit/test_schema_ownership.py` fails if a
 module ever creates a Postgres table no migration creates.
 
-Embedded SQLite stores (`core.privacy`, `core.incidents`, `core.compliance`,
-`core.thirdparty`, the audit chain, the SQLite checkpoint store) are out of
+Embedded SQLite stores (`baselith.core.privacy`, `baselith.core.incidents`, `baselith.core.compliance`,
+`baselith.core.thirdparty`, the audit chain, the SQLite checkpoint store) are out of
 scope — a single-file store has no migration job. So is the pgvector provider,
 which creates one table per *collection* on demand.
 
@@ -771,7 +773,7 @@ tenant filtering on every vector search is a **Roadmap** item.
 
 ### Cache (semantic LLM cache)
 
-`SemanticLLMCache` (`core/cache/semantic_cache.py`) is tenant-partitioned: it
+`SemanticLLMCache` (`baselith/core/cache/semantic_cache.py`) is tenant-partitioned: it
 stores entries under `entries[tenant_id][prompt_hash]`, deriving `tenant_id` from
 `get_tenant_or_default()`. Two tenants issuing the same prompt never share a cache
 entry:
@@ -781,8 +783,8 @@ entry:
 #   self._entries[get_tenant_or_default()][prompt_hash] = CacheEntry
 ```
 
-The **exact** LLM response cache (`core/services/llm/_generation.py`) and the
-Redis cache prefix (`core/optimization/caching.py`) partition the same way. All
+The **exact** LLM response cache (`baselith/core/services/llm/_generation.py`) and the
+Redis cache prefix (`baselith/core/optimization/caching.py`) partition the same way. All
 three resolve the tenant *leniently* — see
 [Namespacing is not a boundary](#namespacing-is-not-a-boundary).
 
@@ -796,7 +798,7 @@ three resolve the tenant *leniently* — see
 
 ## Isolation Guarantees
 
-`core/tenancy` provides reusable enforcement so isolation does not depend on
+`baselith/core/tenancy` provides reusable enforcement so isolation does not depend on
 each store re-implementing the check correctly.
 
 ### Cross-tenant guard
@@ -806,7 +808,7 @@ belongs to the request's tenant **before acting** — a forgotten check is a
 cross-tenant IDOR. Use the shared guard:
 
 ```python
-from core.tenancy import tenants_match, require_tenant_match
+from baselith.core.tenancy import tenants_match, require_tenant_match
 
 # Predicate form — treat a mismatch as "not found" (don't leak existence):
 if not tenants_match(resource.tenant_id):           # vs the active tenant context
@@ -828,7 +830,7 @@ the operator's base key, on top of the AES-256-GCM
 [field encryptor](../core-modules/security.md):
 
 ```python
-from core.tenancy import tenant_field_encryptor
+from baselith.core.tenancy import tenant_field_encryptor
 
 base_keys = {"k1": "operator-secret-or-base64-key"}
 enc = tenant_field_encryptor(tenant_id, base_keys, active_key_id="k1")
@@ -864,7 +866,7 @@ In strict mode:
 **Example error in strict mode:**
 
 ```python
-from core.context import get_current_tenant_id
+from baselith.core.context import get_current_tenant_id
 
 # Without tenant context, with the default strict_tenant_isolation=True
 tenant_id = get_current_tenant_id()
@@ -890,11 +892,11 @@ Two helpers, one rule:
 | `get_current_tenant_id()` | data boundaries: rows, documents, graph nodes, per-tenant scratchpads | raises `TenantContextError` under strict isolation |
 | `get_tenant_or_default()` | namespacing only: cache keys, cost ledger entries, metric labels | returns `"default"` |
 
-In `core/`, the second group is the LLM response cache
-(`core/services/llm/_generation.py`), the semantic cache
-(`core/cache/semantic_cache.py`), the Redis cache prefix
-(`core/optimization/caching.py`) and the cost ledger
-(`core/quotas/cost_enforcement.py`): an entry is keyed by the prompt hash and
+In `baselith/core/`, the second group is the LLM response cache
+(`baselith/core/services/llm/_generation.py`), the semantic cache
+(`baselith/core/cache/semantic_cache.py`), the Redis cache prefix
+(`baselith/core/optimization/caching.py`) and the cost ledger
+(`baselith/core/quotas/cost_enforcement.py`): an entry is keyed by the prompt hash and
 never read across prefixes, so an unbound caller shares the `"default"` bucket.
 
 Apply the same rule in your own code. A failure in this group is easy to miss:
@@ -907,7 +909,7 @@ looks healthy.
 
 ## Management API
 
-Tenants are managed through `TenantService` (`core/services/tenant/service.py`),
+Tenants are managed through `TenantService` (`baselith/core/services/tenant/service.py`),
 backed by the primary SQL database. Obtain the singleton via `get_tenant_service()`.
 Protect admin routes with the auth manager's `require_auth({AuthRole.ADMIN})`
 decorator.
@@ -915,8 +917,8 @@ decorator.
 ### Create a Tenant
 
 ```python
-from core.auth.types import AuthRole
-from core.services.tenant.service import get_tenant_service
+from baselith.core.auth.types import AuthRole
+from baselith.core.services.tenant.service import get_tenant_service
 
 tenant_service = get_tenant_service()
 
@@ -962,7 +964,7 @@ one unit from both the caller's identity budget and their tenant's budget on eve
 authenticated request, rejecting with `429` when either window is exhausted.
 
 ```python
-from core.config.quotas import set_tenant_quota
+from baselith.core.config.quotas import set_tenant_quota
 
 # Tenant plan: 1M requests/day, 20M/month (aggregate across all members)
 set_tenant_quota("tenant-123", daily=1_000_000, monthly=20_000_000)
@@ -978,24 +980,24 @@ Defaults apply to every tenant via `QUOTA_TENANT_DAILY_REQUESTS` /
 
 ### Tenant data purge (GDPR)
 
-`purge_tenant_data(tenant_id)` (`core/services/tenant/purge.py`) deletes every row
+`purge_tenant_data(tenant_id)` (`baselith/core/services/tenant/purge.py`) deletes every row
 scoped to a tenant across **all** public tables carrying a `tenant_id` column —
 core (`interactions`, `feedback`) and any plugin store. The table set is discovered
 dynamically from `information_schema`, and foreign-key ordering is resolved by a
 fixpoint retry loop, so no hand-maintained table list can drift:
 
 ```python
-from core.services.tenant import purge_tenant_data
+from baselith.core.services.tenant import purge_tenant_data
 
 deleted = await purge_tenant_data("tenant-123")  # {table: rows_deleted}
 ```
 
 It is idempotent and covers tenant-scoped data only — the tenant entity row
-itself is owned by `TenantService` (`core/services/tenant/service.py`).
+itself is owned by `TenantService` (`baselith/core/services/tenant/service.py`).
 
 After the tables, the same call erases the two stores that hold tenant data
 without a `tenant_id` column (`purge_tenant_stores`,
-`core/services/tenant/purge_stores.py`):
+`baselith/core/services/tenant/purge_stores.py`):
 
 - **Vector store** — every chunk's payload carries `tenant_id` (the JSONB
   column of a pgvector `vs_*` table, or a Qdrant point payload). The purge
@@ -1028,7 +1030,7 @@ When writing tests, ensure you verify isolation:
 
 ```python
 import pytest
-from core.context import set_tenant_context, reset_tenant_context
+from baselith.core.context import set_tenant_context, reset_tenant_context
 
 @pytest.mark.asyncio
 async def test_tenant_isolation():
@@ -1077,7 +1079,7 @@ async def test_tenant_isolation():
 | Raised from | Switch | Meaning |
 | --- | --- | --- |
 | `get_current_tenant_id()` | `strict_tenant_isolation` | Code is running outside an HTTP request (background task, script) without setting the tenant first. |
-| A **pool checkout** (`core/db/connection.py`) | `DB_RLS_ENABLED=true` | No tenant is bound, so `app.tenant_id` cannot be set. Raised regardless of `strict_tenant_isolation`, and the message names `system_tenant_scope()`. |
+| A **pool checkout** (`baselith/core/db/connection.py`) | `DB_RLS_ENABLED=true` | No tenant is bound, so `app.tenant_id` cannot be set. Raised regardless of `strict_tenant_isolation`, and the message names `system_tenant_scope()`. |
 
 For the second, the fix is usually not to invent a tenant: if the work is boot,
 schema, maintenance or cross-tenant, wrap it in
@@ -1089,7 +1091,7 @@ after — `contextvars` do not cross task boundaries on their own, so setting it
 once at startup does not cover a consumer loop started later:
 
 ```python
-from core.context import set_tenant_context, reset_tenant_context
+from baselith.core.context import set_tenant_context, reset_tenant_context
 
 async def background_task(tenant_id: str):
     token = set_tenant_context(tenant_id)
@@ -1101,8 +1103,8 @@ async def background_task(tenant_id: str):
 ```
 
 The framework already binds at every chokepoint it owns
-(`core/middleware/tenant.py`, `core/task_queue/worker.py`,
-`core/events/durable.py`); a plugin that starts its own producer or consumer
+(`baselith/core/middleware/tenant.py`, `baselith/core/task_queue/worker.py`,
+`baselith/core/events/durable.py`); a plugin that starts its own producer or consumer
 task owns the same responsibility.
 
 If the raising call is only building a cache key or a metric label, the fix is

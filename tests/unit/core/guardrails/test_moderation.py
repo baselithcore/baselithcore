@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.guardrails.config import GuardrailsConfig
-from core.guardrails.moderation import (
+from baselith.core.guardrails.config import GuardrailsConfig
+from baselith.core.guardrails.moderation import (
     ModerationVerdict,
     OpenAIModerator,
     get_moderator,
@@ -104,8 +104,8 @@ class _StubModerator:
 
 @pytest.mark.asyncio
 async def test_guard_input_async_blocks_flagged_content(monkeypatch):
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration.guard_pipeline import guard_input_async
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration.guard_pipeline import guard_input_async
 
     stub = _StubModerator(flagged=True)
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)
@@ -119,8 +119,8 @@ async def test_guard_input_async_blocks_flagged_content(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_guard_input_async_passes_clean_content(monkeypatch):
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration.guard_pipeline import guard_input_async
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration.guard_pipeline import guard_input_async
 
     stub = _StubModerator(flagged=False)
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)
@@ -130,8 +130,8 @@ async def test_guard_input_async_passes_clean_content(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_guard_input_async_fails_open_on_moderator_error(monkeypatch):
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration.guard_pipeline import guard_input_async
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration.guard_pipeline import guard_input_async
 
     stub = _StubModerator(flagged=True, raises=True)
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)
@@ -142,8 +142,8 @@ async def test_guard_input_async_fails_open_on_moderator_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_guard_input_async_still_applies_sync_guard(monkeypatch):
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration.guard_pipeline import guard_input_async
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration.guard_pipeline import guard_input_async
 
     stub = _StubModerator(flagged=False)
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)
@@ -157,8 +157,8 @@ async def test_guard_input_async_still_applies_sync_guard(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_moderation_disabled_by_config_skips_moderator(monkeypatch):
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration.guard_pipeline import guard_input_async
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration.guard_pipeline import guard_input_async
 
     stub = _StubModerator(flagged=True)
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)

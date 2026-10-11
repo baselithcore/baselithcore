@@ -1,6 +1,6 @@
 """Deterministic code security review — regex/entropy scanner, no LLM.
 
-Pins the contract of :func:`core.guardrails.code_review.review_code`:
+Pins the contract of :func:`baselith.core.guardrails.code_review.review_code`:
 every secret class is detected with a line number and ``high`` severity,
 dangerous call patterns are flagged ``medium``/``high``, the entropy check
 catches only genuinely random-looking literals, and clean code is approved
@@ -9,7 +9,7 @@ with severity ``"none"``.
 
 from __future__ import annotations
 
-from core.guardrails.code_review import (
+from baselith.core.guardrails.code_review import (
     CodeReview,
     CodeReviewComment,
     review_code,

@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core.scraper.models import ExtractedData, ScrapedPage
-from core.scraper.storage.filesystem import FilesystemStorage
+from baselith.core.scraper.models import ExtractedData, ScrapedPage
+from baselith.core.scraper.storage.filesystem import FilesystemStorage
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def sample_data():
         fetched_at=datetime.now(UTC),
         fetch_time_ms=100,
     )
-    from core.scraper.models import PageMetadata
+    from baselith.core.scraper.models import PageMetadata
 
     data = ExtractedData(
         text="Hello", metadata=PageMetadata(title="Test"), images=[], links=[]

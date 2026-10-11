@@ -15,6 +15,103 @@ v0.4.0 module moves, see the [Migration Guide](migration-guide.md).
 
 ---
 
+## 1.0: one top-level package
+
+The `baselith-core` wheel now installs a single top-level package, `baselith`.
+`core.*` is `baselith.core.*` and `plugins.*` is `baselith.plugins.*`; the
+facade (`from baselith import Agent`) is unchanged. A project with its own
+`core` package (a Django app, typically) can now install the framework.
+
+**What can break:**
+
+- Deep imports. Rewrite them with the codemod (`--no-move` on your own
+  project), or install `baselith-core-compat` while you migrate.
+- Jobs queued by 0.x. Their function paths name the old modules, and the
+  dead-letter replay allowlist now defaults to `baselith.core.,baselith.plugins.`.
+  Drain the queues before upgrading.
+- Log filters, dashboards and alerts keyed on the old logger names.
+- Third-party plugins written for 0.x. They need the compat package or a 1.0
+  release that declares `min_core_version: 1.0.0`.
+- Container paths (`/app/baselith/core`), volume mounts of the repository's
+  plugins, a custom `alembic.ini`, and direct `python -m` calls to framework
+  modules.
+
+The full procedure, with the codemod, the compat package and the operator
+checklist, is in [Migrating to 1.0](migrating-to-1-0.md).
+
+### The `agents` and `goals` shims are gone
+
+`core.agents` and `core.goals` were deprecated in 0.39 with removal announced
+for 1.0, and every import has warned since. They are removed: neither
+`baselith.core.agents` / `baselith.core.goals` nor, through
+`baselith-core-compat`, `core.agents` / `core.goals` resolves any more.
+
+| Removed | Import instead |
+| --- | --- |
+| `core.agents.BrowserAgent`, `core.agents.browser_agent`, `browser_tools`, `browser_types` | `baselith.plugins.browser_agent` |
+| `core.agents.CodingAgent`, `core.agents.coding`, `coding_tools` | `baselith.plugins.coding_agent` |
+| `core.goals.Goal`, `GoalStatus`, `GoalTracker` | `baselith.plugins.goals` |
+
+The classes are the same objects the shims re-exported, so the import is the
+only change. The other three frozen shims (`doc_sources`, `routers`,
+`scraper`) stay, still `deprecated`, with no removal date announced.
+
+### Consent records are tenant-scoped
+
+The consent log was keyed by subject id alone, so two tenants sharing a
+subject id shared its consent chain, and its DSR export and erasure. Records
+now carry `tenant_id`; reads, withdrawals, exports and erasures see only the
+current tenant. Records written before the upgrade belong to the `default`
+tenant. A deployment that recorded consent for other tenants before the
+upgrade finds those records under `default`; re-record them, or re-file them
+with `subject_key(subject_id, tenant_id)` in a custom `ConsentStore`. Subject
+ids with control characters are refused.
+
+### Overdue deprecations are removed
+
+Two APIs announced for removal in 0.41.0 outlived their date; 1.0 removes
+them:
+
+- `InputGuard.validate_async()`: use the orchestrator's `guard_input_async`,
+  or `InputGuard.classify()` for an LLM verdict.
+- `baselith.core.services.evaluation` (its `EvaluationService` alias and
+  `get_evaluation_service()`): use `baselith.core.evaluation.EvaluationService`
+  and `baselith.core.evaluation.metrics.FaithfulnessEvaluator` /
+  `AnswerRelevancyEvaluator`.
+
+### Settings built in code honour aliased fields set by name
+
+`VoiceConfig(openai_api_key=...)`, `WebhookConfig(allow_internal=...)` and every
+other keyword named after an aliased field used to be dropped without an error:
+the instance silently took the environment's value (or the default) instead.
+They are now applied, and they win over the environment. Code that passed such
+a keyword and relied, unknowingly, on the environment value will now get the
+value it passed. Environment variables are unchanged: no new names bind. See
+[Configuration › Building a settings object in code](../core-modules/config.md#settings-in-code).
+
+### Deprecations announced in 1.0 (removed in 2.0)
+
+Both keep working through 1.x; both name their removal version when used.
+
+- **`baselith.core.webhooks.ssrf`** — `validate_webhook_url()`,
+  `resolve_pinned_target(url, allow_internal=...)` and `WebhookSSRFError`, also
+  re-exported by `baselith.core.webhooks`. No framework module uses them any
+  more; the two functions warn (`DeprecationWarning`) on every call. Import
+  from `baselith.core.security.ssrf` instead:
+  `assert_url_safe(url, SsrfPolicy(allow_internal=x))`,
+  `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` and `SsrfError`.
+  `WebhookSSRFError` is the same class as `SsrfError` (so existing `except`
+  clauses keep working) and cannot warn — search for the name. See
+  [Security › Deprecated shims](../core-modules/security.md#deprecated-shims).
+- **`BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`** — the opt-out that exports a plugin
+  `.env`'s out-of-namespace keys to `os.environ`. Setting it now logs a
+  deprecation warning naming 2.0, once per process; from 2.0 it is ignored.
+  Rename each key the plugin-env warnings list into the plugin namespace, or
+  declare it in the manifest's `environment_variables`. See
+  [Plugins › Plugin-specific environment variables](../core-modules/plugins.md#plugin-specific-environment-variables-env).
+
+---
+
 ## Security postures that are now fail-closed
 
 ### MCP tokens are bound to the MCP resource (RFC 8707)
@@ -50,8 +147,8 @@ warning. Both variables survive only as explicit downgrade flags:
 
 **What can break:** `plugin_dependencies` are part of the compat gate, so
 **disabling a plugin now disables its dependents**. Turning `browser_agent` off
-in `configs/plugins.yaml` skips `baselithbot` too, where it previously logged a
-warning and loaded anyway. Either disable the dependents explicitly, or set the
+in `configs/plugins.yaml` skips every plugin that declares it as a dependency, where it
+previously logged a warning and loaded anyway. Either disable the dependents explicitly, or set the
 downgrade flag for the duration.
 
 See [Plugin System › Load-time Admission Gates](../core-modules/plugins.md#load-time-admission-gates).
@@ -179,6 +276,67 @@ marks `failed` and emits `agent.failed`. A poller must stop on `completed`,
 `failed` or `cancelled` only. See
 [Task Queue › Async Agent Runs](../core-modules/task-queue.md#async-agent-runs-agentasync).
 
+### MCP stdio servers launch only from what the operator allows
+
+The MCP client now treats every server it launches as untrusted. A stdio
+server that started under 0.x will most likely **not start** after the upgrade
+until you opt in:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `MCP_STDIO_ALLOWED_DIRS` | `""` | Absolute directories a `python`/`node`/`deno`/`bun`/`uv` server script must live in. Empty: no script runs. |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | system dirs + active venv | Where a command name is resolved. `PATH` is never consulted. |
+| `MCP_STDIO_ALLOWED_MODULES` | `""` | Modules `python -m` may run. Empty: `-m` is refused. |
+| `MCP_ALLOW_PACKAGE_RUNNERS` | `false` | `npx`, `uvx`, `bunx` and friends, even when listed in `MCP_ALLOWED_COMMANDS`. |
+| `MCP_STDIO_ENV_PASSTHROUGH` | `""` | Extra parent variables a server may inherit (a trailing `*` matches a prefix). |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | `""` | Loader variables (`PATH`, `LD_*`, `PYTHON*`, `NODE_*`, proxies) a spec's `env` may set. |
+
+**What can break:**
+
+- A server run through an interpreter (`python server.py`, `node index.js`)
+  is refused until its directory is in `MCP_STDIO_ALLOWED_DIRS`; inline code
+  (`python -c`, `node -e`) and remote scripts are refused for good.
+- Shells and exec-wrappers (`sh`, `bash`, `env`, `xargs`, ...) are refused
+  whatever `MCP_ALLOWED_COMMANDS` says, and allowlist names now match exactly:
+  list `python3.12` to allow `python3.12`.
+- The server no longer inherits the parent environment. Only a short built-in
+  list (`PATH`, `HOME`, locale, temp and time-zone variables) passes; a server
+  that read an API key from the inherited environment must get it through its
+  spec's `env` or `MCP_STDIO_ENV_PASSTHROUGH`.
+- Server-initiated requests (`sampling/createMessage`, `elicitation/create`,
+  `roots/list`) are answered with a JSON-RPC error unless the `MCPClient` was
+  given an `input_provider`.
+
+See [MCP](../core-modules/mcp.md).
+
+### The MCP client refuses compressed responses
+
+The HTTP transport and `OAuthClient` send `Accept-Encoding: identity`, and a
+response with any other `Content-Encoding` fails with `MCPTransportError`
+before its body is read: the body caps count uncompressed bytes, and a
+compressed body would be inflated in memory before any cap could see it.
+`MCP_CLIENT_MAX_RESPONSE_BYTES` (4 MiB), `MCP_CLIENT_TOTAL_DEADLINE_SECONDS`
+(60) and a bounded `tools/list` pagination apply to every server.
+
+**What can break:** a remote MCP or OAuth server that compresses regardless of
+`Accept-Encoding`, or a tool listing past `MCP_CLIENT_MAX_PAGES` /
+`MCP_CLIENT_MAX_ITEMS`. `baselith.core.mcp.bounded_http.check_declared_length`
+is now `check_response_headers`.
+
+### Other capped HTTP readers refuse brotli and zstd
+
+The connector client, the plugin-update source, the inference HTTP client,
+the voice providers and the `web_scraper` / `document_sources` fetchers read
+bodies through `baselith.core.security.bounded_body`: they send
+`Accept-Encoding: gzip, deflate`, inflate gzip/deflate under their size cap
+(a compressed body used to be expanded whole before the cap saw it), and
+refuse any other `Content-Encoding` before reading the body.
+
+**What can break:** a server that answers with `br` or `zstd` regardless of
+`Accept-Encoding` — the call now fails (`ConnectorError`, `SourceError`,
+`InferenceError`, `VoiceUpstreamError`, `FetchError` 415, or a skipped page)
+instead of succeeding.
+
 ---
 
 ## Supply chain
@@ -230,10 +388,10 @@ See [Security › Plugin trust store](security.md#plugin-trust-store).
 ### Plugin core bounds name the public core release
 
 `min_core_version` / `max_core_version` are compared with `CORE_VERSION`
-(`core/_core_version.py`) by the plugin loader, `baselith plugin add`, the plugin
-update checker and the upgrade checklist — no longer with `core._version`. In the
+(`baselith/core/_core_version.py`) by the plugin loader, `baselith plugin add`, the plugin
+update checker and the upgrade checklist — no longer with `baselith.core._version`. In the
 core project the two numbers are equal, so nothing changes there. A downstream
-distribution that versions its own `core/_version.py` independently must restate
+distribution that versions its own `baselith/core/_version.py` independently must restate
 its plugins' bounds as public core releases: a floor written in the
 distribution's own numbering (`1.0.0` against a public `0.42.1`) now refuses the
 plugin. The upgrade checklist's plugin check, previously reported as not
@@ -353,7 +511,7 @@ See [A2A Protocol](../core-modules/a2a.md).
 
 `create`, `touch` and `terminate` are coroutines on both `SessionStore` and the
 new `RedisSessionStore`; they must be awaited. The class keeps its name and its
-`core.mcp.http_transport` import path. Sessions are now Redis-backed
+`baselith.core.mcp.http_transport` import path. Sessions are now Redis-backed
 automatically when the deployment declares `CACHE_BACKEND=redis`, which makes
 them shared across replicas.
 
@@ -365,7 +523,7 @@ See [MCP › Session storage](../core-modules/mcp.md#session-storage).
 
 ### `estimate_cost` renamed its first two parameters
 
-`core.models.pricing.estimate_cost(model_id, input_tokens, output_tokens, ...)` —
+`baselith.core.models.pricing.estimate_cost(model_id, input_tokens, output_tokens, ...)` —
 they were `prompt_tokens` / `completion_tokens`. **Positional callers are
 unaffected; keyword callers are not.** `ModelPrice.estimate` keeps the older
 names.
@@ -385,9 +543,199 @@ and the run pauses durably; only reachable when the agent was given an
 
 See [Agent API › What `run()` raises](../core-modules/agent.md#what-run-raises).
 
+### Secrets: `env` and `file` cannot be re-registered
+
+`SECRETS_BACKEND` now also resolves providers published in the
+`baselith.secrets_providers` entry-point group, so installing a provider package
+is enough. In return, `register_secrets_provider("env", ...)` and
+`register_secrets_provider("file", ...)` raise `ValueError`, and a registered
+factory that returns something other than a `SecretsProvider` raises
+`TypeError` on first use. Resolution never falls back to `env`.
+
+See [Security](../core-modules/security.md).
+
+### A broken agent stream raises `StreamInterruptedError`
+
+`Agent.run_events` streams text token by token where the provider supports it
+(`LLM_STREAM_AGENT_TEXT=false` restores one chunk per model turn). A stream
+that breaks **after** text has reached the caller raises
+`StreamInterruptedError` (`baselith.core.services.llm.exceptions`) instead of
+failing over and replaying the turn, which would have sent the same text twice.
+Catch it where you consume the event stream.
+
+### Fewer exceptions are swallowed
+
+Every silent `except Exception: pass` in the framework is gone. Most now log;
+some catch only the errors the code can actually meet, so an unexpected error
+that 0.x hid now propagates. `DistributedLock.release()` re-raises a
+`CancelledError` it used to swallow, after deleting the lock key.
+
+### The `baselithbot` plugin is no longer bundled
+
+It was removed from the `baselith-core` distribution. A deployment that enabled
+it in its plugin configuration must remove the entry.
+
 ---
 
 ## Operations
+
+### Durable runs resume automatically, under a per-run lease
+
+Four changes to checkpointed runs an operator will notice
+([Orchestration › Durable checkpointing](../core-modules/orchestration.md#durable-checkpointing-resume)):
+
+- **Auto resume is on for a durable store.**
+  `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` is now unset by default, which
+  starts the recovery loop when the checkpoint backend resolves to `postgres`
+  or `sqlite` (it stays off for `memory`). Runs a crash or restart left
+  `running` are re-entered — their completed tool steps replay, the rest of the
+  loop runs again, including LLM calls. Set it to `false` to keep the previous
+  behaviour (only the fail-only stale sweep).
+- **A lease, not silence, decides ownership.** Each executing attempt holds
+  `owner` + `lease_expires_at` on its checkpoint, renews it on every tool step
+  and from a heartbeat (`ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS`, default 60),
+  and the sweep resumes a run only once its lease has expired — after a crash,
+  about one lease length plus one sweep interval later. A long LLM or tool call
+  is no longer mistaken for a dead worker. `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`
+  now only applies to runs without a lease (in flight across the upgrade).
+  On Postgres lease expiry is computed and checked with the database clock
+  (`now()` in the SQL), so replica clock skew does not affect ownership;
+  SQLite and in-memory stores are single-host and use the process clock.
+- **Migration 013** adds the nullable `owner` and `lease_expires_at` columns to
+  `agent_checkpoints` (catalog-only, no rewrite). Run it before the new code
+  serves traffic; with `DB_SCHEMA_CHECK` at its production default a stale
+  schema refuses to start anyway. SQLite checkpoint files are upgraded in place
+  on open.
+- **Writes are compare-and-swap.** A checkpoint write from a stale copy now
+  raises `CheckpointConflictError` instead of overwriting newer state, and the
+  run stops with `{"error": true, "checkpoint_conflict": true}`. Calling
+  `process(run_id=X)` **without** `resume=True` for an `X` that already exists
+  raises it too (it used to overwrite the old run). Code that saved a brand-new
+  `Checkpoint(run_id=X)` over an existing run must load it first.
+  `POST /approvals/{run_id}/resume` answers **409** while another executor
+  holds the run.
+
+Also new: the budget snapshot is saved with every tool step (a crash no longer
+resets the caps), the request inputs (strategy, tool names, history,
+attachment references; never secrets) are restored on every resume — install
+`set_resume_tool_resolver` so a resumed ReAct run can rebuild its tools — and
+the boot log warns `checkpoint_backend_not_durable` when
+`ORCHESTRATOR_CHECKPOINT_BACKEND=auto` falls back to the in-memory store.
+
+### Retries and redeploys resume runs instead of restarting them
+
+Durability now reaches the entry points and runners that had none
+([Orchestration › Composite runners](../core-modules/orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **A shutdown no longer fails in-flight runs.** A run cancelled while the
+  process is draining (SIGTERM, a rolling deploy) is saved `running` with a
+  `yielded_for_shutdown` marker and its lease released; the next recovery
+  sweep on any replica resumes it at once. Only a cancellation outside a drain
+  (client disconnect, explicit cancel, timeout) still fails it with
+  `cancelled`. Its run-event stream now ends with `interrupted_by_shutdown`.
+- **`POST /chat` names its run.** For an authenticated, non-anonymous caller
+  the run id is derived from the request's `Idempotency-Key`, scoped to tenant
+  and user. A client retrying with the same key resumes the run, or gets the
+  recorded answer of one that already completed, instead of starting over; a
+  retry while the first attempt still executes answers **409**. A key reused
+  for a different query starts a fresh run. Without the header, or from an
+  anonymous caller, every request is a fresh run: `X-Request-ID` is never a
+  replay key, since the client picks it and responses and logs echo it.
+- **An RQ agent-run retry resumes its run.** Every attempt of a job runs under
+  `agent_job_run_id(job_id)`, so completed steps replay and the tool ledger
+  matches. When the recovery sweep finishes a run whose worker died, the
+  TaskTracker and the `agent.completed` / `agent.failed` webhook are updated
+  as if the job had finished it — at least once: a later retry of the same job
+  reports again. `ChatService.handle_chat_async` takes keyword-only `run_id`
+  and `extra_context`; a test double that replaces it must accept them.
+- **Crews, group chats, swarms and Tree-of-Thoughts searches record their
+  units** under the run's checkpoint — explicit (`Crew.run(checkpoint=...)`,
+  `GroupChat.run(..., checkpoint=...)`, `solve(checkpoint=...)`) or the
+  ambient one the orchestrator binds while a handler runs. A resumed run skips
+  finished tasks, rounds, sub-tasks and LLM calls. Results of those units are
+  now persisted, so they must be JSON-serialisable (structured `output_type`
+  models are dumped and re-validated). Under a checkpoint, a crew task's agent
+  keys its idempotency-ledger entries by `<run_id>/<scope path>`, not the bare
+  run id.
+- **Workflow AGENT nodes receive `checkpoint=`** when their agent's `run`
+  accepts it, so an interrupted crew or agent node resumes inside the node
+  rather than re-running it whole.
+- **Plugin agents.** Inside a checkpointed run, the coding agent records each
+  model answer and sandbox test run, so a resumed run continues from the first
+  unfinished step. A browser task is recorded as one step: a finished task
+  replays its result without screenshots; an interrupted task that already
+  clicked or typed returns a failed "interrupted" result instead of re-running,
+  while a read-only one re-runs from scratch. The reasoning-agent flow handler
+  records the whole Tree-of-Thoughts search.
+- **A2A and MCP tasks no longer poll forever.** A2A tasks left
+  `submitted`/`working` by a crash are failed when `tasks/get` or
+  `tasks/resubscribe` finds them silent for longer than
+  `A2AServer(orphan_timeout_seconds=3600.0)` (`None` restores the old
+  behaviour), and `baselith.core.a2a.task_orphans.sweep_orphaned_tasks` does
+  the same across a whole in-memory or Postgres store. MCP tasks end `failed`
+  when their driver ends without a result or after
+  `TaskStore(max_working_seconds=3600.0)` of work. Raise either timeout above
+  your longest legitimate background job. MCP task handles now survive a
+  restart with a Postgres task store (below).
+
+### Model turns, streams, subgraphs and colony auctions are recorded too
+
+The units the previous change left re-running on resume are now steps of the
+run's checkpoint
+([Orchestration › Composite runners](../core-modules/orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **Every model turn of a checkpointed `Agent.run`** (an `llm_turn` step:
+  the full response, tool-call requests and thinking blocks included). A
+  resumed agent no longer calls the model for the turns it already had: it
+  continues from the first unrecorded turn, so a crash after nine turns of a
+  ten-turn run costs one model call, not ten. A replayed turn charges no cost
+  or tokens to the budget but still counts as an iteration. Under a
+  checkpoint a run's step count grows by one per turn, and each turn's
+  response is persisted (JSON) in the checkpoint row. A resumed run whose
+  agent changed its model, system prompt, tools or output schema runs afresh.
+- **Streams are checkpointed runs.** With a checkpoint store,
+  `process_stream` creates (or with `resume=True` claims) a checkpoint, binds
+  it for the handler and records the delivered answer when the stream
+  completes; a disconnected stream is recorded `failed`/`cancelled` (a drained
+  one `running`, yielded). `POST /chat/stream` names the run from an
+  authenticated caller's `Idempotency-Key` like `POST /chat`: a retry replays
+  a completed answer — honouring `Last-Event-ID`, which used to be ignored —
+  or resumes an interrupted run behind a new `event: reset` frame, and answers
+  **409** while the first attempt still streams. A client that sends
+  `Last-Event-ID` must handle `event: reset` (discard its partial text). A
+  streamed run now costs the same checkpoint writes as a non-streamed one (one
+  at the start, overlapped with memory recall, one at completion), and the
+  recovery sweep finishes a crashed stream through `process()`.
+  `ChatService.handle_chat_stream_async` takes a keyword-only `run_id`, and
+  `Orchestrator.process_stream` takes `run_id` and `resume`.
+- **SUBGRAPH nodes resume inside.** The nested workflow runs under the node
+  visit's scope, so its finished inner nodes replay; the nested definition is
+  pinned under `workflow_version@<scope path>` in the run's `plugin_data`.
+- **Colony auctions are recorded.** Under an ambient checkpoint (a
+  `ColonyNodeAdapter` workflow node), `Colony.execute_batch` records each
+  task's bids, winner and result: a resumed batch reinstates the recorded
+  winner instead of re-auctioning and never re-executes a finished task. The
+  batch body moved to `baselith/core/swarm/colony_batch.py`; results must be
+  JSON-serialisable under a checkpoint.
+
+A browser task interrupted after it clicked or typed still returns a failed
+"interrupted" result instead of resuming — the live page cannot be rebuilt
+([Agents › BrowserAgent](../core-modules/agents.md#durability-in-a-checkpointed-run)).
+
+### MCP task handles survive a restart
+
+`MCP_TASK_STORE_BACKEND` (default `auto` = `postgres` when `POSTGRES_ENABLED`,
+else `memory`) writes every `io.modelcontextprotocol/tasks` status transition
+to the new `mcp_tasks` table (migration `015_mcp_tasks`; run migrations before
+deploying). After a restart, or on another replica, `tasks/get` returns the
+stored status and result instead of `Unknown task`. A task that was still
+`working`/`input_required` when its process died is failed with
+`Task orphaned: its worker ended without a result.` once its 60 s lease
+lapses; the work itself is not re-run. `tasks/update` and `tasks/cancel` on a
+task still running on another instance now answer `-32602` ("running on
+another server instance"), so route a session's follow-ups to the instance
+that created its tasks. Set `MCP_TASK_STORE_BACKEND=memory` to keep the
+previous process-local behaviour.
 
 ### Production refuses to start on a stale schema (`DB_SCHEMA_CHECK`)
 
@@ -422,6 +770,38 @@ Every connection string now gets `connect_timeout`, TCP keepalives and
 sets them. A failover is noticed in about a minute instead of the OS default of
 up to fifteen. Set a value to `0` to hand it back to libpq and the OS.
 
+### `EvaluationService` samples instead of judging every flow
+
+With `EVAL_ENABLED=true`, the `EvaluationService` used to send **every**
+successful flow to the LLM judge. It now evaluates a deterministic sample
+(`EVAL_ONLINE_SAMPLE_RATE`, default `0.05`) with cheap deterministic checks,
+and the judge is opt-in on top: `EVAL_ONLINE_JUDGE_RATE` defaults to `0.0`, so
+no `EVALUATION_COMPLETED` is emitted until it is raised. A deployment whose
+`OptimizationLoop` or learning subsystems relied on judging every flow sets
+`EVAL_ONLINE_SAMPLE_RATE=1.0` and `EVAL_ONLINE_JUDGE_RATE=1.0` to keep the old
+behaviour. The service is also started at boot only when `EVAL_ONLINE_ENABLED`
+is on as well (or a plugin requires the `evaluation` resource, as before).
+
+`FLOW_COMPLETED` is now emitted **after** the output guard: its `response` is
+the guarded text the user received (PII redacted), not the handler's raw
+answer, and streamed answers emit it too (`streamed: true`). See
+[Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation).
+
+### The online quality monitor is fleet-wide under Redis
+
+With `CACHE_BACKEND=redis`, online evaluation's quality monitor now aggregates
+every worker's sampled traffic through Redis, and one elected worker announces
+each transition: `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED` arrive **once
+per fleet** instead of once per worker that crossed the line, on the event bus
+of the elected worker only. Their payload gains `state` and `scope`
+(`fleet` / `worker`), and both are also delivered as the `evaluation.degraded` /
+`evaluation.recovered` webhooks to the endpoints of `EVAL_ONLINE_WEBHOOK_TENANT`
+(default `default`) when `WEBHOOKS_ENABLED` is on. `GET
+/v1/evaluation/online/summary` reports the fleet's windows and says so in a new
+`scope` field. Set `EVAL_ONLINE_FLEET=false` to keep the per-worker monitor;
+without Redis as the cache backend nothing changes. See
+[Evaluation › Fleet-wide monitoring](../core-modules/evaluation.md#fleet-monitoring).
+
 ### Metrics and spans follow the OpenTelemetry GenAI conventions
 
 - The Prometheus label `gen_ai_system` on the `gen_ai_client_*` metrics is
@@ -452,7 +832,7 @@ than a `SettingsError` out of the whole settings class. Previously both raised,
 which meant copying `.env.example` verbatim could break a subsystem by leaving a
 key empty.
 
-The parser (`core.config._collections.csv_list`) splits on a **literal comma**. A
+The parser (`baselith.core.config._collections.csv_list`) splits on a **literal comma**. A
 value that legitimately contains one — a credential, an algorithm token, a
 description — cannot be expressed in the CSV form. Both forms are accepted, so
 use the JSON one there:
@@ -472,9 +852,9 @@ SOME_KEYS=["abc", "def-with,comma"]
 
     | Setting | Shape |
     |---|---|
-    | `MCP_SERVERS` | `dict[str, MCPServerSpec]` (`core/config/mcp.py`) |
-    | `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` (`core/config/plugins.py`) |
-    | `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` (`core/config/world_model.py`) |
+    | `MCP_SERVERS` | `dict[str, MCPServerSpec]` (`baselith/core/config/mcp.py`) |
+    | `PLUGIN_PLUGIN_CONFIGS` | `dict[str, dict[str, Any]]` (`baselith/core/config/plugins.py`) |
+    | `WORLD_MODEL_RISK_WEIGHTS` | `dict[str, float]` (`baselith/core/config/world_model.py`) |
 
     `MCP_SERVERS=weather` fails; `MCP_SERVERS='{"weather": {...}}'` is the only
     accepted form. There is no CSV spelling for a nested object, so this is a

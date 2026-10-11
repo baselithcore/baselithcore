@@ -3,7 +3,7 @@ title: A2A Protocol
 description: Agent-to-Agent protocol for inter-agent communication
 ---
 
-The `core/a2a` module implements the **Agent-to-Agent Protocol** (Google A2A
+The `baselith/core/a2a` module implements the **Agent-to-Agent Protocol** (Google A2A
 specification), enabling standardized JSON-RPC 2.0 communication between
 agents, plus an agent-discovery service and the A2UI blueprint schema.
 
@@ -12,7 +12,7 @@ agents, plus an agent-discovery service and the A2UI blueprint schema.
 ## Structure
 
 ```text
-core/a2a/
+baselith/core/a2a/
 ├── __init__.py
 ├── agent_card.py    # AgentCard, AgentSkill, AgentCapabilities, AgentCapability
 ├── discovery.py     # AgentDiscovery, AgentRegistration
@@ -20,6 +20,9 @@ core/a2a/
 ├── protocol.py      # JSON-RPC types, A2ARequest/A2AResponse, A2AMethod, ErrorCode
 ├── client.py        # A2AClient, A2AClientConfig, A2AClientPool
 ├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
+├── task_orphans.py  # Orphaned-task detection: lazy check on poll + sweep_orphaned_tasks
+├── task_store_postgres.py  # PostgresTaskStore (durable, tenant-scoped JSONB rows)
+├── task_streams.py  # tasks/resubscribe + push-notification answers
 ├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
 ├── security.py      # HMAC request signing (BASELITH_A2A_SHARED_SECRET)
 ├── guards.py        # Per-IP rate limit + request-body cap on the JSON-RPC endpoint
@@ -36,7 +39,7 @@ Every agent describes its identity and capabilities via an **Agent Card**.
 and the well-known endpoint — the card itself has no `publish()` method.
 
 ```python
-from core.a2a import AgentCard, AgentCapabilities, AgentSkill
+from baselith.core.a2a import AgentCard, AgentCapabilities, AgentSkill
 
 card = AgentCard(
     name="Data Analyzer",
@@ -88,7 +91,7 @@ all three on the card, and every one is overridable per deployment:
 | `security` | `[{"hmacSignature": []}]` | Which of those schemes a peer must satisfy. |
 
 Build the defaults directly with `default_security_schemes()` and
-`default_security()` from `core.a2a.agent_card`, or replace them when a
+`default_security()` from `baselith.core.a2a.agent_card`, or replace them when a
 deployment fronts the agent with OAuth or mTLS.
 
 !!! warning "`protocols` is deprecated and no longer emitted"
@@ -108,7 +111,7 @@ deployment fronts the agent with OAuth or mTLS.
 name, with health tracking. None of its methods are coroutines.
 
 ```python
-from core.a2a import AgentDiscovery
+from baselith.core.a2a import AgentDiscovery
 
 discovery = AgentDiscovery(stale_threshold=300.0)  # seconds before stale
 
@@ -148,7 +151,7 @@ stats = discovery.get_stats()            # {total_agents, healthy_agents, ...}
 ### Well-known discovery endpoint
 
 Per A2A 0.3.0, an agent advertises its card at `/.well-known/agent-card.json`.
-The main BaselithCore app mounts this automatically — `core.api.factory`
+The main BaselithCore app mounts this automatically — `baselith.core.api.factory`
 builds the card from app config plus the framework version and includes
 `create_wellknown_router(...)` — so peer agents can discover this instance
 without bespoke integration:
@@ -162,7 +165,7 @@ curl http://localhost:8000/.well-known/agent-card.json
 
 | Path | Role | Constant |
 |---|---|---|
-| `/.well-known/agent-card.json` | Canonical (0.3.0) | `core.a2a.router.AGENT_CARD_PATH` |
+| `/.well-known/agent-card.json` | Canonical (0.3.0) | `baselith.core.a2a.router.AGENT_CARD_PATH` |
 | `/.well-known/agent.json` | Pre-0.3.0 alias, still served | `LEGACY_AGENT_CARD_PATH` |
 | `/a2a/agent-card` | Convenience alias | — |
 
@@ -176,8 +179,8 @@ backend, use the discovery-only router:
 
 ```python
 from fastapi import FastAPI
-from core.a2a import AgentCard, AgentCapabilities
-from core.a2a.router import create_wellknown_router
+from baselith.core.a2a import AgentCard, AgentCapabilities
+from baselith.core.a2a.router import create_wellknown_router
 
 card = AgentCard(
     name="my-agent",
@@ -194,8 +197,8 @@ For the full JSON-RPC task backend (`message/send`, `tasks/get`,
 exposes the well-known endpoint.
 
 !!! note "The main app mounts discovery only"
-    `core.api.factory` includes `create_wellknown_router` and nothing else from
-    `core/a2a`: the JSON-RPC endpoint (`POST /a2a`, `message/stream`, the
+    `baselith.core.api.factory` includes `create_wellknown_router` and nothing else from
+    `baselith/core/a2a`: the JSON-RPC endpoint (`POST /a2a`, `message/stream`, the
     guards) is not mounted by the default app, so its card advertises
     `streaming: false`. Include `create_a2a_router(server)` in your own app, or
     run `create_standalone_app`, to serve it.
@@ -210,7 +213,7 @@ task snapshot followed by a terminal `status-update` event carrying
 method returned `UNSUPPORTED_OPERATION`, which broke those peers.
 
 A quiet stream is kept warm: while the agent produces nothing, the framer
-(`core.a2a.router.sse_frames`) emits an SSE comment frame (`:`) every
+(`baselith.core.a2a.router.sse_frames`) emits an SSE comment frame (`:`) every
 `SSE_KEEPALIVE_SECONDS` (15s) so intermediaries do not drop the connection, and
 the producer runs as its own task behind a bounded 64-event queue — a peer that
 reads slower than the agent emits applies backpressure to the agent rather than
@@ -225,11 +228,13 @@ final task in one response. The card also carries a `protocolVersion` field
 
 ### Task re-subscription & push notifications
 
-`tasks/resubscribe` is served (`core/a2a/task_streams.py`): over the streaming
+`tasks/resubscribe` is served (`baselith/core/a2a/task_streams.py`): over the streaming
 endpoint it replays the task snapshot followed by the terminal
 `status-update` (`final: true`) — the tail a reconnecting client needs; over
 sync `dispatch()` it returns the current snapshot. Unknown ids get the spec's
-`TaskNotFoundError` (-32003).
+`TaskNotFoundError` (-32003). An orphaned task is failed before it is replayed
+(see [Orphaned tasks](#orphaned-tasks)), so the `final: true` event always
+carries a terminal state.
 
 Push-notification configuration is answered with the spec's
 `PushNotificationNotSupportedError` (-32007) — the conformant reply for an agent
@@ -248,7 +253,7 @@ whose card advertises `pushNotifications: false` — rather than a generic
 The deprecated pair keeps working so peers pinned to the older spelling are not
 broken, but each call logs `a2a_deprecated_push_notification_method`. The sets are
 exported as `PUSH_NOTIFICATION_METHODS` and
-`DEPRECATED_PUSH_NOTIFICATION_METHODS` from `core.a2a.protocol`, so peer tooling
+`DEPRECATED_PUSH_NOTIFICATION_METHODS` from `baselith.core.a2a.protocol`, so peer tooling
 can agree with the server instead of maintaining its own list.
 
 ### Task states
@@ -273,7 +278,7 @@ circuit breaker.
     The client enforces an `http(s)` scheme on the agent card's endpoint, so a
     malicious or misconfigured card cannot coerce the client into `file://` /
     `gopher://` style requests — a `ValueError` is raised on first use.
-    Requests go through `core.security.http.create_hardened_async_client`,
+    Requests go through `baselith.core.security.http.create_hardened_async_client`,
     which re-validates and IP-pins every request/redirect (DNS-rebinding
     defense). The `allow_internal_endpoints` default is **environment-aware**
     when `A2A_ALLOW_INTERNAL_ENDPOINTS` is unset: private/internal hosts are
@@ -286,7 +291,7 @@ circuit breaker.
     production deployment back in, `false` to lock down a dev box.
 
 ```python
-from core.a2a import A2AClient, A2AClientConfig
+from baselith.core.a2a import A2AClient, A2AClientConfig
 
 config = A2AClientConfig(
     timeout=30.0,
@@ -373,12 +378,12 @@ Without the secret the dispatch endpoint **fails closed in production**:
 unsigned requests are rejected (`401`) unless the operator explicitly opts in
 with `BASELITH_A2A_ALLOW_UNAUTHENTICATED=true`. Outside production the protocol
 stays unauthenticated (backward compatible) and a CRITICAL log fires. Helpers
-live in `core.a2a.security` (`build_signature_headers`, `verify_signature`,
+live in `baselith.core.a2a.security` (`build_signature_headers`, `verify_signature`,
 `unauthenticated_a2a_allowed`).
 
 !!! warning "`APP_ENV=prod` now counts as production"
     Both this gate and the client's internal-host deny below ask
-    `core.utils.runtime_env.is_production_env()`. `core.a2a.security` used to
+    `baselith.core.utils.runtime_env.is_production_env()`. `baselith.core.a2a.security` used to
     match the literal string `production` on its own, so a mesh running
     `APP_ENV=prod` accepted unsigned peer requests and allowed internal
     endpoints. `prod`, `prd` and `live` now resolve to `production`, and an
@@ -390,7 +395,7 @@ live in `core.a2a.security` (`build_signature_headers`, `verify_signature`,
 ### Endpoint guards: rate limit and body cap
 
 Signing is authentication, not admission control — and outside production it is
-not even required. `core.a2a.guards` therefore meters the `POST /a2a` JSON-RPC
+not even required. `baselith.core.a2a.guards` therefore meters the `POST /a2a` JSON-RPC
 endpoint before any dispatch work happens:
 
 | Guard | Default | Environment variable |
@@ -398,7 +403,7 @@ endpoint before any dispatch work happens:
 | Per-source-IP rate limit | 120 requests/minute | `BASELITH_A2A_RATE_LIMIT_PER_MINUTE` (`0` disables) |
 | Request body cap | 1 MiB | `BASELITH_A2A_MAX_BODY_BYTES` (`0` disables) |
 
-The limiter is the same `core.middleware.rate_limiter.RateLimiter`
+The limiter is the same `baselith.core.middleware.rate_limiter.RateLimiter`
 `SecurityManager` uses for the HTTP API (Redis fixed window, in-memory
 fallback, `RATE_LIMIT_FAIL_MODE` honoured) and buckets on the same
 `<scope>:<ip>` key shape — here `a2a:<source ip>`. One limiter is built lazily
@@ -418,7 +423,7 @@ a chunked payload with no `Content-Length` is never fully buffered.
 `A2AClientPool` lazily creates and caches one `A2AClient` per agent name:
 
 ```python
-from core.a2a import A2AClientPool
+from baselith.core.a2a import A2AClientPool
 
 pool = A2AClientPool(config)
 client = await pool.get_client(analyst_card)
@@ -434,8 +439,8 @@ await pool.close_all()
 `handle_message`; the base provides JSON-RPC dispatch and task lifecycle.
 
 ```python
-from core.a2a import A2AServer, AgentCard, InMemoryTaskStore
-from core.a2a import Message, Task, TaskState
+from baselith.core.a2a import A2AServer, AgentCard, InMemoryTaskStore
+from baselith.core.a2a import Message, Task, TaskState
 
 
 class AnalyzerAgent(A2AServer):
@@ -467,7 +472,7 @@ text back as both a message and an artifact.
 To serve over HTTP, mount the router:
 
 ```python
-from core.a2a import create_a2a_router, create_standalone_app
+from baselith.core.a2a import create_a2a_router, create_standalone_app
 
 # Add to an existing FastAPI app:
 app.include_router(create_a2a_router(server))
@@ -480,7 +485,7 @@ standalone = create_standalone_app(server)
 
 `create_standalone_app(server, title=None, version=None)` is a documented
 deployment shape, not a demo: it faces peer agents directly, **without** the
-middleware stack `core.api.factory` assembles. It therefore mounts the two
+middleware stack `baselith.core.api.factory` assembles. It therefore mounts the two
 perimeter guards a bare `FastAPI` has no equivalent for — both pure ASGI, so
 they add no per-request task hop:
 
@@ -489,7 +494,7 @@ they add no per-request task hop:
 | `RequestSizeLimitMiddleware` | An unbounded body is a trivial memory-exhaustion vector; oversized requests get `413` (`SecurityConfig.max_request_size_bytes`, default 10 MiB; `0` disables) |
 | `SecurityHeadersMiddleware` | A response with no CSP/HSTS/nosniff is one an embedded browser will happily over-trust |
 
-Both are imported lazily from `core.middleware.security_headers`, and the import
+Both are imported lazily from `baselith.core.middleware.security_headers`, and the import
 is guarded: if they are unavailable the app still comes up, with a warning
 logged rather than a failed bring-up. See
 [Middleware](middleware.md#requestsizelimitmiddleware).
@@ -519,7 +524,7 @@ wire. `JSONRPCError.internal_error()` still accepts a `data` argument for
 local/diagnostic use, but nothing on a peer-reachable path passes one: an
 exception's text names psycopg/redis internals, driver versions and filesystem
 paths, and `to_dict` serializes `data` verbatim. This mirrors what
-`core.api.errors.unhandled_exception_handler` does on the HTTP surface and what
+`baselith.core.api.errors.unhandled_exception_handler` does on the HTTP surface and what
 [Auth](auth.md#error-disclosure-the-401-body-says-nothing) does for `401`
 bodies. Protocol-level errors that are *not* exception text — task not found,
 push-notification unsupported, rate limited — keep their specific codes and
@@ -530,14 +535,14 @@ payloads.
 `TaskStore` is an abstract async interface (`get`, `save`, `delete`).
 `InMemoryTaskStore` is the default development/testing implementation.
 
-For production, `PostgresTaskStore` (`core/a2a/task_store_postgres.py`)
+For production, `PostgresTaskStore` (`baselith/core/a2a/task_store_postgres.py`)
 persists tasks as tenant-scoped JSONB rows on the shared async pool — a peer
 polling `tasks/get` across a restart or redeploy still finds its task. Same
 conventions as the durable checkpoint store: idempotent self-initializing DDL
 (`await store.initialize()`), ambient-tenant row scoping.
 
 ```python
-from core.a2a import PostgresTaskStore
+from baselith.core.a2a import PostgresTaskStore
 
 store = PostgresTaskStore()
 await store.initialize()                       # idempotent DDL
@@ -550,6 +555,50 @@ server = AnalyzerAgent(my_agent_card, task_store=store)
     [migration 007](db.md#who-creates-the-schema) owns the
     schema and the runtime role holds no DDL rights. The call stays safe
     either way: with the gate off the table is expected to exist already.
+
+### Orphaned tasks
+
+A server that returns a `working` task and finishes it in the background
+updates the task later — unless the process dies first. Without a cleanup the
+row stayed `working` forever (in Postgres, across every restart) and a peer
+polling `tasks/get` polled forever. `baselith/core/a2a/task_orphans.py` closes
+that in two ways:
+
+* **On poll (always on).** `tasks/get` and `tasks/resubscribe` fail a
+  `submitted`/`working` task whose last status change (`status.timestamp`) is
+  older than the server's `orphan_timeout_seconds`, save it, and return it.
+  The task moves to `failed` with an agent status message
+  (`Task orphaned: no progress for …s (timeout …s); presumed lost to a crash or
+  restart.`) and `metadata.orphaned = {silence_seconds, timeout_seconds}`.
+* **Sweep (opt-in).** `sweep_orphaned_tasks(store, max_age_seconds=3600.0,
+  limit=100)` fails every such task in the store whether or not anyone polls —
+  call it from your scheduler. It needs the store's optional `fail_orphaned`
+  method, which `InMemoryTaskStore` and `PostgresTaskStore` implement; a
+  store without it is skipped with a warning. The Postgres sweep reads across
+  tenants under `system_tenant_scope()`, measures silence from the row's
+  `updated_at` (its last save), keeps each row's own `tenant_id`, and writes
+  with a conditional `UPDATE` that leaves a row alone if it moved since it was
+  read (a live worker saved progress, or another replica's sweep won).
+
+```python
+from baselith.core.a2a import PostgresTaskStore
+from baselith.core.a2a.task_orphans import sweep_orphaned_tasks
+
+server = AnalyzerAgent(card, task_store=store, orphan_timeout_seconds=1800.0)
+failed_ids = await sweep_orphaned_tasks(store, max_age_seconds=1800.0)
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `A2AServer(orphan_timeout_seconds=...)` | `3600.0` | Silence before a polled task is failed; `None` disables the check. |
+| `sweep_orphaned_tasks(max_age_seconds=...)` | `3600.0` | Silence before the sweep fails a task. |
+| `sweep_orphaned_tasks(limit=...)` | `100` | Tasks failed per call; a backlog drains across calls. |
+
+`input-required` and `auth-required` tasks are never touched — they wait on the
+client or a human, not on a worker that might have died. Pick a timeout well
+above your longest legitimate background job: a worker that is merely slow and
+saves its result after the timeout overwrites the `failed` state, but a client
+that already stopped polling will not see it.
 
 ---
 
@@ -573,7 +622,7 @@ sequenceDiagram
 
 ## A2UI — Agent-to-UI blueprint schema
 
-`core/a2a/a2ui.py` defines a closed-whitelist JSON schema for any UI an
+`baselith/core/a2a/a2ui.py` defines a closed-whitelist JSON schema for any UI an
 agent emits. The agent never returns raw HTML or JavaScript; it emits a
 JSON tree of pre-approved components and the client renders the tree
 natively (web, mobile, desktop). The schema rejects unknown component
@@ -603,7 +652,7 @@ runaway nesting: `MAX_TREE_DEPTH` (default 16) and `MAX_TREE_NODES`
 ### Validation entry point
 
 ```python
-from core.a2a.a2ui import A2UIBlueprint, validate_blueprint
+from baselith.core.a2a.a2ui import A2UIBlueprint, validate_blueprint
 
 payload = {
     "schema_version": "a2ui/v1",

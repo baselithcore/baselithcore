@@ -2,14 +2,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.realtime.events import EventType
-from core.task_queue.jobs.indexing import _run_indexing_logic, run_indexing_job
+from baselith.core.realtime.events import EventType
+from baselith.core.task_queue.jobs.indexing import _run_indexing_logic, run_indexing_job
 
 
 class TestIndexingJob:
     @pytest.fixture
     def mock_rq_job(self):
-        with patch("core.task_queue.jobs.indexing.get_current_job") as mock:
+        with patch("baselith.core.task_queue.jobs.indexing.get_current_job") as mock:
             job = MagicMock()
             job.id = "indexing-job-123"
             mock.return_value = job
@@ -17,7 +17,9 @@ class TestIndexingJob:
 
     @pytest.fixture
     def mock_indexing_service(self):
-        with patch("core.task_queue.jobs.indexing.get_indexing_service") as mock:
+        with patch(
+            "baselith.core.task_queue.jobs.indexing.get_indexing_service"
+        ) as mock:
             service = MagicMock()
             stats = MagicMock()
             stats.new_documents = 42
@@ -27,7 +29,9 @@ class TestIndexingJob:
 
     @pytest.fixture
     def mock_pubsub(self):
-        with patch("core.task_queue.jobs.indexing.PubSubManager") as mock_class:
+        with patch(
+            "baselith.core.task_queue.jobs.indexing.PubSubManager"
+        ) as mock_class:
             instance = mock_class.return_value
             instance.publish = AsyncMock()
             yield instance
@@ -69,7 +73,7 @@ class TestIndexingJob:
         self, mock_rq_job, mock_indexing_service, mock_pubsub
     ):
         # This tests the non-async wrapper that uses asyncio.run
-        with patch("core.task_queue.jobs.indexing.asyncio.run") as mock_run:
+        with patch("baselith.core.task_queue.jobs.indexing.asyncio.run") as mock_run:
             mock_run.return_value = 10
             res = run_indexing_job(incremental=True)
             assert res == 10

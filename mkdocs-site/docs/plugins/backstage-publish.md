@@ -61,7 +61,7 @@ catalog:
 
 ## Scaffolder form steps
 
-1. **Plugin source** — slug, monorepo URL, `sourcePath` (e.g. `plugins/baselithbot`).
+1. **Plugin source** — slug, monorepo URL, `sourcePath` (e.g. `plugins/my_plugin`).
 2. **Release metadata** — version, license, entry point, author, readiness.
 3. **Marketplace submission (required)** — the form asks for a hub URL (`marketplaceUrl`) and the framework host serving `/api/backstage/publish`. The hub URL is forwarded as `registry_url` and **ignored by the framework**: both the GitHub-token exchange and the submission always target the framework's `OFFICIAL_MARKETPLACE_URL`. **Auth is the signed-in user's GitHub identity** — the Scaffolder forwards `${{ secrets.USER_OAUTH_TOKEN }}` so no static marketplace token is required.
 4. **Mirror to GitHub (optional)** — enable only if you want a dedicated repo + CI workflow alongside the marketplace listing.
@@ -74,7 +74,7 @@ catalog:
    zips + submits the bundle to
    `{OFFICIAL_MARKETPLACE_URL}/api/marketplace/plugins/submit`; the
    `registry_url` in the request body is ignored. This is the canonical
-   submission path (wraps `core.marketplace.publisher.PluginPublisher.publish`).
+   submission path (wraps `baselith.core.marketplace.publisher.PluginPublisher.publish`).
 4. *(optional)* `publish:github` mirrors the scaffolded bundle to a
    dedicated repo (only when `mirrorToGithub=true`).
 5. *(optional)* `catalog:register` registers the mirror in the Backstage
@@ -137,16 +137,16 @@ Legacy clients may still POST `auth_token` (pre-issued JWT) or
 CI systems that cannot reach Backstage, but new integrations should use
 the GitHub flow.
 
-## Running the flow for baselithbot
+## Running the flow
 
 1. Open Backstage → **Create** → **Publish BaselithCore Plugin**.
 2. Form values (minimum):
-   - `pluginName`: `baselithbot`
+   - `pluginName`: `my_plugin`
    - `sourceRepoUrl`: `https://github.com/baselithcore/baselithcore`
-   - `sourcePath`: `plugins/baselithbot`
+   - `sourcePath`: `plugins/my_plugin`
    - `version`: `1.0.0`
    - `license`: `MIT`
-   - `entryPoint`: `plugin:BaselithbotPlugin`
+   - `entryPoint`: `plugin:MyPlugin`
    - `marketplaceUrl`: `https://marketplace.baselithcore.xyz` (required by
      the form, but ignored by the framework — the submission always goes to
      `PLUGIN_OFFICIAL_MARKETPLACE_URL`)

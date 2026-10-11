@@ -10,7 +10,7 @@ useDefault = true
 description = "Test fixtures that exercise the credential-redaction guardrail"
 # The canonical public example token from jwt.io (HS256, sub=1234567890). It
 # is the fixture behind the `jwt` redaction pattern in
-# core/guardrails/config.py and is referenced verbatim by
+# baselith/core/guardrails/config.py and is referenced verbatim by
 # tests/unit/core/guardrails/test_secret_patterns.py and
 # evals/red_team/injection_variants.yaml. Matching the exact literal keeps
 # every other JWT-shaped string a finding.

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from core.utils.similarity import cosine_similarity, cosine_similarity_many
+from baselith.core.utils.similarity import cosine_similarity, cosine_similarity_many
 
 
 def test_cosine_identical_vectors():

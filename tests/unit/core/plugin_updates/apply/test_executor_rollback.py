@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.plugin_updates.apply import _activation
-from core.plugin_updates.apply.boot_report import PluginBootState
-from core.plugin_updates.apply.models import ApplyRun, RunKind, RunState
-from core.plugin_updates.apply.swap import current_target
+from baselith.core.plugin_updates.apply import _activation
+from baselith.core.plugin_updates.apply.boot_report import PluginBootState
+from baselith.core.plugin_updates.apply.models import ApplyRun, RunKind, RunState
+from baselith.core.plugin_updates.apply.swap import current_target
 
 from ._executor_env import Env
 from .fakes import write_report

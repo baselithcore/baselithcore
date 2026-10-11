@@ -1,0 +1,90 @@
+"""
+Internal Event Bus for Baselith-Core.
+
+Provides pub/sub event-driven communication between components
+without tight coupling. Supports both sync and async handlers.
+
+Usage:
+    from baselith.core.events import EventBus, get_event_bus
+
+    bus = get_event_bus()
+
+    # Subscribe to events
+    @bus.on("agent.completed")
+    async def handle_completion(data):
+        print(f"Agent completed: {data}")
+
+    # Publish events
+    await bus.emit("agent.completed", {"agent_id": "123", "result": "success"})
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from baselith.core.events.bus import EventBus, get_event_bus, reset_event_bus
+from baselith.core.events.durable import DEFAULT_CONSUMER_GROUP, DurableEventBridge
+from baselith.core.events.names import EventNames
+from baselith.core.events.stream import (
+    DEFAULT_STREAM_MAXLEN,
+    EventStream,
+    InMemoryEventStream,
+    StreamRecord,
+    StreamStats,
+)
+from baselith.core.events.types import (
+    AsyncHandler,
+    Event,
+    EventStats,
+    Handler,
+    SyncHandler,
+)
+from baselith.core.events.validation import (
+    DeadLetterEntry,
+    DeadLetterQueue,
+    EventSchemaRegistry,
+    EventValidationError,
+    get_dead_letter_queue,
+    get_schema_registry,
+)
+
+if TYPE_CHECKING:
+    from baselith.core.events.listener import EventListener
+
+__all__ = [
+    # Types
+    "Event",
+    "EventStats",
+    "SyncHandler",
+    "AsyncHandler",
+    "Handler",
+    # Bus
+    "EventBus",
+    "get_event_bus",
+    "reset_event_bus",
+    # Names
+    "EventNames",
+    # Durable stream
+    "DEFAULT_CONSUMER_GROUP",
+    "DEFAULT_STREAM_MAXLEN",
+    "DurableEventBridge",
+    "EventStream",
+    "InMemoryEventStream",
+    "StreamRecord",
+    "StreamStats",
+    # Validation & DLQ
+    "DeadLetterEntry",
+    "DeadLetterQueue",
+    "EventSchemaRegistry",
+    "EventValidationError",
+    "get_dead_letter_queue",
+    "get_schema_registry",
+]
+
+
+# Lazy import for listener to avoid circular imports
+def get_event_listener() -> EventListener:
+    """Get or create the global event listener."""
+    from baselith.core.events.listener import EventListener
+
+    return EventListener.setup()

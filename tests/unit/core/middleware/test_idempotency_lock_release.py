@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.middleware.idempotency import IdempotencyMiddleware
+from baselith.core.middleware.idempotency import IdempotencyMiddleware
 
 pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
 
@@ -47,7 +47,9 @@ def _locks(fake: _Redis) -> list[str]:
 
 
 async def _drive(app: Any, fake: _Redis) -> None:
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app)
     scope = {
         "type": "http",

@@ -1,4 +1,4 @@
-"""Unit tests for ``core.evaluation.promotion``.
+"""Unit tests for ``baselith.core.evaluation.promotion``.
 
 Covers the scrub step (PII redaction + indirect-injection sanitizing), the
 checkpoint -> recorded-run mapping (round-tripped through the regression
@@ -15,18 +15,18 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.evaluation.promotion import (
+from baselith.core.evaluation.promotion import (
     PromotionError,
     checkpoint_to_recorded_run,
     promote_run,
     scrub_text,
 )
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     load_cases,
     load_recorded_runs,
     run_regression,
 )
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_COMPLETED,
     STATUS_RUNNING,
     Checkpoint,

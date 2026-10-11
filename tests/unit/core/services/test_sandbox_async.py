@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.services.sandbox.service import ExecutionResult, SandboxService
+from baselith.core.services.sandbox.service import ExecutionResult, SandboxService
 
 
 @pytest.mark.asyncio
@@ -55,3 +55,41 @@ async def test_sandbox_mounts():
     # Mount is dict-like
     assert mount["Target"] == "/data"
     assert mount["Source"] == "/tmp/host"
+
+
+def _docker_service():
+    mock_factory = MagicMock()
+    mock_factory.ensure_image = AsyncMock()
+    mock_container = MagicMock()
+    mock_container.wait.return_value = {"StatusCode": 0}
+    mock_container.logs.return_value = b""
+    mock_factory.client.containers.run.return_value = mock_container
+    return SandboxService(docker_factory=mock_factory), mock_factory
+
+
+@pytest.mark.asyncio
+async def test_read_only_mounts_reach_the_container():
+    service, factory = _docker_service()
+    await service.execute_code_async(
+        "print(1)", mounts={"/host/ws": "/work"}, mounts_read_only=True
+    )
+    mount = factory.client.containers.run.call_args.kwargs["mounts"][0]
+    assert mount["Target"] == "/work" and mount["Source"] == "/host/ws"
+    assert mount["ReadOnly"] is True
+
+
+@pytest.mark.asyncio
+async def test_mounts_stay_writable_by_default():
+    service, factory = _docker_service()
+    await service.execute_code_async("print(1)", mounts={"/host/ws": "/work"})
+    mount = factory.client.containers.run.call_args.kwargs["mounts"][0]
+    assert mount.get("ReadOnly", False) is False
+
+
+@pytest.mark.asyncio
+async def test_sbx_refuses_a_read_only_mount():
+    service = SandboxService(provider="sbx", sbx_factory=MagicMock())
+    with pytest.raises(ValueError, match="docker sandbox provider"):
+        await service.execute_code_async(
+            "print(1)", mounts={"/h": "/w"}, mounts_read_only=True
+        )

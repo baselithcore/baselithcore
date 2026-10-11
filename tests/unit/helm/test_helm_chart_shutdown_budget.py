@@ -3,7 +3,7 @@
 Kubernetes counts the preStop hook against ``terminationGracePeriodSeconds``,
 then sends SIGTERM; uvicorn drains HTTP for ``GRACEFUL_SHUTDOWN_TIMEOUT`` and
 only then runs the lifespan teardown, bounded by
-``core.api._shutdown.TEARDOWN_BUDGET_S``. The chart used to grant 45s against
+``baselith.core.api._shutdown.TEARDOWN_BUDGET_S``. The chart used to grant 45s against
 a 5s preStop, a 30s drain and a teardown whose per-step timeouts summed to
 minutes, so SIGKILL landed before the usage ledger, the audit queue and the
 pools were flushed. These tests read every number from where it is defined.
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from core.api._shutdown import TEARDOWN_BUDGET_S
+from baselith.core.api._shutdown import TEARDOWN_BUDGET_S
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHART_DIR = REPO_ROOT / "deploy" / "helm" / "baselithcore"

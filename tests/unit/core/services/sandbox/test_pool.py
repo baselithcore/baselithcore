@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.services.sandbox.policy import build_sandbox_runtime_kwargs
-from core.services.sandbox.pool import PoolConfig, PooledContainer, SandboxPool
+from baselith.core.services.sandbox.policy import build_sandbox_runtime_kwargs
+from baselith.core.services.sandbox.pool import PoolConfig, PooledContainer, SandboxPool
 
 
 @pytest.fixture
@@ -135,8 +135,12 @@ async def test_health_check(pool):
     pooled.is_healthy = False
     await pool._available.put(pooled)
 
-    # Wait for health check loop
-    await asyncio.sleep(0.2)
+    # Wait for the health check loop. Poll rather than sleep a fixed two
+    # intervals: under a loaded xdist run the loop can need longer than that.
+    for _ in range(100):  # up to 5s
+        if pool._total_recycled >= 1:
+            break
+        await asyncio.sleep(0.05)
 
     # Should have been recycled
     assert pool._total_recycled >= 1

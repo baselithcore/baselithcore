@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.manifest_model import ManifestValidationError, validate_manifest_data
-from core.plugins.runtime_state import (
+from baselith.core.plugins.manifest_model import (
+    ManifestValidationError,
+    validate_manifest_data,
+)
+from baselith.core.plugins.runtime_state import (
     ALWAYS_CARRIED,
     MAX_RUNTIME_STATE_PATHS,
     declared_runtime_state_paths,

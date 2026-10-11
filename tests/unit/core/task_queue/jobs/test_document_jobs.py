@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.task_queue.jobs.documents import (
+from baselith.core.task_queue.jobs.documents import (
     batch_ingest_task,
     ingest_document_task,
     reindex_collection_task,
@@ -12,7 +12,7 @@ from core.task_queue.jobs.documents import (
 class TestDocumentJobs:
     @pytest.fixture
     def mock_job(self):
-        with patch("core.task_queue.jobs.documents.get_current_job") as mock:
+        with patch("baselith.core.task_queue.jobs.documents.get_current_job") as mock:
             job = MagicMock()
             job.id = "test-job-id"
             mock.return_value = job
@@ -20,7 +20,7 @@ class TestDocumentJobs:
 
     @pytest.fixture
     def mock_indexing_service(self):
-        with patch("core.services.indexing.get_indexing_service") as mock:
+        with patch("baselith.core.services.indexing.get_indexing_service") as mock:
             service = MagicMock()
             service.ingest_file = AsyncMock()
             service.reindex_collection = AsyncMock()
@@ -30,9 +30,11 @@ class TestDocumentJobs:
     @pytest.fixture
     def mock_status(self):
         with (
-            patch("core.task_queue.jobs.documents.get_task_tracker") as mock_tracker,
             patch(
-                "core.task_queue.jobs.documents.update_job_progress"
+                "baselith.core.task_queue.jobs.documents.get_task_tracker"
+            ) as mock_tracker,
+            patch(
+                "baselith.core.task_queue.jobs.documents.update_job_progress"
             ) as mock_progress,
         ):
             tracker = MagicMock()

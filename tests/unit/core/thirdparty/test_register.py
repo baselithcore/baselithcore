@@ -1,10 +1,10 @@
-"""Tests for the DORA Art. 28 Register of Information (core/thirdparty)."""
+"""Tests for the DORA Art. 28 Register of Information (baselith/core/thirdparty)."""
 
 from datetime import date
 
 import pytest
 
-from core.thirdparty import (
+from baselith.core.thirdparty import (
     ContractualArrangement,
     FunctionCriticality,
     ICTFunction,

@@ -12,7 +12,7 @@ class TestMemoryTierAndConfig:
 
     def test_tier_enum_values(self):
         """Tier enum has expected values."""
-        from core.memory.hierarchy import MemoryTier
+        from baselith.core.memory.hierarchy import MemoryTier
 
         assert MemoryTier.STM.value == "short_term"
         assert MemoryTier.MTM.value == "mid_term"
@@ -20,7 +20,7 @@ class TestMemoryTierAndConfig:
 
     def test_tier_config_defaults(self):
         """TierConfig has sensible defaults."""
-        from core.memory.hierarchy import TierConfig
+        from baselith.core.memory.hierarchy import TierConfig
 
         config = TierConfig(max_items=10)
         assert config.max_items == 10
@@ -29,7 +29,7 @@ class TestMemoryTierAndConfig:
 
     def test_hierarchy_config_defaults(self):
         """HierarchyConfig has sensible defaults."""
-        from core.memory.hierarchy import HierarchyConfig
+        from baselith.core.memory.hierarchy import HierarchyConfig
 
         config = HierarchyConfig()
         assert config.stm.max_items == 10
@@ -43,7 +43,7 @@ class TestHierarchicalMemory:
 
     def test_initialization(self):
         """Basic initialization with defaults."""
-        from core.memory.hierarchy import HierarchicalMemory
+        from baselith.core.memory.hierarchy import HierarchicalMemory
 
         mem = HierarchicalMemory()
         assert mem.config is not None
@@ -53,7 +53,7 @@ class TestHierarchicalMemory:
 
     def test_initialization_with_config(self):
         """Initialization with custom config."""
-        from core.memory.hierarchy import (
+        from baselith.core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
             TierConfig,
@@ -71,7 +71,7 @@ class TestHierarchicalMemory:
     @pytest.mark.asyncio
     async def test_add_to_stm(self):
         """Add item to short-term memory."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         item = await mem.add("Test content", tier=MemoryTier.STM)
@@ -83,7 +83,7 @@ class TestHierarchicalMemory:
     @pytest.mark.asyncio
     async def test_add_to_mtm(self):
         """Add item to mid-term memory."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("MTM content", tier=MemoryTier.MTM)
@@ -94,7 +94,7 @@ class TestHierarchicalMemory:
     @pytest.mark.asyncio
     async def test_add_to_ltm(self):
         """Add item to long-term memory."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("LTM content", tier=MemoryTier.LTM)
@@ -105,7 +105,7 @@ class TestHierarchicalMemory:
     @pytest.mark.asyncio
     async def test_stm_fifo_eviction(self):
         """STM evicts oldest when at capacity with auto_consolidate=False."""
-        from core.memory.hierarchy import (
+        from baselith.core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
             MemoryTier,
@@ -129,7 +129,7 @@ class TestHierarchicalMemory:
     @pytest.mark.asyncio
     async def test_stm_auto_consolidate(self):
         """STM consolidates to MTM when at capacity."""
-        from core.memory.hierarchy import (
+        from baselith.core.memory.hierarchy import (
             HierarchicalMemory,
             HierarchyConfig,
             MemoryTier,
@@ -161,7 +161,7 @@ class TestHierarchicalMemoryConsolidation:
     @pytest.mark.asyncio
     async def test_consolidate_stm_to_mtm(self):
         """Manual STM to MTM consolidation."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
 
@@ -182,7 +182,7 @@ class TestHierarchicalMemoryConsolidation:
     @pytest.mark.asyncio
     async def test_compress_mtm_to_ltm(self):
         """Compress MTM to LTM."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
 
@@ -206,7 +206,7 @@ class TestHierarchicalMemoryRecall:
     @pytest.mark.asyncio
     async def test_recall_from_stm(self):
         """Recall items from STM using keyword search."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("The weather is sunny today", tier=MemoryTier.STM)
@@ -220,7 +220,7 @@ class TestHierarchicalMemoryRecall:
     @pytest.mark.asyncio
     async def test_recall_across_tiers(self):
         """Recall searches across all specified tiers."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("STM weather info", tier=MemoryTier.STM)
@@ -233,7 +233,7 @@ class TestHierarchicalMemoryRecall:
     @pytest.mark.asyncio
     async def test_recall_limit(self):
         """Recall respects limit parameter."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         for i in range(10):
@@ -250,7 +250,7 @@ class TestHierarchicalMemoryContext:
     @pytest.mark.asyncio
     async def test_get_context_empty(self):
         """Get context from empty memory."""
-        from core.memory.hierarchy import HierarchicalMemory
+        from baselith.core.memory.hierarchy import HierarchicalMemory
 
         mem = HierarchicalMemory()
         context = mem.get_context()
@@ -260,7 +260,7 @@ class TestHierarchicalMemoryContext:
     @pytest.mark.asyncio
     async def test_get_context_with_stm(self):
         """Get context includes STM items."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("Recent event 1", tier=MemoryTier.STM)
@@ -275,7 +275,7 @@ class TestHierarchicalMemoryContext:
     @pytest.mark.asyncio
     async def test_get_context_respects_max_tokens(self):
         """Context generation respects token limit."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         # Add many items
@@ -288,7 +288,7 @@ class TestHierarchicalMemoryContext:
 
         # get_context now budgets by tokens (not characters), so assert the
         # token count stays within the cap plus a small header tolerance.
-        from core.utils.tokens import estimate_tokens
+        from baselith.core.utils.tokens import estimate_tokens
 
         assert estimate_tokens(context) <= 220
 
@@ -299,7 +299,7 @@ class TestHierarchicalMemoryStats:
     @pytest.mark.asyncio
     async def test_get_tier_stats_empty(self):
         """Get stats for empty memory."""
-        from core.memory.hierarchy import HierarchicalMemory
+        from baselith.core.memory.hierarchy import HierarchicalMemory
 
         mem = HierarchicalMemory()
         stats = mem.get_tier_stats()
@@ -310,7 +310,7 @@ class TestHierarchicalMemoryStats:
     @pytest.mark.asyncio
     async def test_get_tier_stats_with_items(self):
         """Get stats with items in tiers."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("STM item", tier=MemoryTier.STM)
@@ -326,7 +326,7 @@ class TestHierarchicalMemoryStats:
     @pytest.mark.asyncio
     async def test_clear_all(self):
         """Clear all tiers."""
-        from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+        from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
         mem = HierarchicalMemory()
         await mem.add("STM", tier=MemoryTier.STM)

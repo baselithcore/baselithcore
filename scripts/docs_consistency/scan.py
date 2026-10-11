@@ -20,15 +20,17 @@ SHELL_LANGS = frozenset({"bash", "sh", "shell", "zsh", "console", ""})
 DOTENV_LANGS = frozenset({"env", "dotenv", "ini", "properties"})
 
 IMPORT_FROM_RE = re.compile(
-    r"^\s*(?:>>>\s*)?from\s+((?:core|plugins)[\w.]*)\s+import\s+"
+    r"^\s*(?:>>>\s*)?from\s+(baselith\.(?:core|plugins)[\w.]*)\s+import\s+"
     r"(?:\(([^)]*)\)|([^\n#]+))",
     re.M,
 )
-IMPORT_MOD_RE = re.compile(r"^\s*(?:>>>\s*)?import\s+((?:core|plugins)[\w.]*)", re.M)
+IMPORT_MOD_RE = re.compile(
+    r"^\s*(?:>>>\s*)?import\s+(baselith\.(?:core|plugins)[\w.]*)", re.M
+)
 
 REPO_ROOTS = (
-    "core",
-    "plugins",
+    "baselith/core",
+    "baselith/plugins",
     "scripts",
     "tests",
     "examples",
@@ -100,7 +102,7 @@ def _fences(text: str, langs: frozenset[str] | None = None):
 
 
 def extract_imports(page: Path, text: str) -> list[Claim]:
-    """``from core.x import Y`` / ``import core.x`` inside Python fences."""
+    """``from baselith.core.x import Y`` / ``import baselith.core.x`` inside Python fences."""
     claims: list[Claim] = []
     for _lang, body, start in _fences(text, PYTHON_LANGS):
         for m in IMPORT_FROM_RE.finditer(body):

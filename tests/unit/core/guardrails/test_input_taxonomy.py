@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from core.guardrails.config import GuardrailsConfig
-from core.guardrails.input_guard import (
+from baselith.core.guardrails.config import GuardrailsConfig
+from baselith.core.guardrails.input_guard import (
     InputClassification,
     InputGuard,
     InputValidationResult,
@@ -28,16 +28,18 @@ class _StubLLM:
     def __init__(self, payload: str | Exception) -> None:
         self.payload = payload
         self.prompts: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
 
     async def generate_response(self, prompt: str, **kwargs: Any) -> str:
         self.prompts.append(prompt)
+        self.kwargs.append(kwargs)
         if isinstance(self.payload, Exception):
             raise self.payload
         return self.payload
 
 
 def _install_llm(monkeypatch: pytest.MonkeyPatch, stub: _StubLLM) -> None:
-    monkeypatch.setattr("core.services.llm.get_llm_service", lambda: stub)
+    monkeypatch.setattr("baselith.core.services.llm.get_llm_service", lambda: stub)
 
 
 def _verdict(intent: str, confidence: float = 0.95, reason: str = "because") -> str:
@@ -133,6 +135,59 @@ class TestClassify:
 
         assert result.confidence == 1.0
 
+    async def test_fail_open_is_marked_in_the_reason(self, monkeypatch):
+        _install_llm(monkeypatch, _StubLLM(ConnectionError("down")))
+
+        result = await InputGuard().classify("hello")
+
+        assert result.reason == "classification unavailable (fail-open)"
+
+    async def test_requests_json_mode_classification_call(self, monkeypatch):
+        # Without JSON mode the verdict stops parsing and every call fails open.
+        stub = _StubLLM(_verdict("in_scope"))
+        _install_llm(monkeypatch, stub)
+
+        await InputGuard().classify("hello")
+
+        assert stub.kwargs == [{"json": True, "task_category": "classification"}]
+
+    async def test_missing_fields_default_to_zero_confidence_and_empty_reason(
+        self, monkeypatch
+    ):
+        _install_llm(monkeypatch, _StubLLM(json.dumps({"intent": "jailbreak"})))
+
+        result = await InputGuard().classify("hello")
+
+        assert (result.intent, result.confidence, result.reason) == (
+            "jailbreak",
+            0.0,
+            "",
+        )
+
+    @pytest.mark.parametrize(
+        ("topics", "options"),
+        [
+            (None, "<in_scope|jailbreak|harmful>"),
+            ("Kubernetes", "<in_scope|out_of_scope|jailbreak|harmful>"),
+        ],
+    )
+    async def test_prompt_asks_for_the_keys_and_labels_the_parser_reads(
+        self, monkeypatch, topics, options
+    ):
+        # A label or key the parser does not recognise turns every verdict
+        # into a fail-open ``in_scope`` (or a jailbreak at confidence 0.0).
+        stub = _StubLLM(_verdict("in_scope"))
+        _install_llm(monkeypatch, stub)
+
+        await InputGuard(GuardrailsConfig(allowed_topics=topics)).classify("hi")
+
+        prompt = stub.prompts[0]
+        assert f'"intent": "{options}"' in prompt
+        assert '{"reason": ' in prompt
+        assert '"confidence": <float 0.0-1.0>}' in prompt
+        for label in options.strip("<>").split("|"):
+            assert f'- "{label}": ' in prompt
+
     def test_sync_regex_path_untouched(self):
         # The taxonomy is additive: validate() stays a pure-regex sync path.
         verdict = InputGuard().validate("what is the capital of France?")
@@ -162,8 +217,8 @@ class _StubTaxonomyGuard:
 def _install_pipeline(
     monkeypatch: pytest.MonkeyPatch, guard: _StubTaxonomyGuard
 ) -> None:
-    from core.guardrails import moderation as moderation_module
-    from core.orchestration import guard_pipeline
+    from baselith.core.guardrails import moderation as moderation_module
+    from baselith.core.orchestration import guard_pipeline
 
     monkeypatch.setattr(guard_pipeline, "_guards", lambda: (guard, None))
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: None)
@@ -180,7 +235,7 @@ class TestPipelineWiring:
     """guard_input_async taxonomy rail behind BASELITH_INPUT_GUARD_TAXONOMY."""
 
     async def test_default_off_never_classifies(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.delenv("BASELITH_INPUT_GUARD_TAXONOMY", raising=False)
         guard = _StubTaxonomyGuard(
@@ -193,7 +248,7 @@ class TestPipelineWiring:
 
     @pytest.mark.parametrize("intent", ["jailbreak", "harmful"])
     async def test_blocks_and_emits_metric(self, monkeypatch, intent):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -211,7 +266,7 @@ class TestPipelineWiring:
         assert _blocks(intent) == before + 1
 
     async def test_in_scope_passes(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -223,7 +278,7 @@ class TestPipelineWiring:
         assert guard.classify_calls == 1
 
     async def test_below_threshold_passes(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         guard = _StubTaxonomyGuard(
@@ -234,7 +289,7 @@ class TestPipelineWiring:
         assert await guard_input_async("borderline request") is None
 
     async def test_threshold_env_override(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY_THRESHOLD", "0.4")
@@ -248,7 +303,7 @@ class TestPipelineWiring:
         assert blocked["intent"] == "blocked_by_taxonomy"
 
     async def test_out_of_scope_blocks_only_with_allowed_topics(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         classification = InputClassification(
@@ -269,7 +324,7 @@ class TestPipelineWiring:
         assert blocked["intent"] == "blocked_by_taxonomy"
 
     async def test_master_kill_switch_bypasses_taxonomy(self, monkeypatch):
-        from core.orchestration.guard_pipeline import guard_input_async
+        from baselith.core.orchestration.guard_pipeline import guard_input_async
 
         monkeypatch.setenv("BASELITH_INPUT_GUARD_TAXONOMY", "1")
         monkeypatch.setenv("BASELITH_ORCHESTRATOR_GUARDRAILS", "off")

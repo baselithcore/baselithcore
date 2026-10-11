@@ -1,10 +1,10 @@
-"""Unit tests for ``core.orchestration.limits``."""
+"""Unit tests for ``baselith.core.orchestration.limits``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.orchestration.limits import (
+from baselith.core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
     LoopBudgetSnapshot,
@@ -124,12 +124,12 @@ class TestChargeLLMCostTokens:
         ``tests/unit/core/orchestration/test_budget_context.py``); pinned to
         'zero' here since this test is about token accounting, not pricing.
         """
-        from core.orchestration.budget_context import (
+        from baselith.core.orchestration.budget_context import (
             activate_budget,
             charge_llm_cost,
             deactivate_budget,
         )
-        from core.quotas import cost_enforcement as ce_mod
+        from baselith.core.quotas import cost_enforcement as ce_mod
 
         monkeypatch.setenv("BASELITH_UNKNOWN_MODEL_COST_POLICY", "zero")
         monkeypatch.setattr(ce_mod, "_unknown_model_cost_config", None)
@@ -144,7 +144,7 @@ class TestChargeLLMCostTokens:
             deactivate_budget(token)
 
     def test_token_cap_aborts_request(self) -> None:
-        from core.orchestration.budget_context import (
+        from baselith.core.orchestration.budget_context import (
             activate_budget,
             charge_llm_cost,
             deactivate_budget,

@@ -16,9 +16,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.index as index_module
-from core.middleware import require_admin_or_job
-from core.services.bootstrap import IndexBootstrapper
+import baselith.plugins.api_routers.index as index_module
+from baselith.core.middleware import require_admin_or_job
+from baselith.core.services.bootstrap import IndexBootstrapper
 
 
 @pytest.fixture
@@ -101,7 +101,7 @@ class TestScheduleManual:
     async def test_runs_in_background_and_reports_through_status(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import core.services.bootstrap as bootstrap_module
+        import baselith.core.services.bootstrap as bootstrap_module
 
         release = asyncio.Event()
 
@@ -118,7 +118,7 @@ class TestScheduleManual:
             state_path=tmp_path / "st",
         )
         monkeypatch.setattr(
-            "core.graph.graph_db", SimpleNamespace(is_enabled=lambda: False)
+            "baselith.core.graph.graph_db", SimpleNamespace(is_enabled=lambda: False)
         )
         assert await instance.schedule_manual("incremental") is True
         assert instance.status()["running"] is True

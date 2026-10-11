@@ -44,7 +44,7 @@ Step-by-step instructions the model receives on activation…
 ```
 
 Frontmatter contract (validated by
-`core.plugins.declarative.DeclarativeSkillLoader`):
+`baselith.core.plugins.declarative.DeclarativeSkillLoader`):
 
 | Field | Required | Constraint |
 | --- | --- | --- |
@@ -58,12 +58,12 @@ A malformed `SKILL.md` disables that plugin's skills (with a warning) —
 never the whole catalog. On duplicate names the first provider (plugins
 sorted by name) wins and the duplicate is logged.
 
-See [plugins/example-plugin/skills/structured-summary/SKILL.md](https://github.com/baselithcore/baselithcore/blob/main/plugins/example-plugin/skills/structured-summary/SKILL.md)
+See [baselith/plugins/example-plugin/skills/structured-summary/SKILL.md](https://github.com/baselithcore/baselithcore/blob/main/baselith/plugins/example-plugin/skills/structured-summary/SKILL.md)
 for the reference skill.
 
 ## Runtime flow
 
-`core.plugins.skills_service.SkillService` aggregates every plugin's
+`baselith.core.plugins.skills_service.SkillService` aggregates every plugin's
 skill root (via `PluginRegistry.get_all_skill_roots()`, cached with a
 30 s TTL) and the orchestrator wires it into the loop:
 
@@ -116,13 +116,13 @@ symlink escaping the roots fails the activation with `SkillSandboxError`.
 
 ### Running bundled scripts (`run_skill_script`)
 
-`core.plugins.skill_scripts.run_skill_script` executes a `.py` helper from an
+`baselith.core.plugins.skill_scripts.run_skill_script` executes a `.py` helper from an
 activated skill's `scripts/` directory non-interactively — *model proposes,
 code disposes*: the model only ever names a skill and a relative script
 filename, resolution and validation happen in code.
 
 ```python
-from core.plugins import run_skill_script
+from baselith.core.plugins import run_skill_script
 
 result = await run_skill_script(loader, "code-review", "lint.py", ["--fix"])
 result.exit_code     # negative signal number when killed (e.g. timeout)
@@ -160,10 +160,10 @@ approval gates apply.
   `verify_plugin_integrity` just like tampered source. Re-sign after
   editing a skill: `python scripts/sign_changed_plugins.py`.
 * **Approval gate** — `requires_approval: true` routes activation through
-  `core.human.HumanIntervention` and **fails closed** when no approval
+  `baselith.core.human.HumanIntervention` and **fails closed** when no approval
   channel is configured.
 * **Injection scan** — activated bodies pass the indirect-injection
-  scanner (`core.guardrails.scan_external_content`, detection-first)
+  scanner (`baselith.core.guardrails.scan_external_content`, detection-first)
   before reaching the model.
 * **Telemetry** — every activation emits a `skill.activate` span with
   `gen_ai.operation.name=execute_tool` and
@@ -171,10 +171,8 @@ approval gates apply.
 
 ## Relationship to plugin-local skill systems
 
-The `baselithbot` plugin keeps its richer, OpenClaw-compatible skill
-subsystem (ClawHub marketplace, workspace scopes, MANIFEST.yaml quality
-signals) but reuses the core frontmatter parser
-(`core.plugins.declarative.split_frontmatter`), so `SKILL.md` frontmatter
-semantics stay uniform across the stack. New plugins should prefer the
-declarative `skills/` convention and only build custom machinery for
+A plugin may still build its own skill machinery, and can reuse the core
+frontmatter parser (`baselith.core.plugins.declarative.split_frontmatter`) so `SKILL.md`
+frontmatter semantics stay uniform across the stack. New plugins should prefer
+the declarative `skills/` convention and only build custom machinery for
 genuinely domain-specific needs.

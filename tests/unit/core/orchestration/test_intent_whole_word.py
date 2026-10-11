@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 @pytest.fixture(scope="module")

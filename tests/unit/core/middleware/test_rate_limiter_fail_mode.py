@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.rate_limiter import RateLimiter
+from baselith.core.middleware.rate_limiter import RateLimiter
 
 
 def _limiter(fail_mode: str, redis_ok: bool) -> RateLimiter:
-    with patch("core.middleware.rate_limiter.get_security_config") as cfg:
+    with patch("baselith.core.middleware.rate_limiter.get_security_config") as cfg:
         cfg.return_value.rate_limit_fail_mode = fail_mode
         limiter = RateLimiter()
     if redis_ok:
@@ -42,24 +42,32 @@ async def test_fail_closed_normal_path_unaffected():
 def test_unset_mode_resolves_closed_only_for_redis_backed_production(monkeypatch):
     from types import SimpleNamespace
 
-    from core.middleware.rate_limiter import _resolve_fail_mode
+    from baselith.core.middleware.rate_limiter import _resolve_fail_mode
 
     def _storage(backend: str):
         return lambda: SimpleNamespace(cache_backend=backend)
 
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: True)
-    monkeypatch.setattr("core.config.get_storage_config", _storage("redis"))
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: True
+    )
+    monkeypatch.setattr("baselith.core.config.get_storage_config", _storage("redis"))
     assert _resolve_fail_mode(None) == "closed"
     # Production without a Redis backend: the in-memory window is the design,
     # not a degraded state — refusing every request would be a self-inflicted
     # outage rather than a security control.
-    monkeypatch.setattr("core.config.get_storage_config", _storage("memory"))
+    monkeypatch.setattr("baselith.core.config.get_storage_config", _storage("memory"))
     assert _resolve_fail_mode(None) == "open"
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: False)
-    monkeypatch.setattr("core.config.get_storage_config", _storage("redis"))
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: False
+    )
+    monkeypatch.setattr("baselith.core.config.get_storage_config", _storage("redis"))
     assert _resolve_fail_mode(None) == "open"
     # An explicit value always wins over the environment.
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: True
+    )
     assert _resolve_fail_mode("open") == "open"
-    monkeypatch.setattr("core.config.environment.is_production_env", lambda: False)
+    monkeypatch.setattr(
+        "baselith.core.config.environment.is_production_env", lambda: False
+    )
     assert _resolve_fail_mode("closed") == "closed"

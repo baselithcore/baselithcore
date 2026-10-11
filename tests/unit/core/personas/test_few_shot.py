@@ -1,4 +1,4 @@
-"""Unit tests for ``core.personas.few_shot``."""
+"""Unit tests for ``baselith.core.personas.few_shot``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.personas.few_shot import (
+from baselith.core.personas.few_shot import (
     FewShotExample,
     FewShotLibrary,
     FewShotLoadError,

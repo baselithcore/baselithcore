@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.services.llm.fallback_runtime import (
+from baselith.core.services.llm.fallback_runtime import (
     parse_fallback_chain,
     run_with_fallback,
 )
@@ -32,8 +32,8 @@ class TestParseFallbackChain:
 
 def _make_service(fallback_chain="openai:gpt-4o-mini"):
     """LLMService with mocked provider construction and a fallback chain."""
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider="ollama", model="llama3.2", fallback_chain=fallback_chain
@@ -73,7 +73,7 @@ class TestRunWithFallback:
                 AsyncMock(side_effect=RuntimeError("down")),
             ),
             patch(
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=secondary,
             ),
         ):
@@ -98,7 +98,7 @@ class TestRunWithFallback:
         )
 
     async def test_budget_error_is_fatal_no_fallthrough(self):
-        from core.orchestration.limits import BudgetExceededError, LoopBudget
+        from baselith.core.orchestration.limits import BudgetExceededError, LoopBudget
 
         service = _make_service()
         budget = LoopBudget()
@@ -110,14 +110,16 @@ class TestRunWithFallback:
                     side_effect=BudgetExceededError("max_seconds", budget.snapshot())
                 ),
             ),
-            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm.fallback_runtime._clone_service"
+            ) as clone,
         ):
             with pytest.raises(BudgetExceededError):
                 await run_with_fallback(service, "p", model="llama3.2", json_mode=False)
         clone.assert_not_called()
 
     async def test_all_failed_raises_llm_provider_error(self):
-        from core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.exceptions import LLMProviderError
 
         service = _make_service()
         secondary = AsyncMock()
@@ -131,7 +133,7 @@ class TestRunWithFallback:
                 AsyncMock(side_effect=RuntimeError("down")),
             ),
             patch(
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=secondary,
             ),
         ):
@@ -141,13 +143,13 @@ class TestRunWithFallback:
 
 class TestStructuredFallback:
     async def test_no_chain_calls_primary_directly(self):
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_structured_with_fallback,
         )
 
         service = _make_service(fallback_chain="")
         with patch(
-            "core.services.llm.structured._native_with_retry",
+            "baselith.core.services.llm.structured._native_with_retry",
             AsyncMock(return_value="RESULT"),
         ) as native:
             (
@@ -163,7 +165,7 @@ class TestStructuredFallback:
         native.assert_awaited_once()
 
     async def test_falls_through_to_native_capable_stage(self):
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_structured_with_fallback,
         )
 
@@ -178,11 +180,11 @@ class TestStructuredFallback:
 
         with (
             patch(
-                "core.services.llm.structured._native_with_retry",
+                "baselith.core.services.llm.structured._native_with_retry",
                 AsyncMock(side_effect=_native),
             ),
             patch(
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=clone,
             ),
         ):
@@ -198,8 +200,8 @@ class TestStructuredFallback:
         )
 
     async def test_stage_without_native_support_is_skipped(self):
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_structured_with_fallback,
         )
 
@@ -209,11 +211,11 @@ class TestStructuredFallback:
 
         with (
             patch(
-                "core.services.llm.structured._native_with_retry",
+                "baselith.core.services.llm.structured._native_with_retry",
                 AsyncMock(side_effect=RuntimeError("primary down")),
             ),
             patch(
-                "core.services.llm.fallback_runtime._clone_service",
+                "baselith.core.services.llm.fallback_runtime._clone_service",
                 return_value=clone,
             ),
         ):
@@ -221,15 +223,15 @@ class TestStructuredFallback:
                 await maybe_run_structured_with_fallback(service, "p", "llama3.2")
 
     async def test_budget_error_is_fatal_no_fallthrough_structured(self):
-        from core.orchestration.limits import BudgetExceededError, LoopBudget
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.orchestration.limits import BudgetExceededError, LoopBudget
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_structured_with_fallback,
         )
 
         service = _make_service()
         budget = LoopBudget()
         with patch(
-            "core.services.llm.structured._native_with_retry",
+            "baselith.core.services.llm.structured._native_with_retry",
             AsyncMock(side_effect=BudgetExceededError("max_tokens", budget.snapshot())),
         ):
             with pytest.raises(BudgetExceededError):
@@ -251,12 +253,12 @@ class TestSameProviderChain:
         """
         from unittest.mock import AsyncMock, patch
 
-        from core.config.services import LLMConfig
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.fallback_runtime import (
             reset_fallback_services,
             run_with_fallback,
         )
-        from core.services.llm.service import LLMService
+        from baselith.core.services.llm.service import LLMService
 
         reset_fallback_services()
         with patch.dict("os.environ", {}, clear=True):
@@ -279,7 +281,8 @@ class TestSameProviderChain:
         clone = AsyncMock()
         clone._generate_with_retry = AsyncMock(side_effect=_small)
         with patch(
-            "core.services.llm.fallback_runtime._clone_service", return_value=clone
+            "baselith.core.services.llm.fallback_runtime._clone_service",
+            return_value=clone,
         ):
             content, tokens, served_by, served_model = await run_with_fallback(
                 service, prompt="hi", model="big-model", json_mode=False
@@ -308,12 +311,12 @@ class TestRefusalIsFatal:
 
     @staticmethod
     def _refusal():
-        from core.services.llm.errors import LLMRefusalError
+        from baselith.core.services.llm.errors import LLMRefusalError
 
         return LLMRefusalError(category="safety", explanation="no")
 
     async def test_text_path_does_not_fall_through(self):
-        from core.services.llm.errors import LLMRefusalError
+        from baselith.core.services.llm.errors import LLMRefusalError
 
         service = _make_service()
         with (
@@ -322,43 +325,49 @@ class TestRefusalIsFatal:
                 "_generate_with_retry",
                 AsyncMock(side_effect=self._refusal()),
             ),
-            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm.fallback_runtime._clone_service"
+            ) as clone,
         ):
             with pytest.raises(LLMRefusalError):
                 await run_with_fallback(service, "p", model="llama3.2", json_mode=False)
         clone.assert_not_called()
 
     async def test_structured_path_does_not_fall_through(self):
-        from core.services.llm.errors import LLMRefusalError
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.errors import LLMRefusalError
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_structured_with_fallback,
         )
 
         service = _make_service()
         with (
             patch(
-                "core.services.llm.structured._native_with_retry",
+                "baselith.core.services.llm.structured._native_with_retry",
                 AsyncMock(side_effect=self._refusal()),
             ),
-            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm.fallback_runtime._clone_service"
+            ) as clone,
         ):
             with pytest.raises(LLMRefusalError):
                 await maybe_run_structured_with_fallback(service, "p", "llama3.2")
         clone.assert_not_called()
 
     async def test_messages_path_does_not_fall_through(self):
-        from core.services.llm.errors import LLMRefusalError
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.errors import LLMRefusalError
+        from baselith.core.services.llm.fallback_runtime import (
             maybe_run_messages_with_fallback,
         )
 
         service = _make_service()
         with (
             patch(
-                "core.services.llm.message_runtime._messages_with_retry",
+                "baselith.core.services.llm.message_runtime._messages_with_retry",
                 AsyncMock(side_effect=self._refusal()),
             ),
-            patch("core.services.llm.fallback_runtime._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm.fallback_runtime._clone_service"
+            ) as clone,
         ):
             with pytest.raises(LLMRefusalError):
                 await maybe_run_messages_with_fallback(service, [], "llama3.2")
@@ -367,7 +376,7 @@ class TestRefusalIsFatal:
     async def test_the_refusal_keeps_its_type_and_detail(self):
         """Not rewrapped as ``All providers failed: …`` — callers branch on the
         class, and the category/explanation are the whole point."""
-        from core.services.llm.errors import LLMRefusalError
+        from baselith.core.services.llm.errors import LLMRefusalError
 
         service = _make_service()
         with patch.object(

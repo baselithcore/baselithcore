@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.security import (
+from baselith.core.middleware.security import (
     RateLimiter,
     SecurityManager,
 )
@@ -25,7 +25,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_allows_requests_within_limit(self):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             script = AsyncMock(return_value=1)
             mock_redis_factory.return_value = self._mock_redis_with_script(script)
@@ -40,7 +40,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_blocks_requests_over_limit(self):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             # Counter returned by the Lua script: 1..5 allowed, 6 over limit.
             script = AsyncMock(side_effect=[1, 2, 3, 4, 5, 6])
@@ -57,7 +57,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_falls_back_to_memory_when_redis_fails(self):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             script = AsyncMock(side_effect=RuntimeError("redis down"))
             mock_redis_factory.return_value = self._mock_redis_with_script(script)
@@ -76,7 +76,7 @@ class TestSecurityManager:
     @pytest.mark.parametrize("role", ["user", "admin"])
     async def test_enforce_auth_valid_key(self, mock_security_config, role):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -87,7 +87,7 @@ class TestSecurityManager:
             request.headers = {"X-API-Key": f"key-{role}"}
             request.client.host = "1.2.3.4"
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_user = MagicMock()
             mock_user.is_authenticated = True
@@ -104,7 +104,7 @@ class TestSecurityManager:
     @pytest.mark.asyncio
     async def test_enforce_auth_missing_key(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -114,7 +114,7 @@ class TestSecurityManager:
             request = MagicMock()
             request.headers = {}
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_user = MagicMock()
             mock_user.is_authenticated = False
@@ -130,7 +130,7 @@ class TestSecurityManager:
     @pytest.mark.asyncio
     async def test_enforce_auth_forbidden_role(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -140,7 +140,7 @@ class TestSecurityManager:
             request = MagicMock()
             request.headers = {"X-API-Key": "key-user"}
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_user = MagicMock()
             mock_user.is_authenticated = True
@@ -160,7 +160,7 @@ class TestSecurityManager:
         self, mock_security_config
     ):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis_factory.return_value = mock_redis
@@ -173,7 +173,7 @@ class TestSecurityManager:
             request.url.path = "/secure"
             request.state = MagicMock()
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_user = MagicMock()
             mock_user.is_authenticated = True
@@ -210,7 +210,7 @@ class TestScopedIdentityGate:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
@@ -232,7 +232,7 @@ class TestScopedIdentityGate:
     @pytest.mark.asyncio
     async def test_scoped_denied_on_control_plane(self, mock_security_config):
         manager = self._manager(mock_security_config)
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_get_auth.return_value = self._patch_scoped_user()
             with pytest.raises(HTTPException) as exc:
                 await manager.enforce_auth(
@@ -245,7 +245,7 @@ class TestScopedIdentityGate:
     @pytest.mark.asyncio
     async def test_scoped_admitted_on_data_tier(self, mock_security_config):
         manager = self._manager(mock_security_config)
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_get_auth.return_value = self._patch_scoped_user()
             resolved = await manager.enforce_auth(
                 self._scoped_request(),
@@ -282,14 +282,14 @@ class TestAuthMemoReuse:
     @pytest.mark.asyncio
     async def test_matching_memo_skips_reauthentication(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
             mock_redis_factory.return_value = mock_redis
             manager = SecurityManager(mock_security_config)
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_get_auth.return_value = mock_auth
             user = self._mock_user()
@@ -306,14 +306,14 @@ class TestAuthMemoReuse:
     @pytest.mark.asyncio
     async def test_header_mismatch_reauthenticates(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
             mock_redis_factory.return_value = mock_redis
             manager = SecurityManager(mock_security_config)
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.authenticate.return_value = self._mock_user()
             mock_get_auth.return_value = mock_auth
@@ -333,14 +333,14 @@ class TestAuthMemoReuse:
         self, mock_security_config
     ):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis = AsyncMock()
             mock_redis.incr.return_value = 1
             mock_redis_factory.return_value = mock_redis
             manager = SecurityManager(mock_security_config)
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.authenticate.return_value = self._mock_user()
             mock_get_auth.return_value = mock_auth
@@ -363,7 +363,7 @@ class TestAuthFailureThrottle:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = AsyncMock()
             manager = SecurityManager(mock_security_config)
@@ -381,12 +381,12 @@ class TestAuthFailureThrottle:
 
     @pytest.mark.asyncio
     async def test_failed_auth_is_throttled_per_ip(self, mock_security_config):
-        from core.auth.types import AuthError
+        from baselith.core.auth.types import AuthError
 
         manager = self._manager(mock_security_config)
         request = self._bad_cred_request()
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.authenticate.side_effect = AuthError("invalid token")
             mock_get_auth.return_value = mock_auth
@@ -409,7 +409,7 @@ class TestAuthFailureThrottle:
     async def test_over_budget_failures_return_429_not_401(self, mock_security_config):
         """Once the per-IP failure budget is exhausted the throttle raises 429,
         which must surface instead of the 401 so the attacker is throttled."""
-        from core.auth.types import AuthError
+        from baselith.core.auth.types import AuthError
 
         manager = self._manager(mock_security_config)
         # The failure throttle trips first: check() raises 429.
@@ -418,7 +418,7 @@ class TestAuthFailureThrottle:
         )
         request = self._bad_cred_request()
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             mock_auth.authenticate.side_effect = AuthError("invalid token")
             mock_get_auth.return_value = mock_auth
@@ -440,13 +440,13 @@ class TestAnonymousRateLimit:
         mock_security_config.api_keys_admin = set()
         mock_security_config.api_keys_job = set()
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = AsyncMock()
             manager = SecurityManager(mock_security_config)
         manager.rate_limiter = AsyncMock()
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             anon = MagicMock()
             anon.is_authenticated = False

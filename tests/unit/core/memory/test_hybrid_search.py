@@ -1,4 +1,4 @@
-"""Unit tests for ``core.memory.hybrid_search``."""
+"""Unit tests for ``baselith.core.memory.hybrid_search``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from core.memory.hybrid_search import (
+from baselith.core.memory.hybrid_search import (
     BM25Index,
     HybridSearcher,
     ScoredHit,
@@ -180,7 +180,7 @@ class TestSearchWithExtra:
         return base
 
     def test_exact_equivalence_with_unified_index(self) -> None:
-        from core.memory.hybrid_search import bm25_doc_stats
+        from baselith.core.memory.hybrid_search import bm25_doc_stats
 
         base = self._base()
         unified = self._unified()
@@ -203,7 +203,7 @@ class TestSearchWithExtra:
             assert got == want
 
     def test_top_k_respected(self) -> None:
-        from core.memory.hybrid_search import bm25_doc_stats
+        from baselith.core.memory.hybrid_search import bm25_doc_stats
 
         base = self._base()
         extra_tok = {d: bm25_doc_stats(t) for d, t in self.EXTRA.items()}
@@ -221,7 +221,7 @@ def _reference_ranking(
     position — so the sparse/``heapq.nlargest`` fast path cannot silently
     reshuffle a ranking.
     """
-    from core.memory.hybrid_search import _tokenize, bm25_doc_stats
+    from baselith.core.memory.hybrid_search import _tokenize, bm25_doc_stats
 
     docs = dict(
         zip(
@@ -295,7 +295,7 @@ class TestSparseScoringEquivalence:
     def test_search_with_extra_matches_naive_ranking(
         self, query: str, top_k: int
     ) -> None:
-        from core.memory.hybrid_search import bm25_doc_stats
+        from baselith.core.memory.hybrid_search import bm25_doc_stats
 
         idx = BM25Index()
         idx.index(self.MIXED)
@@ -345,7 +345,7 @@ class TestSparseScoringEquivalence:
         base match — the previous code appended extra hits after base hits and
         stable-sorted, which put the base doc first.
         """
-        from core.memory.hybrid_search import bm25_doc_stats
+        from baselith.core.memory.hybrid_search import bm25_doc_stats
 
         idx = BM25Index()
         idx.index({"b0": "beta filler filler"})

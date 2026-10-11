@@ -11,13 +11,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.security import SecurityManager
+from baselith.core.middleware.security import SecurityManager
 
 
 class TestAnonymousResolutionThrottle:
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = AsyncMock()
             manager = SecurityManager(mock_security_config)
@@ -49,8 +49,8 @@ class TestAnonymousResolutionThrottle:
         request = self._bad_cred_request()
 
         with (
-            patch("core.auth.manager.get_auth_manager") as mock_get_auth,
-            patch("core.middleware.security.get_audit_logger") as mock_audit,
+            patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth,
+            patch("baselith.core.middleware.security.get_audit_logger") as mock_audit,
         ):
             mock_auth = AsyncMock()
             mock_auth.authenticate.return_value = self._anonymous_user()
@@ -78,8 +78,8 @@ class TestAnonymousResolutionThrottle:
         request = self._bad_cred_request()
 
         with (
-            patch("core.auth.manager.get_auth_manager") as mock_get_auth,
-            patch("core.middleware.security.get_audit_logger") as mock_audit,
+            patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth,
+            patch("baselith.core.middleware.security.get_audit_logger") as mock_audit,
         ):
             mock_auth = AsyncMock()
             mock_auth.authenticate.return_value = self._anonymous_user()
@@ -100,8 +100,8 @@ class TestAnonymousResolutionThrottle:
         request.headers = {}
 
         with (
-            patch("core.auth.manager.get_auth_manager") as mock_get_auth,
-            patch("core.middleware.security.get_audit_logger") as mock_audit,
+            patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth,
+            patch("baselith.core.middleware.security.get_audit_logger") as mock_audit,
         ):
             mock_auth = AsyncMock()
             mock_auth.authenticate.return_value = self._anonymous_user()

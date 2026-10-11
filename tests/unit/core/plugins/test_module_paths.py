@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._module_paths import ensure_parent_packages
+from baselith.core.plugins._module_paths import ensure_parent_packages
 
 
 @pytest.fixture
@@ -31,16 +31,17 @@ def plugin_tree(tmp_path: Path) -> Path:
 @pytest.fixture(autouse=True)
 def _restore_sys_modules():
     saved = {
-        name: sys.modules.get(name) for name in ("plugins", "plugins.sample_plugin")
+        name: sys.modules.get(name)
+        for name in ("plugins", "baselith.plugins.sample_plugin")
     }
-    saved_attr = getattr(sys.modules.get("plugins"), "sample_plugin", None)
+    saved_attr = getattr(sys.modules.get("baselith.plugins"), "sample_plugin", None)
     yield
     for name, module in saved.items():
         if module is None:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = module
-    parent = sys.modules.get("plugins")
+    parent = sys.modules.get("baselith.plugins")
     if parent is not None:
         if saved_attr is None:
             parent.__dict__.pop("sample_plugin", None)
@@ -51,15 +52,15 @@ def _restore_sys_modules():
 def test_child_is_bound_on_the_parent_package(plugin_tree: Path) -> None:
     ensure_parent_packages("sample_plugin", plugin_tree)
 
-    parent = sys.modules["plugins"]
-    assert parent.sample_plugin is sys.modules["plugins.sample_plugin"]
+    parent = sys.modules["baselith.plugins"]
+    assert parent.sample_plugin is sys.modules["baselith.plugins.sample_plugin"]
 
 
 def test_attribute_walk_resolves_the_dotted_path(plugin_tree: Path) -> None:
     """The shape `monkeypatch.setattr` uses to resolve a dotted target."""
     ensure_parent_packages("sample_plugin", plugin_tree)
 
-    found: types.ModuleType = sys.modules["plugins"]
+    found: types.ModuleType = sys.modules["baselith.plugins"]
     for part in ("sample_plugin",):
         found = getattr(found, part)
     assert found.VALUE == "from-init"
@@ -67,13 +68,13 @@ def test_attribute_walk_resolves_the_dotted_path(plugin_tree: Path) -> None:
 
 def test_existing_parent_is_not_replaced(plugin_tree: Path) -> None:
     """A real, already-imported ``plugins`` package keeps its identity."""
-    sentinel = types.ModuleType("plugins")
+    sentinel = types.ModuleType("baselith.plugins")
     sentinel.__path__ = [str(plugin_tree.parent)]
     sentinel.MARKER = "original"  # type: ignore[attr-defined]
-    sys.modules["plugins"] = sentinel
+    sys.modules["baselith.plugins"] = sentinel
 
     ensure_parent_packages("sample_plugin", plugin_tree)
 
-    assert sys.modules["plugins"] is sentinel
+    assert sys.modules["baselith.plugins"] is sentinel
     assert sentinel.MARKER == "original"  # type: ignore[attr-defined]
-    assert sentinel.sample_plugin is sys.modules["plugins.sample_plugin"]  # type: ignore[attr-defined]
+    assert sentinel.sample_plugin is sys.modules["baselith.plugins.sample_plugin"]  # type: ignore[attr-defined]

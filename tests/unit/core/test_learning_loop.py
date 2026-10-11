@@ -6,7 +6,7 @@ Tests for ContinuousLearner and PersistentLearner.
 
 from unittest.mock import Mock, patch
 
-from core.learning.learning_loop import ContinuousLearner, PersistentLearner
+from baselith.core.learning.learning_loop import ContinuousLearner, PersistentLearner
 
 # ============================================================================
 # ContinuousLearner Tests
@@ -174,7 +174,7 @@ class TestPersistentLearner:
         expected = "learner:state:agent_1"
         assert learner._cache_key == expected
 
-    @patch("core.learning.learning_loop.PersistentLearner.cache")
+    @patch("baselith.core.learning.learning_loop.PersistentLearner.cache")
     def test_auto_save_after_training(self, mock_cache):
         """Auto-save triggers after training."""
         mock_cache._enabled = True
@@ -192,7 +192,7 @@ class TestPersistentLearner:
 
         mock_cache.set.assert_called()
 
-    @patch("core.learning.learning_loop.PersistentLearner.cache")
+    @patch("baselith.core.learning.learning_loop.PersistentLearner.cache")
     def test_manual_checkpoint(self, mock_cache):
         """Manual checkpoint save."""
         mock_cache._enabled = True
@@ -207,7 +207,7 @@ class TestPersistentLearner:
         assert result is True
         mock_cache.set.assert_called_once()
 
-    @patch("core.learning.learning_loop.PersistentLearner.cache")
+    @patch("baselith.core.learning.learning_loop.PersistentLearner.cache")
     def test_auto_load_on_init(self, mock_cache):
         """Load state on initialization if available."""
         mock_cache._enabled = True
@@ -228,7 +228,7 @@ class TestPersistentLearner:
         assert learner._train_count == 5
         assert learner.optimizer.epsilon == 0.05
 
-    @patch("core.learning.learning_loop.PersistentLearner.cache")
+    @patch("baselith.core.learning.learning_loop.PersistentLearner.cache")
     def test_get_stats_includes_persistence(self, mock_cache):
         """Stats include persistence info."""
         mock_cache._enabled = True

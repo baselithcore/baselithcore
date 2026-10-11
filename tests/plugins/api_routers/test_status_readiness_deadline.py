@@ -18,7 +18,7 @@ import time
 import pytest
 from fastapi import Response
 
-from plugins.api_routers import status
+from baselith.plugins.api_routers import status
 
 
 @pytest.fixture(autouse=True)

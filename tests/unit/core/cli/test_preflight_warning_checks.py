@@ -20,8 +20,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.cli.commands.doctor_checks import CheckResult
-from core.services.llm.preflight import PreflightFinding
+from baselith.core.cli.commands.doctor_checks import CheckResult
+from baselith.core.services.llm.preflight import PreflightFinding
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def _isolated_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 
 def _with_checks(monkeypatch: pytest.MonkeyPatch, *checks: CheckResult) -> None:
-    import core.cli.commands.doctor as doctor
+    import baselith.core.cli.commands.doctor as doctor
 
     monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: list(checks))
 
@@ -43,7 +43,7 @@ class TestStartupGate:
     def test_a_warning_check_does_not_block_startup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.run import _run_preflight
+        from baselith.core.cli.commands.run import _run_preflight
 
         _with_checks(
             monkeypatch,
@@ -62,7 +62,7 @@ class TestStartupGate:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Booting past it is fine; hiding it is how it bites the next person."""
-        from core.cli.commands.run import _run_preflight
+        from baselith.core.cli.commands.run import _run_preflight
 
         _with_checks(
             monkeypatch,
@@ -84,7 +84,7 @@ class TestStartupGate:
     def test_a_blocking_check_still_stops_startup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.cli.commands.run import _run_preflight
+        from baselith.core.cli.commands.run import _run_preflight
 
         _with_checks(
             monkeypatch,
@@ -102,7 +102,7 @@ class TestStartupGate:
     def test_a_passing_check_prints_no_warning_panel(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        from core.cli.commands.run import _run_preflight
+        from baselith.core.cli.commands.run import _run_preflight
 
         _with_checks(
             monkeypatch,
@@ -115,7 +115,7 @@ class TestStartupGate:
 
 class TestLocalModelsCheckSeverity:
     def test_vision_only_findings_are_a_warning(self) -> None:
-        from core.cli.commands.doctor_llm import check_llm_local_endpoints
+        from baselith.core.cli.commands.doctor_llm import check_llm_local_endpoints
 
         finding = PreflightFinding(
             severity="warning",
@@ -124,7 +124,7 @@ class TestLocalModelsCheckSeverity:
             remedy="Run: ollama pull llava:7b",
         )
         with patch(
-            "core.services.llm.preflight.check_local_endpoints",
+            "baselith.core.services.llm.preflight.check_local_endpoints",
             AsyncMock(return_value=[finding]),
         ):
             result = check_llm_local_endpoints()
@@ -134,7 +134,7 @@ class TestLocalModelsCheckSeverity:
 
     def test_a_blocking_finding_headlines_and_fails(self) -> None:
         """The gap that cannot be served around is the one to read first."""
-        from core.cli.commands.doctor_llm import check_llm_local_endpoints
+        from baselith.core.cli.commands.doctor_llm import check_llm_local_endpoints
 
         vision = PreflightFinding(
             severity="warning",
@@ -149,7 +149,7 @@ class TestLocalModelsCheckSeverity:
             remedy="Run: ollama pull llama3.2",
         )
         with patch(
-            "core.services.llm.preflight.check_local_endpoints",
+            "baselith.core.services.llm.preflight.check_local_endpoints",
             AsyncMock(return_value=[vision, primary]),
         ):
             result = check_llm_local_endpoints()
@@ -158,10 +158,10 @@ class TestLocalModelsCheckSeverity:
         assert "llama3.2" in result.message
 
     def test_no_findings_still_passes(self) -> None:
-        from core.cli.commands.doctor_llm import check_llm_local_endpoints
+        from baselith.core.cli.commands.doctor_llm import check_llm_local_endpoints
 
         with patch(
-            "core.services.llm.preflight.check_local_endpoints",
+            "baselith.core.services.llm.preflight.check_local_endpoints",
             AsyncMock(return_value=[]),
         ):
             result = check_llm_local_endpoints()

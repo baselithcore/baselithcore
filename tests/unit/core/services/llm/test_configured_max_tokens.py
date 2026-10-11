@@ -13,12 +13,12 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.model_capabilities import configured_max_tokens
-from core.services.llm.service import LLMService
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.model_capabilities import configured_max_tokens
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
 
 pytestmark = [pytest.mark.unit]
 
@@ -29,7 +29,7 @@ MODEL = "gpt-4o-mini"
 def _isolated_token_ledger():
     """Keep token reports out of the process-wide cost context (see
     ``test_cost_gate_on_every_path`` for why)."""
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -39,7 +39,7 @@ def _isolated_token_ledger():
 
 
 def _service(max_tokens: object, *, messages: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -98,6 +98,8 @@ class TestEveryPathForwardsIt:
     async def test_message_path(self):
         service = _service(333, messages=True)
         turn = AsyncMock(return_value=LLMResult(text="hi", tokens_used=10))
-        with patch("core.services.llm.message_runtime._messages_with_retry", turn):
+        with patch(
+            "baselith.core.services.llm.message_runtime._messages_with_retry", turn
+        ):
             await generate_messages(service, [Message.user("q")], model=MODEL)
         assert turn.await_args.kwargs["max_tokens"] == 333

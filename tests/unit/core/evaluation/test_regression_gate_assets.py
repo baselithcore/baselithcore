@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     load_cases,
     load_recorded_runs,
     run_regression,
 )
-from core.evaluation.replay import load_scenarios
+from baselith.core.evaluation.replay import load_scenarios
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CASES_DIR = REPO_ROOT / "evals" / "cases"
@@ -125,7 +125,7 @@ class TestTheGateFails:
         """
         from unittest.mock import patch
 
-        from core.evaluation.replay import ReplayError, replay_scenario
+        from baselith.core.evaluation.replay import ReplayError, replay_scenario
 
         scenario = next(iter(load_scenarios(SCENARIOS_DIR)))
 
@@ -138,7 +138,7 @@ class TestTheGateFails:
         # wrong reason.
         with (
             patch(
-                "core.reasoning.react_tool_gate.wrap_untrusted",
+                "baselith.core.reasoning.react_tool_gate.wrap_untrusted",
                 side_effect=lambda text, **kwargs: text,
             ),
             pytest.raises(ReplayError, match="envelope"),

@@ -9,23 +9,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.chat.agent_state import AgentState
-from core.chat.precheck import (
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.chat.precheck import (
     PRECHECK_CACHE_NAMESPACE,
     PRECHECK_KEY_NAMESPACE,
     build_precheck_key,
 )
-from core.chat.rag_workflow import RagWorkflowHandler
-from core.chat.service import ChatService
-from core.chat.workflow_response import ResponseGenerator
-from core.chat.workflow_retrieval import RetrievalPipeline
-from core.models.chat import ChatRequest
+from baselith.core.chat.rag_workflow import RagWorkflowHandler
+from baselith.core.chat.service import ChatService
+from baselith.core.chat.workflow_response import ResponseGenerator
+from baselith.core.chat.workflow_retrieval import RetrievalPipeline
+from baselith.core.models.chat import ChatRequest
 
 
 @pytest.fixture
 def mock_indexing():
     """Pin the corpus version so keys are deterministic."""
-    with patch("core.chat.precheck.get_indexing_service") as mock:
+    with patch("baselith.core.chat.precheck.get_indexing_service") as mock:
         mock.return_value = MagicMock(index_version=7)
         yield mock
 
@@ -132,7 +132,7 @@ class TestPrecheckKey:
     def test_authenticated_tenant_and_kb_scope_the_key(self, mock_indexing):
         # Without the retrieved context in the key, nothing else would keep
         # one tenant's answer away from another's request.
-        from core.context import set_tenant_context
+        from baselith.core.context import set_tenant_context
 
         set_tenant_context("acme")
         acme = build_precheck_key(make_state())
@@ -148,10 +148,10 @@ class TestPrecheckKey:
         tenant — a background job running this pipeline. Withholding the key
         costs a full retrieval; a placeholder tenant would serve one tenant's
         answer to another."""
-        from core.context import TenantContextError
+        from baselith.core.context import TenantContextError
 
         with patch(
-            "core.chat.precheck.get_current_tenant_id",
+            "baselith.core.chat.precheck.get_current_tenant_id",
             side_effect=TenantContextError("no tenant bound"),
         ):
             assert build_precheck_key(make_state()) is None
@@ -160,7 +160,7 @@ class TestPrecheckKey:
         """``ChatRequest.tenant_id`` is client-controlled and normal callers
         leave it unset, so keying on it put every tenant in one shared bucket
         while letting a caller pick which bucket to read."""
-        from core.context import set_tenant_context
+        from baselith.core.context import set_tenant_context
 
         set_tenant_context("acme")
         try:
@@ -426,19 +426,19 @@ class TestPrecheckWrite:
 
 class TestPrecheckWiring:
     def test_disabled_by_default(self):
-        from core.config.app import AppConfig
+        from baselith.core.config.app import AppConfig
 
         config = AppConfig()
         assert config.chat_rag_precheck_enabled is False
 
     def test_ttl_is_separate_and_shorter_than_the_response_cache(self):
-        from core.config.app import AppConfig
+        from baselith.core.config.app import AppConfig
 
         config = AppConfig()
         assert config.chat_rag_precheck_ttl < config.chat_response_cache_ttl
 
     def test_no_cache_built_when_disabled(self):
-        from core.chat.dependencies import (
+        from baselith.core.chat.dependencies import (
             ChatDependencyConfig,
             create_default_dependencies,
         )
@@ -451,7 +451,7 @@ class TestPrecheckWiring:
         assert create_default_dependencies(cfg).precheck_cache is None
 
     def test_cache_gets_its_own_namespace_and_ttl(self):
-        from core.chat.dependencies import (
+        from baselith.core.chat.dependencies import (
             ChatDependencyConfig,
             create_default_dependencies,
         )
@@ -490,7 +490,7 @@ class TestPrecheckWiring:
 
     def test_service_exposes_the_cache(self):
         assert hasattr(ChatService, "__init__")
-        from core.services.chat.service import ChatService as CoreChatService
+        from baselith.core.services.chat.service import ChatService as CoreChatService
 
         service = CoreChatService(precheck_cache=None)
         assert service.precheck_cache is None

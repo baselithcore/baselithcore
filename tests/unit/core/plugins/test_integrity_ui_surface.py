@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from core.plugins.integrity import compute_plugin_hash, verify_plugin_integrity
+from baselith.core.plugins.integrity import compute_plugin_hash, verify_plugin_integrity
 
 
 def test_compute_hash_covers_ui_dist_bundle(
@@ -31,7 +31,7 @@ def test_legacy_surfaces_ignored_ui_dist(
     plugin_dir: Path, write_dist_bundle: Callable[..., Path]
 ) -> None:
     """Regression guard: the pre-0.27 surfaces excluded the whole ``ui/`` tree."""
-    from core.plugins.integrity import HashSurface, compute_legacy_plugin_hash
+    from baselith.core.plugins.integrity import HashSurface, compute_legacy_plugin_hash
 
     before_v1 = compute_plugin_hash(plugin_dir, surface=HashSurface.V1_SOURCE)
     before_v2 = compute_plugin_hash(plugin_dir, surface=HashSurface.V2_BUILD)
@@ -73,7 +73,7 @@ def test_v4_covers_bundles_built_outside_ui_dist(plugin_dir: Path) -> None:
     to the operator's browser, and no signature covered a byte of them. The
     point of the surface is that a bundle change must move the digest.
     """
-    from core.plugins.integrity import HashSurface
+    from baselith.core.plugins.integrity import HashSurface
 
     before_v3 = compute_plugin_hash(plugin_dir, surface=HashSurface.V3_SHIPPED)
     before_v4 = compute_plugin_hash(plugin_dir, surface=HashSurface.V4_UI_EXPORT)
@@ -94,7 +94,7 @@ def test_v4_covers_bundles_built_outside_ui_dist(plugin_dir: Path) -> None:
 
 def test_v4_still_ignores_ui_build_inputs(plugin_dir: Path) -> None:
     """Widening the shipped set must not drag `ui/src` into the digest."""
-    from core.plugins.integrity import HashSurface
+    from baselith.core.plugins.integrity import HashSurface
 
     before = compute_plugin_hash(plugin_dir, surface=HashSurface.V4_UI_EXPORT)
     src = plugin_dir / "ui" / "src"

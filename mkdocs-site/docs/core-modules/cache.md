@@ -1,11 +1,11 @@
 # Caching System
 
-The `core/cache/` module provides a **pluggable caching system** with three implementations behind one protocol: an in-memory TTL + LRU cache (`local_cache.py`), a Redis-backed cache, and a semantic (vector-similarity) LLM response cache. There is no on-disk file cache.
+The `baselith/core/cache/` module provides a **pluggable caching system** with three implementations behind one protocol: an in-memory TTL + LRU cache (`local_cache.py`), a Redis-backed cache, and a semantic (vector-similarity) LLM response cache. There is no on-disk file cache.
 
 ## Module Structure
 
 ```txt
-core/cache/
+baselith/core/cache/
 ├── protocols.py       # CacheProtocol family — typed Protocol interfaces
 ├── local_cache.py     # TTLCache — in-memory async TTL + LRU cache
 ├── ttl_cache.py       # Backward-compat re-export of TTLCache
@@ -26,7 +26,7 @@ core/cache/
 Best for: single-process deployments, ephemeral data, rate limiting.
 
 ```python
-from core.cache import TTLCache  # defined in core.cache.local_cache
+from baselith.core.cache import TTLCache  # defined in baselith.core.cache.local_cache
 
 cache = TTLCache(maxsize=1000, ttl=300)  # 5-minute TTL, LRU eviction
 
@@ -59,9 +59,9 @@ URL. Build the client with `create_redis_client()` (or your own), then pass
 it in:
 
 ```python
-from core.cache import RedisTTLCache
-from core.cache.redis_cache import create_redis_client
-from core.config.cache import get_redis_cache_config
+from baselith.core.cache import RedisTTLCache
+from baselith.core.cache.redis_cache import create_redis_client
+from baselith.core.config.cache import get_redis_cache_config
 
 # url is required (keyword-only decode_responses=False); clients share one
 # bounded pool per (url, decode_responses)
@@ -83,16 +83,16 @@ CACHE_REDIS_URL=redis://localhost:6379/1
 ```
 
 `RedisTTLCache`, `create_redis_client` and the shared pools read
-`RedisCacheConfig` (`core/config/cache.py`, `get_redis_cache_config()`):
+`RedisCacheConfig` (`baselith/core/config/cache.py`, `get_redis_cache_config()`):
 `url` ← `CACHE_REDIS_URL` (default `redis://localhost:6379/1`, shared with `StorageConfig`), `cache_prefix`
 (default `baselithcore:cache`), `cache_ttl` (default `3600.0` s) and the pool
 bounds (`max_connections` default `50`). The async and sync shared pools are
 `BlockingConnectionPool`s: at `max_connections` a caller waits up to
 `socket_connect_timeout` (default `2.0` s) for a released connection rather
 than failing at once with "Too many connections". `StorageConfig.cache_redis_url`
-(`core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with the
+(`baselith/core/config/storage.py`) reads the **same** `CACHE_REDIS_URL` variable with the
 same default and is what
-`core/bootstrap/lazy_init.py` and `core/chat/dependencies.py` use for the
+`baselith/core/bootstrap/lazy_init.py` and `baselith/core/chat/dependencies.py` use for the
 bootstrap client — set the variable and both agree.
 
 ### XFetch probabilistic early refresh
@@ -128,7 +128,7 @@ created in the same burst do not all lapse at once.
 Best for: LLM response caching — avoids redundant inference for semantically identical queries.
 
 ```python
-from core.cache import SemanticLLMCache
+from baselith.core.cache import SemanticLLMCache
 
 cache = SemanticLLMCache(
     maxsize=1000,
@@ -158,8 +158,8 @@ three tiers, cheapest first, and stops at the first hit:
 
 | Tier | Key | Cost | Catches |
 | ---- | --- | ---- | ------- |
-| **Exact** | SHA-256 of the *canonicalized* prompt (`core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded, whitespace collapsed) plus kwargs | hash lookup | `"Perché Python?"` vs `"perche   python?"` |
-| **Fingerprint** | Set of canonical word unigrams + bigrams (`core/cache/fingerprint.py`), Jaccard ≥ `fingerprint_threshold` | set algebra over the tenant's entries, **no embedder call** | punctuation / filler / accent variants: `"What is Python?"` vs `"What is Python"` |
+| **Exact** | SHA-256 of the *canonicalized* prompt (`baselith.core.utils.text_canon.canonicalize`: NFKC, accents stripped, casefolded, whitespace collapsed) plus kwargs | hash lookup | `"Perché Python?"` vs `"perche   python?"` |
+| **Fingerprint** | Set of canonical word unigrams + bigrams (`baselith/core/cache/fingerprint.py`), Jaccard ≥ `fingerprint_threshold` | set algebra over the tenant's entries, **no embedder call** | punctuation / filler / accent variants: `"What is Python?"` vs `"What is Python"` |
 | **Embedding** | L2-normalized prompt embedding, cosine ≥ `threshold` | one encode (tens of ms) + one matrix-vector product | paraphrases: `"Explain RAG to me"` vs `"What is RAG?"` |
 
 The fingerprint tier is the cache's *static lookup*: a deterministic address
@@ -213,8 +213,8 @@ the callable, not on convention:
 
 | Embedder | How it is called |
 | -------- | ---------------- |
-| `async def encode(...)` — e.g. the production `core.nlp.CachedEmbedder` | Awaited directly |
-| `def encode(...)` — e.g. a raw `SentenceTransformer` | Offloaded via `core.utils.concurrency.run_inference` |
+| `async def encode(...)` — e.g. the production `baselith.core.nlp.CachedEmbedder` | Awaited directly |
+| `def encode(...)` — e.g. a raw `SentenceTransformer` | Offloaded via `baselith.core.utils.concurrency.run_inference` |
 
 Both paths are invoked as `encode(text, convert_to_numpy=True)`, and the result
 is L2-normalized once at insert time so the similarity scan is a single
@@ -245,7 +245,7 @@ and return something `np.asarray` can consume.
 
 ## Single-Flight (stampede protection)
 
-`core/cache/single_flight.py` coalesces concurrent cache-miss fills:
+`baselith/core/cache/single_flight.py` coalesces concurrent cache-miss fills:
 
 - **`SingleFlight`** — in-process: only the first caller for a key runs the
   factory; concurrent callers share the result (or exception). Wired into
@@ -266,7 +266,7 @@ and return something `np.asarray` can consume.
 
 ## Connection pools
 
-Every Redis client in `core/` comes from one of two shared registries, never
+Every Redis client in `baselith/core/` comes from one of two shared registries, never
 from a bare `Redis.from_url()`:
 
 | Client | Factory | Registry keyed by |
@@ -349,7 +349,7 @@ Redis that is not running:
 | The caller's cache is actually shared | What lets a losing worker read the winner's result. |
 
 ```python
-from core.cache.single_flight import build_single_flight
+from baselith.core.cache.single_flight import build_single_flight
 
 # In-process only unless BOTH conditions hold.
 sf = build_single_flight(shared_cache=isinstance(cache, RedisTTLCache))
@@ -364,7 +364,7 @@ value = await sf.do(
 !!! warning "Fail-open, not fail-closed"
     If Redis is unreachable, coalescing degrades to the in-process behaviour and
     the request still succeeds. This is the opposite of the AP2 replay guard in
-    `core/world_model/replay_guard.py`, which is deliberately fail-closed: there,
+    `baselith/core/world_model/replay_guard.py`, which is deliberately fail-closed: there,
     a missing guard risks a double payment. Here the cost of a coordination
     failure is one extra LLM call, while the cost of failing closed would be an
     outage.
@@ -378,12 +378,12 @@ immediately instead of leaving the next caller to wait out the TTL.
 
 ## Cache Protocol
 
-Caches conform to the `CacheProtocol` family in `core/cache/protocols.py`.
+Caches conform to the `CacheProtocol` family in `baselith/core/cache/protocols.py`.
 The base `CacheProtocol` defines the core async surface; `TTLCacheProtocol`
 adds a `ttl` argument to `set`, and `BatchCacheProtocol` adds bulk ops:
 
 ```python
-from core.cache import CacheProtocol
+from baselith.core.cache import CacheProtocol
 
 # CacheProtocol (base):
 async def get(key) -> Optional[V]: ...
@@ -401,8 +401,8 @@ implementations without changing business logic:
 
 ```python
 # Swap from in-memory to Redis behind the same protocol
-from core.config import get_storage_config
-from core.config.cache import get_redis_cache_config
+from baselith.core.config import get_storage_config
+from baselith.core.config.cache import get_redis_cache_config
 
 cache: CacheProtocol = (
     RedisTTLCache(create_redis_client(get_redis_cache_config().url))

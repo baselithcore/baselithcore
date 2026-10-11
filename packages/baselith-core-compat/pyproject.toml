@@ -1,0 +1,28 @@
+# ns-migrate: skip-file
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baselith-core-compat"
+version = "1.0.0"
+description = "Legacy `core`/`plugins` import names for code written against baselith-core < 1.0."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+dependencies = ["baselith-core>=1.0.0"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["baselith_core_compat*"]
+
+[tool.pytest.ini_options]
+# Run from this directory or by path from the repository root; either way the
+# tests import the package from src/ without installing it.
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

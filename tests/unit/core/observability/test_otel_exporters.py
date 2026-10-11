@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.observability.otel_exporters import (
+from baselith.core.observability.otel_exporters import (
     PROTOCOL_GRPC,
     PROTOCOL_HTTP,
     build_log_exporter,
@@ -44,7 +44,7 @@ class TestNormalizeProtocol:
         # no exporter for it: treated as unknown rather than silently ignored.
         warnings: list[tuple] = []
         monkeypatch.setattr(
-            "core.observability.otel_exporters.logger.warning",
+            "baselith.core.observability.otel_exporters.logger.warning",
             lambda *args, **kwargs: warnings.append(args),
         )
         assert normalize_protocol("http/json") == PROTOCOL_GRPC

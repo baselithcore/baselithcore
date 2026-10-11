@@ -23,8 +23,10 @@ import uuid
 
 
 async def main() -> int:
-    from core.db.connection import get_async_cursor
-    from core.services.vectorstore.providers.pgvector_provider import PgVectorProvider
+    from baselith.core.db.connection import get_async_cursor
+    from baselith.core.services.vectorstore.providers.pgvector_provider import (
+        PgVectorProvider,
+    )
 
     provider = PgVectorProvider()
     collection = f"verify_{uuid.uuid4().hex[:10]}"

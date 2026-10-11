@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.api.pagination import (
+from baselith.core.api.pagination import (
     CursorPage,
     PaginationError,
     decode_cursor,

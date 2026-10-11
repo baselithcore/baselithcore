@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.guardrails.output_guard import OutputGuard
+from baselith.core.guardrails.output_guard import OutputGuard
 
 SECRETS = [
     ("aws_access_key", "AKIAIOSFODNN7EXAMPLE"),

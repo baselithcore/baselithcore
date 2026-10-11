@@ -13,7 +13,7 @@
 # SECURITY (migration 008 deliberately leaves FORCE off). POSTGRES_USER is both,
 # so the base stack has RLS policies that apply to nobody. This overlay runs the
 # app as a least-privilege role so the policies actually bite —
-# `core.db.rls_posture` refuses to boot in production when they do not.
+# `baselith.core.db.rls_posture` refuses to boot in production when they do not.
 #
 # Set in .env (or the environment) before the FIRST `up` of a new volume:
 #
@@ -43,7 +43,7 @@ services:
   worker:
     environment:
       # The worker shares the pool and the policies. Out-of-request work must
-      # declare its tenant (core.db.connection.system_tenant_scope) or the
+      # declare its tenant (baselith.core.db.connection.system_tenant_scope) or the
       # checkout refuses — which is the point of RLS being on.
       - DB_USER=${DB_RUNTIME_USER}
       - DB_PASSWORD=${DB_RUNTIME_PASSWORD}

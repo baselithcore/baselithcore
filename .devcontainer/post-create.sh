@@ -19,5 +19,5 @@ Next steps:
   python backend.py           # start the API on :8000  →  /console, /docs
 
 Tests:    python -m pytest -m "not slow"
-Lint:     ruff check . && mypy core/
+Lint:     ruff check . && mypy baselith/core/
 EOF

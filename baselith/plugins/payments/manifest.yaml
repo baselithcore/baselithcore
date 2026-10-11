@@ -1,0 +1,20 @@
+name: payments
+description: Reference PSP adapter (mock) for the AP2 payment-execution seam
+version: 0.2.0
+author: Baselith
+tags:
+- payments
+- ap2
+- psp
+# Declared capabilities. The mock PSP adapter reaches no network at all; a real
+# adapter replacing it must add its provider's host here, and will be refused
+# under BASELITH_PLUGIN_PERMISSIONS=enforce until it does.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
+integrity_sha256: 0d2571fbff5defc8a53d2c00cf263dfe955984109fb7c08a09d96f9068264fa2
+hash_surface_version: 5

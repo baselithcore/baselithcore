@@ -1,6 +1,6 @@
-"""``core/_core_version.py``: the public core release this tree corresponds to.
+"""``baselith/core/_core_version.py``: the public core release this tree corresponds to.
 
-The file is byte-identical in every distribution. Where ``core/_version.py``
+The file is byte-identical in every distribution. Where ``baselith/core/_version.py``
 is the public core's own version (no ``__distribution__`` marker) the two must
 agree, and the release job must rewrite both. A downstream distribution marks
 its ``_version.py`` with ``__distribution__``: there the two version
@@ -16,12 +16,14 @@ from pathlib import Path
 
 import pytest
 
-import core._version as version_module
-from core._core_version import CORE_VERSION
+import baselith.core._version as version_module
+from baselith.core._core_version import CORE_VERSION
 
 ROOT = Path(__file__).resolve().parents[3]
 _SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
-_WRITES_CORE_VERSION = re.compile(r"""Path\(\s*['"]core/_core_version\.py['"]\s*\)""")
+_WRITES_CORE_VERSION = re.compile(
+    r"""Path\(\s*['"]baselith/core/_core_version\.py['"]\s*\)"""
+)
 _DISTRIBUTION: str | None = getattr(version_module, "__distribution__", None)
 
 
@@ -48,7 +50,7 @@ def test_framework_version_is_a_plain_release_semver() -> None:
 )
 def test_public_core_versions_agree() -> None:
     assert CORE_VERSION == version_module.__version__, (
-        "core/_core_version.py and core/_version.py must name the same release "
+        "baselith/core/_core_version.py and baselith/core/_version.py must name the same release "
         "in the public core project; bump both together"
     )
 
@@ -58,11 +60,11 @@ def test_release_job_owns_core_version_only_in_the_public_core() -> None:
     writes_core_version = bool(_WRITES_CORE_VERSION.search(_prepare_cmd()))
     if _DISTRIBUTION is None:
         assert writes_core_version, (
-            "the public core's release job must rewrite core/_core_version.py "
-            "together with core/_version.py"
+            "the public core's release job must rewrite baselith/core/_core_version.py "
+            "together with baselith/core/_version.py"
         )
     else:
         assert not writes_core_version, (
-            "a distribution's release job must not rewrite core/_core_version.py: "
+            "a distribution's release job must not rewrite baselith/core/_core_version.py: "
             "it is the public core release and comes from the core alignment"
         )

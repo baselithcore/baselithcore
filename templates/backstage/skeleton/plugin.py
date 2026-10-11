@@ -10,15 +10,15 @@ Dogma III— Async Everything: initialize() and shutdown() are async.
 
 from typing import Any, Dict, List
 
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 {% if values.includeAgent %}
-from core.plugins.agent_plugin import AgentPlugin
+from baselith.core.plugins.agent_plugin import AgentPlugin
 {% endif %}
 {% if values.includeRouter %}
-from core.plugins.router_plugin import RouterPlugin
+from baselith.core.plugins.router_plugin import RouterPlugin
 {% endif %}
 {% if not values.includeAgent and not values.includeRouter %}
-from core.plugins.interface import Plugin as _PluginBase
+from baselith.core.plugins.interface import Plugin as _PluginBase
 {% endif %}
 
 logger = get_logger(__name__)

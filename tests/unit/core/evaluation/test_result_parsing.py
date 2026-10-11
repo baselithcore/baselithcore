@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.evaluation.base import BaseLLMEvaluator
+from baselith.core.evaluation.base import BaseLLMEvaluator
 
 
 class _Evaluator(BaseLLMEvaluator):

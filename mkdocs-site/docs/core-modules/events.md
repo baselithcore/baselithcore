@@ -3,7 +3,7 @@ title: Event System
 description: Internal event bus for pub/sub communication
 ---
 
-The `core/events` module provides an **event bus** for asynchronous and decoupled communication between system components.
+The `baselith/core/events` module provides an **event bus** for asynchronous and decoupled communication between system components.
 
 ## What is the Pub/Sub Pattern
 
@@ -44,7 +44,7 @@ This approach eliminates direct coupling between components, allowing for a more
 ## Structure
 
 ```text
-core/events/
+baselith/core/events/
 ├── __init__.py
 ├── _singleton.py     # get_event_bus() / reset_event_bus() global accessor
 ├── bus.py            # EventBus
@@ -61,7 +61,7 @@ core/events/
 Asynchronous Pub/Sub:
 
 ```python
-from core.events import get_event_bus, EventNames
+from baselith.core.events import get_event_bus, EventNames
 
 bus = get_event_bus()
 
@@ -147,7 +147,7 @@ Here are some concrete use cases where events improve architecture.
 Automatically track all important operations without modifying business logic:
 
 ```python
-from core.events import get_event_bus, EventNames
+from baselith.core.events import get_event_bus, EventNames
 
 bus = get_event_bus()
 
@@ -181,7 +181,7 @@ async def audit_error(data: dict):
 Collect real-time metrics by listening to system events:
 
 ```python
-from core.events import get_event_bus
+from baselith.core.events import get_event_bus
 import prometheus_client as prom
 
 bus = get_event_bus()
@@ -225,8 +225,10 @@ async def auto_generate_report(data):
 | Event                  | Emitter           | Data                         |
 | ---------------------- | ----------------- | ---------------------------- |
 | `FLOW_STARTED`         | Orchestrator      | intent, query                |
-| `FLOW_COMPLETED`       | Orchestrator      | intent, query, response, context, duration_ms, success, run_id — on failure: intent, duration_ms, success=False, error, run_id |
+| `FLOW_COMPLETED`       | Orchestrator      | intent, query, response (the guarded text the user received), context, duration_ms, success, run_id, tenant_id, cost_usd, tokens, guardrails (when a guard acted), streamed (streamed answers) — on failure: intent, duration_ms, success=False, error, run_id |
 | `EVALUATION_COMPLETED` | EvaluationService | score, quality, feedback     |
+| `EVALUATION_DEGRADED`  | EvaluationService (the elected worker under the fleet monitor) | intent, source, state, window_mean, reference_mean, floor, samples, reason, scope (`fleet` / `worker`); also delivered as the `evaluation.degraded` webhook |
+| `EVALUATION_RECOVERED` | EvaluationService (the elected worker under the fleet monitor) | intent, source, state, window_mean, reference_mean, floor, samples, reason=`recovered`, scope; also the `evaluation.recovered` webhook |
 | `EXPERIENCE_RECORDED`  | ContinuousLearner | action, reward               |
 | `PLUGIN_LOADED`        | PluginRegistry    | name, action                 |
 | `AGENT_FAILED`         | Agent runtime     | error, source, context       |
@@ -237,7 +239,7 @@ async def auto_generate_report(data):
 | `plugin.reloaded`      | HotReloadController | plugin, state, op, ok      |
 | `plugin.failed`        | HotReloadController | plugin, state, op, ok      |
 
-The four `plugin.*` lifecycle topics are emitted by `core.plugins.hotreload.HotReloadController`
+The four `plugin.*` lifecycle topics are emitted by `baselith.core.plugins.hotreload.HotReloadController`
 whenever `enable_plugin`/`disable_plugin`/`reload_plugin` completes (see
 [Plugins → Lifecycle events](plugins.md#lifecycle-events)) — best-effort,
 fire-and-forget, never blocking or failing the lifecycle operation itself.
@@ -249,7 +251,7 @@ fire-and-forget, never blocking or failing the lifecycle operation itself.
 Collects aggregated metrics automatically:
 
 ```python
-from core.events import get_event_listener
+from baselith.core.events import get_event_listener
 
 listener = get_event_listener()
 
@@ -265,7 +267,7 @@ print(metrics["flows"]["avg_duration_ms"])
 ## Custom Events
 
 ```python
-from core.events import get_event_bus
+from baselith.core.events import get_event_bus
 
 bus = get_event_bus()
 
@@ -341,7 +343,7 @@ the emitter itself waits for the slowest handler (bounded only by
 `EVENT_HANDLER_TIMEOUT`):
 
 ```python
-from core.events import get_event_bus
+from baselith.core.events import get_event_bus
 
 bus = get_event_bus()
 
@@ -361,7 +363,7 @@ concurrent tasks. **Solution**: keep handlers short and hand heavy work to the
 task queue:
 
 ```python
-from core.task_queue import enqueue_task
+from baselith.core.task_queue import enqueue_task
 
 @bus.on("heavy_task")
 async def enqueue_heavy_task(data):
@@ -392,7 +394,7 @@ Two consequences a multi-replica deployment cannot live with:
 - two pods each have their own bus, so an event emitted on one is invisible to
   a handler that only runs on the other.
 
-`core/events/stream.py` adds an ordered, replayable log in front of the bus.
+`baselith/core/events/stream.py` adds an ordered, replayable log in front of the bus.
 Consumers read through a **consumer group**: each record goes to exactly one
 member and stays *pending* until that member acknowledges it. A consumer that
 dies leaves its records pending rather than consumed, and `reclaim()` hands
@@ -411,8 +413,8 @@ them to a live member.
     start the bridge yourself, as below, and publish through it.
 
 ```python
-from core.events import DurableEventBridge, get_event_bus
-from core.events.stream_redis import RedisEventStream
+from baselith.core.events import DurableEventBridge, get_event_bus
+from baselith.core.events.stream_redis import RedisEventStream
 
 bridge = DurableEventBridge(
     RedisEventStream(redis_client),
@@ -441,7 +443,7 @@ run, because a replica has no request context of its own.
     A record is acknowledged **after** its handlers run, so a process that dies
     in between will see it again. Handlers must be idempotent. For tool calls
     that is what
-    [`core.orchestration.idempotency`](orchestration.md#cross-process-tool-idempotency-idempotencypy)
+    [`baselith.core.orchestration.idempotency`](orchestration.md#cross-process-tool-idempotency-idempotencypy)
     provides. A record that keeps failing is dropped after
     `POISON_DELIVERY_THRESHOLD` (5) deliveries rather than blocking the reclaim
     path forever.
@@ -470,7 +472,7 @@ EVENT_DLQ_MAX_SIZE=1000
 EVENT_HANDLER_TIMEOUT=30.0
 ```
 
-The values above are the defaults from `core/config/events.py`
+The values above are the defaults from `baselith/core/config/events.py`
 (`EventsConfig`); `.env.example` ships none of the `EVENT_*` keys, so an
 untouched deployment runs with exactly these settings.
 

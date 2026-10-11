@@ -1,0 +1,17 @@
+name: reasoning-agent
+version: 0.3.0
+description: Agent capable of complex reasoning using Tree of Thoughts.
+author: System
+dependencies:
+- core
+# Declared capabilities. Tree-of-Thoughts runs on the core LLM service; the
+# plugin itself reaches nothing.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
+integrity_sha256: 3ceb9b2f0aca354704ae03381a8f03c978873cdb245d3e5dc92b462c9cc709d5
+hash_surface_version: 5

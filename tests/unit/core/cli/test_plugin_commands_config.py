@@ -25,7 +25,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True, "max_retries": 3}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -38,7 +38,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -51,7 +51,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -64,7 +64,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -82,7 +82,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -98,7 +98,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True, "retries": 3}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -111,7 +111,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -124,7 +124,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True, "extra": "val"}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -141,7 +141,7 @@ class TestPluginConfig:
         monkeypatch.chdir(tmp_path)
         _make_config(tmp_path, {"my-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import config as config_mod
+        from baselith.core.cli.commands.plugin import config as config_mod
 
         with patch.object(
             config_mod, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"

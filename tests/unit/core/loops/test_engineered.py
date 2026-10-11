@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.loops.engineered import AttemptContext, EngineeredLoop
-from core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.loops.engineered import AttemptContext, EngineeredLoop
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
 
 def _verifier(script: list[tuple[bool, str]]):

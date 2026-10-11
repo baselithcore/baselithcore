@@ -5,7 +5,7 @@ description: Intelligent task planning, decomposition, and budget-aware executio
 
 ## Overview
 
-The `core/planning` module enables agents to handle complex goals by breaking them down into manageable subtasks. It supports **Budget-Aware Planning** to ensure efficient resource usage (steps, tokens, latency).
+The `baselith/core/planning` module enables agents to handle complex goals by breaking them down into manageable subtasks. It supports **Budget-Aware Planning** to ensure efficient resource usage (steps, tokens, latency).
 
 !!! note "Library API — not wired by default"
     The orchestrator does not plan on its own: no route, handler or startup
@@ -29,14 +29,14 @@ The planning system consists of:
 1. **TaskPlanner**: The main entry point — `create_plan()` builds a `Plan` and `validate_plan()` checks it for unknown dependencies or an empty step list. There is no re-plan API.
 2. **TaskDecomposer**: specialized component for breaking down complex tasks.
 3. **PlanningBudget**: Value objects defining resource constraints.
-4. **plan_to_workflow**: Adapter (`core/planning/adapter.py`) that turns a `Plan` into a `WorkflowDefinition` for the workflow engine.
+4. **plan_to_workflow**: Adapter (`baselith/core/planning/adapter.py`) that turns a `Plan` into a `WorkflowDefinition` for the workflow engine.
 
 ## Usage
 
 ### Basic Planning
 
 ```python
-from core.planning import TaskPlanner
+from baselith.core.planning import TaskPlanner
 
 planner = TaskPlanner(llm_service=llm_service)
 
@@ -55,7 +55,7 @@ Each `PlanStep` exposes `id`, `description`, `action`, `parameters`,
 To prevent runaway costs or infinite loops, use `PlanningBudget`:
 
 ```python
-from core.planning import TaskPlanner, PlanningBudget
+from baselith.core.planning import TaskPlanner, PlanningBudget
 
 # Define strict constraints
 budget = PlanningBudget(
@@ -87,7 +87,7 @@ the [workflow engine](workflows.md) can execute it (`name` defaults to
 `plan.goal`):
 
 ```python
-from core.planning import TaskPlanner, plan_to_workflow
+from baselith.core.planning import TaskPlanner, plan_to_workflow
 
 planner = TaskPlanner(llm_service=llm_service)
 plan = await planner.create_plan("Research and summarize global warming trends")
@@ -146,7 +146,7 @@ For very complex tasks, `TaskDecomposer` breaks a task into a flat list of
 `SubTask` objects (it does **not** build a dependency graph).
 
 ```python
-from core.planning import TaskDecomposer
+from baselith.core.planning import TaskDecomposer
 
 decomposer = TaskDecomposer(llm_service=llm_service)
 
@@ -169,15 +169,15 @@ decomposer's.
 
 `TaskPlanner` produces a reviewable `Plan` and `PlanCostEstimate` prices it,
 but nothing composed them into *emit plan → block for sign-off → execute*.
-`approve_plan` (`core/planning/approval.py`) is that composition: under an
+`approve_plan` (`baselith/core/planning/approval.py`) is that composition: under an
 `AutonomyPolicy` whose level requires approval for **mutating** work (plan
 execution changes state by definition), the rendered plan goes to the
 `HumanIntervention` channel and execution is blocked until an explicit yes.
 
 ```python
-from core.human.interaction import HumanIntervention
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-from core.planning import PlanRejectedError, TaskPlanner, approve_plan
+from baselith.core.human.interaction import HumanIntervention
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.planning import PlanRejectedError, TaskPlanner, approve_plan
 
 planner = TaskPlanner(llm_service=llm_service)
 plan = await planner.create_plan("Migrate the billing tables to the new schema")
@@ -219,4 +219,4 @@ for the approval matrix and [Human-in-the-Loop](human.md) for the channel.
     Always provide a `PlanningBudget` for user-facing agents to prevent excessive costs. Start with conservative limits (e.g., 10 steps) and increase as needed.
 
 !!! warning "Handle Failures"
-    Plans can fail, and `TaskPlanner` does not re-plan on its own — `create_plan` is its only entry point. To recover, mark the failed step `StepStatus.FAILED` (`core.planning.planner`) so `get_next_steps()` stops scheduling its dependants, then call `create_plan` again with the error described in `context`.
+    Plans can fail, and `TaskPlanner` does not re-plan on its own — `create_plan` is its only entry point. To recover, mark the failed step `StepStatus.FAILED` (`baselith.core.planning.planner`) so `get_next_steps()` stops scheduling its dependants, then call `create_plan` again with the error described in `context`.

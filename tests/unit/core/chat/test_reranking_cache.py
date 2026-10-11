@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from core.chat.reranking import rerank_hits
+from baselith.core.chat.reranking import rerank_hits
 
 
 class _BatchCache:
@@ -56,7 +56,7 @@ def _hit(hit_id: str, text: str) -> Any:
 
 
 def _key_for(hit: Any) -> tuple[str, str, str, str] | None:
-    from core.chat.reranking import _build_cache_key
+    from baselith.core.chat.reranking import _build_cache_key
 
     return _build_cache_key("q-norm", hit.payload, hit.id)
 

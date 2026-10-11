@@ -6,7 +6,7 @@ the collector; unset, production now samples one trace in ten.
 
 import pytest
 
-from core.config.app import PRODUCTION_TRACES_SAMPLE_RATE, AppConfig
+from baselith.core.config.app import PRODUCTION_TRACES_SAMPLE_RATE, AppConfig
 
 
 @pytest.fixture(autouse=True)

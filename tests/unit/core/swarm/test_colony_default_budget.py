@@ -6,15 +6,15 @@ from typing import Any
 
 import pytest
 
-from core.config.swarm import AuctionConfig, SwarmConfig
-from core.orchestration.budget_context import (
+from baselith.core.config.swarm import AuctionConfig, SwarmConfig
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     deactivate_budget,
     get_active_budget,
 )
-from core.orchestration.limits import LoopBudget, LoopLimits
-from core.swarm.colony import Colony
-from core.swarm.types import AgentProfile, Capability, Task
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.types import AgentProfile, Capability, Task
 
 pytestmark = [pytest.mark.unit]
 

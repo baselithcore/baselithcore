@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from core.mcp.client import MCPClient
-from core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
+from baselith.core.mcp.client import MCPClient
+from baselith.core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
 
 
 class _FakeWriter:
@@ -66,8 +66,10 @@ def _client(replies: dict[str, Any], monkeypatch: Any) -> tuple[MCPClient, _Fake
         mcp_server_name="test-client",
         mcp_server_version="9.9.9",
     )
-    monkeypatch.setattr("core.mcp.client.get_mcp_config", lambda: config)
-    monkeypatch.setattr("core.mcp.client_handshake.get_mcp_config", lambda: config)
+    monkeypatch.setattr("baselith.core.mcp.client.get_mcp_config", lambda: config)
+    monkeypatch.setattr(
+        "baselith.core.mcp.client_handshake.get_mcp_config", lambda: config
+    )
     client = MCPClient()
     writer = _FakeWriter()
     client._writer = writer  # type: ignore[assignment]
@@ -190,11 +192,11 @@ class TestHttpStandardHeaders:
     async def test_modern_message_carries_method_and_name_headers(
         self, monkeypatch: Any
     ) -> None:
-        from core.mcp.http_client_transport import HTTPClientTransport
-        from core.mcp.modern import client_request_meta
+        from baselith.core.mcp.http_client_transport import HTTPClientTransport
+        from baselith.core.mcp.modern import client_request_meta
 
         monkeypatch.setattr(
-            "core.mcp.http_client_transport.get_mcp_config",
+            "baselith.core.mcp.http_client_transport.get_mcp_config",
             lambda: SimpleNamespace(
                 mcp_client_request_timeout=5.0, mcp_allow_internal_endpoints=True
             ),
@@ -229,11 +231,11 @@ class TestHttpStandardHeaders:
     ) -> None:
         import base64
 
-        from core.mcp.http_client_transport import HTTPClientTransport
-        from core.mcp.modern import client_request_meta
+        from baselith.core.mcp.http_client_transport import HTTPClientTransport
+        from baselith.core.mcp.modern import client_request_meta
 
         monkeypatch.setattr(
-            "core.mcp.http_client_transport.get_mcp_config",
+            "baselith.core.mcp.http_client_transport.get_mcp_config",
             lambda: SimpleNamespace(
                 mcp_client_request_timeout=5.0, mcp_allow_internal_endpoints=True
             ),
@@ -264,10 +266,10 @@ class TestHttpStandardHeaders:
     async def test_legacy_message_sends_no_standard_headers(
         self, monkeypatch: Any
     ) -> None:
-        from core.mcp.http_client_transport import HTTPClientTransport
+        from baselith.core.mcp.http_client_transport import HTTPClientTransport
 
         monkeypatch.setattr(
-            "core.mcp.http_client_transport.get_mcp_config",
+            "baselith.core.mcp.http_client_transport.get_mcp_config",
             lambda: SimpleNamespace(
                 mcp_client_request_timeout=5.0, mcp_allow_internal_endpoints=True
             ),

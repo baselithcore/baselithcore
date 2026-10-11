@@ -3,7 +3,7 @@ title: Security Incident Reporting
 description: Structured incident records and reporting-deadline tracking for NIS2 Art. 23, DORA Art. 19, EU AI Act Art. 73 and GDPR Art. 33/34
 ---
 
-`core/incidents/` records incidents and tracks the regulatory reporting
+`baselith/core/incidents/` records incidents and tracks the regulatory reporting
 milestones for four regimes that can run side by side: **NIS2 (EU 2022/2555)
 Art. 23**, **DORA (EU 2022/2554) Art. 19**, **EU AI Act (EU 2024/1689) Art. 73**
 and **GDPR (EU 2016/679) Art. 33/34**.
@@ -32,7 +32,7 @@ explicit, so an overdue obligation is detectable rather than silently missed.
 
 - **Opt-in & additive.** Gated by `INCIDENT_REPORTING_ENABLED` (default off);
   no effect until enabled.
-- **Sacred Core.** Domain-agnostic infrastructure, so it lives in `core/`.
+- **Sacred Core.** Domain-agnostic infrastructure, so it lives in `baselith/core/`.
 - **Storage-agnostic.** `IncidentStore` is a Protocol with an in-memory
   reference implementation and a bundled SQLite store (selected per regime by
   the `*_DB_PATH` settings below); register your own durable store (e.g.
@@ -71,7 +71,7 @@ schema-capped so it can only ever be tightened.
 ## NIS2 usage
 
 ```python
-from core.incidents import IncidentSeverity, get_incident_service
+from baselith.core.incidents import IncidentSeverity, get_incident_service
 
 svc = get_incident_service()
 
@@ -120,7 +120,7 @@ met; `DoraClassification.is_major` applies the RTS-aligned default rule —
 explicit `major_override` when the operator's threshold analysis differs.
 
 ```python
-from core.incidents import DoraImpactAssessment, get_dora_incident_service
+from baselith.core.incidents import DoraImpactAssessment, get_dora_incident_service
 
 svc = get_dora_incident_service()
 
@@ -185,7 +185,7 @@ The Art. 3(49) categories are modelled as `SeriousIncidentCategory`:
 `FUNDAMENTAL_RIGHTS_INFRINGEMENT`, `PROPERTY_OR_ENVIRONMENTAL_HARM`.
 
 ```python
-from core.incidents import SeriousIncidentCategory, get_ai_act_incident_service
+from baselith.core.incidents import SeriousIncidentCategory, get_ai_act_incident_service
 
 svc = get_ai_act_incident_service()
 
@@ -238,7 +238,7 @@ Art. 23 can still leave GDPR Art. 33 unmet.
 | **Art. 33(5)** — document in the register | always | **Every** breach, notified or not |
 
 ```python
-from core.incidents import Art34Exemption, BreachRiskLevel, get_breach_service
+from baselith.core.incidents import Art34Exemption, BreachRiskLevel, get_breach_service
 
 svc = get_breach_service()
 
@@ -318,7 +318,7 @@ maximum.
 | ----------------------------------- | ---------------------------------------------------- |
 | `AiActSeriousIncident`              | Serious-incident record + category-derived `milestones()`. |
 | `SeriousIncidentCategory`           | The Art. 3(49) categories that set the horizon.      |
-| `report_deadline_days(categories, *, widespread_infringement=False)` | The 2/10/15-day derivation, usable standalone. Import it from `core.incidents.ai_act` — it is **not** re-exported from `core.incidents`. |
+| `report_deadline_days(categories, *, widespread_infringement=False)` | The 2/10/15-day derivation, usable standalone. Import it from `baselith.core.incidents.ai_act` — it is **not** re-exported from `baselith.core.incidents`. |
 | `AiActIncidentStatus` / `AiActMilestoneKind` | Lifecycle states and the two report obligations. |
 | `AiActIncidentService`              | Open, advance, list, detect overdue milestones.      |
 | `AiActIncidentStore` / `InMemoryAiActIncidentStore` | Persistence Protocol + reference store. |
@@ -337,7 +337,7 @@ maximum.
 | `get_breach_service()`              | Shared service (durable when `GDPR_BREACH_DB_PATH` is set). |
 
 Every symbol above except `report_deadline_days` is re-exported from
-`core.incidents`, alongside the per-regime `*NotFoundError` exceptions
+`baselith.core.incidents`, alongside the per-regime `*NotFoundError` exceptions
 (`IncidentNotFoundError`, `DoraIncidentNotFoundError`,
 `AiActIncidentNotFoundError`, `BreachNotFoundError`). `ReportingMilestone`
 and `IncidentSeverity` are shared across the regimes.
@@ -372,7 +372,7 @@ Every transition across all four regimes is also written to the
   alerting channel so a deadline cannot pass unnoticed.
 - **Register a durable store** before relying on this in production; the default
   in-memory store does not survive a restart. The bundled SQLite stores
-  (`core/incidents/persistence.py`, selected by the `*_DB_PATH` settings above)
+  (`baselith/core/incidents/persistence.py`, selected by the `*_DB_PATH` settings above)
   run every statement on a worker thread — one `asyncio.to_thread` hop per
   public operation, covering lock, statement, fetch, JSON decode and record
   rehydration — so incident writes never block the event loop.

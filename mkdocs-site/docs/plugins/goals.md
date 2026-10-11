@@ -13,10 +13,9 @@ Complex autonomous agents often need to maintain state about their progress towa
 !!! note "Core vs Plugin"
     This functionality is implemented as a plugin to ensure the core framework remains lightweight and agnostic. It serves as an opt-in component for agents that specifically require stateful goal tracking, adhering to the framework's modular architecture.
 
-!!! warning "`core.goals` is a deprecated shim"
-    The old import path `core.goals` still resolves to this plugin, but
-    importing it now emits a `DeprecationWarning` (deprecated since 0.39,
-    removed in 1.0). Import from `plugins.goals` instead.
+!!! warning "`core.goals` is removed"
+    The old `core.goals` shim over this plugin was deprecated in 0.39 and
+    removed in 1.0. Import from `baselith.plugins.goals`.
 
 ## Key Concepts
 
@@ -46,7 +45,7 @@ The tracker is **in-memory only**: goals live in a dictionary on the `GoalTracke
 ### Defining a Goal
 
 ```python
-from plugins.goals import Goal, GoalTracker
+from baselith.plugins.goals import Goal, GoalTracker
 
 # Create a tracker
 tracker = GoalTracker()

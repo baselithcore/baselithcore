@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from core.observability.audit import (
+from baselith.core.observability.audit import (
     AuditEvent,
     AuditEventType,
     AuditLogger,

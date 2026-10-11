@@ -1,12 +1,12 @@
-"""Tests for core.reasoning.tot.engine."""
+"""Tests for baselith.core.reasoning.tot.engine."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.reasoning.tot.cache import get_thought_cache
-from core.reasoning.tot.engine import TreeOfThoughts, TreeOfThoughtsAsync
-from core.reasoning.tot.tree import ThoughtNode
+from baselith.core.reasoning.tot.cache import get_thought_cache
+from baselith.core.reasoning.tot.engine import TreeOfThoughts, TreeOfThoughtsAsync
+from baselith.core.reasoning.tot.tree import ThoughtNode
 
 
 @pytest.fixture(autouse=True)

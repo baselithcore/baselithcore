@@ -1,10 +1,10 @@
 """
-Tests for core.resilience.rate_limiter module.
+Tests for baselith.core.resilience.rate_limiter module.
 """
 
 import time
 
-from core.resilience.rate_limiter import (
+from baselith.core.resilience.rate_limiter import (
     InMemoryRateLimiter,
     RateLimiter,
     RateLimitResult,

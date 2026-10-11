@@ -2,7 +2,7 @@ from typing import Protocol, runtime_checkable
 
 import pytest
 
-from core.di.container import (
+from baselith.core.di.container import (
     DependencyContainer,
     ScopeNotActiveError,
     ServiceLifetime,

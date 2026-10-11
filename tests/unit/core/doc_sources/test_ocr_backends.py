@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.doc_sources import ocr_backends
+from baselith.core.doc_sources import ocr_backends
 
 
 @pytest.fixture

@@ -45,7 +45,7 @@ author: Your Name
 ```python title="plugins/my-plugin/plugin.py"
 from typing import Any
 
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class MyPlugin(Plugin):
@@ -76,7 +76,7 @@ that defines your class and returns a `PluginMetadata` (`self.metadata.name`,
 
 Plugins acquire specific capabilities by subclassing one or more mixins. Every mixin
 already extends `Plugin`, so subclass the mixin alone, or combine several mixins as
-`plugins/example-plugin/` does:
+`baselith/plugins/example-plugin/` does:
 
 ```python
 class ExamplePlugin(AgentPlugin, RouterPlugin, GraphPlugin): ...
@@ -105,7 +105,7 @@ abstract — a subclass that does not implement it cannot be instantiated:
 ```python
 from typing import Any
 
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 
 from .agent import MyMainAgent
 from .handlers import MyIntentHandler
@@ -161,7 +161,7 @@ Neither pair covers the intents the orchestrator registers for itself
 (`qa_docs`, `complex_reasoning`, `vision_analysis`, `multimodal_reasoning`,
 `collaborative_task`, `scenario_simulation`). Those never enter the registry,
 and the orchestrator is constructed lazily on first use, so there is usually no
-instance to interrogate. Read `core.orchestration.BUILTIN_INTENTS` instead.
+instance to interrogate. Read `baselith.core.orchestration.BUILTIN_INTENTS` instead.
 
 ### RouterPlugin
 
@@ -171,7 +171,7 @@ to `[self.create_router()]`:
 ```python
 from fastapi import APIRouter
 
-from core.plugins import RouterPlugin
+from baselith.core.plugins import RouterPlugin
 
 
 class MyPlugin(RouterPlugin):
@@ -199,7 +199,7 @@ For plugins that extend the knowledge graph:
 ```python
 from typing import Any
 
-from core.plugins import GraphPlugin
+from baselith.core.plugins import GraphPlugin
 
 
 class MyPlugin(GraphPlugin):
@@ -265,7 +265,7 @@ while the FastAPI app is being built:
 ```python
 from typing import Any
 
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class MyPlugin(Plugin):
@@ -293,7 +293,7 @@ class MyPlugin(Plugin):
 plugin that `configs/plugins.yaml` disables (or omits, when the file names
 any plugin at all) gets neither its routers nor this hook, so it installs no
 middleware and mounts no SPA. Both loaders read the file through
-`core/plugins/config_file.py`, which is what keeps them in agreement.
+`baselith/core/plugins/config_file.py`, which is what keeps them in agreement.
 
 ---
 
@@ -302,9 +302,9 @@ middleware and mounts no SPA. Both loaders read the file through
 Via Dependency Injection:
 
 ```python
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol
-from core.plugins import Plugin
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol
+from baselith.core.plugins import Plugin
 
 
 class MyHandler:

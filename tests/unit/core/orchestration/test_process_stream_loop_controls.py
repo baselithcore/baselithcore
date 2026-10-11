@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.budget_context import get_active_budget
-from core.orchestration.limits import LoopBudget, LoopLimits
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.orchestration.budget_context import get_active_budget
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class _RecordingStream:
@@ -99,7 +99,7 @@ async def test_completed_stream_is_written_to_memory(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "core.orchestration.mixins._streaming.inject_memory_context", no_recall
+        "baselith.core.orchestration.mixins._streaming.inject_memory_context", no_recall
     )
 
     [c async for c in orch.process_stream("greet")]
@@ -124,7 +124,7 @@ async def test_failed_stream_is_not_written_to_memory(monkeypatch):
         return None
 
     monkeypatch.setattr(
-        "core.orchestration.mixins._streaming.inject_memory_context", no_recall
+        "baselith.core.orchestration.mixins._streaming.inject_memory_context", no_recall
     )
 
     [c async for c in orch.process_stream("q")]
@@ -143,7 +143,7 @@ class _LeakyStream:
 async def test_handler_failure_does_not_leak_the_exception_text(monkeypatch):
     # Regression: the client received "[ERROR] <exception text>", which can
     # carry internal hosts, SQL or paths.
-    from core.orchestration.mixins.execution import STREAM_ERROR_MESSAGE
+    from baselith.core.orchestration.mixins.execution import STREAM_ERROR_MESSAGE
 
     orch = _orchestrator(monkeypatch, "s", _LeakyStream())
     chunks = [c async for c in orch.process_stream("q")]

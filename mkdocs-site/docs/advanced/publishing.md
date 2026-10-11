@@ -5,7 +5,7 @@ guide explains what the pipeline does and how to dry-run a build locally.
 
 ## 1. Versioning is automatic
 
-The version lives in `core/_version.py` (single source of truth):
+The version lives in `baselith/core/_version.py` (single source of truth):
 
 ```python
 __version__ = "0.31.0"
@@ -29,7 +29,7 @@ even if that step was forgotten; only the tracked files would be left behind.
 Both jobs live in `.github/workflows/ci.yml` and run only on `main`:
 
 1. **`release` (Semantic Release)** — after `python_test` passes, semantic-release
-   analyses the commits, writes `core/_version.py` on the runner — plus every
+   analyses the commits, writes `baselith/core/_version.py` on the runner — plus every
    other file that carries the version: the Helm chart's `appVersion`, the
    `SECURITY.md` support table, both client SDKs and `info.version` in the two
    checked-in `openapi.json` copies — then tags `v<version>` and creates the
@@ -67,4 +67,4 @@ which is where the provenance attestations come from.
 
 !!! tip "Testing a change to the packaging"
     Inspect the wheel contents with `unzip -l dist/*.whl` — for example to
-    confirm `plugins/baselithbot/ui/dist/**` is included and `ui/src/` is not.
+    confirm that a plugin's built assets are included and its sources are not.

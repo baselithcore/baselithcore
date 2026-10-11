@@ -33,6 +33,15 @@ OpenTelemetry spans and Prometheus metrics with real cost attached — the audit
 trail a regulated deployment has to produce is written while the system runs,
 not reconstructed from logs afterwards.
 
+> **1.0 is the stable line.** The public `baselith` API follows Semantic
+> Versioning: a breaking change waits for a major release and goes through a
+> deprecation cycle first. Coming from 0.x? The top-level `core` and `plugins`
+> packages moved under `baselith`, the long-deprecated shims are gone, and
+> several security postures now fail closed — [Migrating to
+> 1.0](https://docs.baselithcore.xyz/advanced/migrating-to-1-0/) has the
+> checklist and [upgrade notes](https://docs.baselithcore.xyz/advanced/upgrade-notes/)
+> the details.
+
 <div align="center">
 
 [**Quick start**](#quick-start) · [**Plugins**](#plugins) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Changelog**](https://github.com/baselithcore/baselithcore/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md)
@@ -94,12 +103,14 @@ tools, structured output and a checkpoint store.
 
 `baselith` is the public API and the only surface that carries a
 compatibility promise; `import baselith` costs ~3 ms because names resolve
-lazily. The framework's own packages live under `core.*` and each declares
-what it promises — see [API stability
+lazily. The framework's own packages live under `baselith.core.*` and each
+declares what it promises — see [API stability
 tiers](https://docs.baselithcore.xyz/advanced/api-stability/).
 
-Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, with migrations
-applied at startup. From a checkout of this repository, with Docker running:
+Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, plus two Hugging
+Face Text Embeddings Inference servers for embedding and reranking, with
+migrations applied at startup. From a checkout of this repository, with Docker
+running:
 
 ```bash
 uv pip install -e .             # installs the `baselith` CLI
@@ -164,6 +175,11 @@ baselith plugin marketplace install <plugin-id>
 `baselith plugin list`, `status` and `logs` cover day-to-day work; `sign` writes
 the integrity hash a hardened deployment verifies before it imports anything.
 
+The distribution ships official plugins under `baselith.plugins`, each signed
+and strictly typed: `api_routers`, `browser_agent`, `coding_agent`,
+`document_sources`, `goals`, `payments` (a reference AP2 adapter),
+`reasoning_agent` and `web_scraper`.
+
 The [first-plugin tutorial](https://docs.baselithcore.xyz/getting-started/first-plugin/)
 walks one end to end · [creating
 plugins](https://docs.baselithcore.xyz/plugins/creating-plugins/) ·
@@ -214,7 +230,7 @@ graph TD
     A -.->|gated by| GOV
 ```
 
-Two rules hold the shape: `core/` stays domain-agnostic, and everything
+Two rules hold the shape: `baselith/core/` stays domain-agnostic, and everything
 domain-specific is a plugin. The [architecture
 docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 
@@ -230,7 +246,7 @@ docs](https://docs.baselithcore.xyz/architecture/overview/) go deeper.
 | **Cognitive layer** | MCTS, Tree-of-Thoughts, world model, swarm auctions & bounded handoffs → [Reasoning](https://docs.baselithcore.xyz/core-modules/reasoning/) · [Swarm](https://docs.baselithcore.xyz/core-modules/swarm/) |
 | **Governance & safety** | Autonomy gating, durable human-in-the-loop, plan approval, loop & tool budgets, layered guardrails, sandboxed code → [Autonomy & Safety](https://docs.baselithcore.xyz/core-modules/orchestration/) |
 | **Memory & RAG** | STM→MTM→LTM hierarchy, hybrid search, hierarchical chunking, full RAG pipeline, Qdrant or pgvector backends → [Memory](https://docs.baselithcore.xyz/core-modules/memory/) |
-| **Multimodal** | Vision, native PDF and audio content blocks, duplex realtime voice with barge-in → [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
+| **Multimodal** | Vision, native PDF and audio content blocks, speech-to-text and text-to-speech (OpenAI, ElevenLabs, Google or any OpenAI-compatible server), and a duplex voice session contract with barge-in → [Services](https://docs.baselithcore.xyz/core-modules/services/) · [Realtime](https://docs.baselithcore.xyz/core-modules/realtime/) |
 | **Interoperability** | Native dual-era MCP (server + client + declarative registry), A2A peer interop, AP2 signed-mandate commerce → [MCP](https://docs.baselithcore.xyz/core-modules/mcp/) · [A2A](https://docs.baselithcore.xyz/core-modules/a2a/) |
 | **Self-improvement, governed** | Skill evolution, prompt compilation and evolutionary search — every change eval-gated, audited and human-approvable → [Skill Evolution](https://docs.baselithcore.xyz/core-modules/skill-evolution/) |
 | **Evaluation & observability** | Trajectory eval in CI, multi-model bake-off, LLM-as-judge, red-team, OTel + Prometheus with USD cost metrics → [Evaluation](https://docs.baselithcore.xyz/core-modules/evaluation/) |
@@ -249,7 +265,7 @@ Contributions are welcome, and the on-ramps are deliberately marked:
 
 [CONTRIBUTING.md](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md) covers the dev setup, the quality gates your
 PR has to pass, and the review turnaround you can expect. Every pull request
-runs **9,026 tests** behind a **78% branch-coverage floor**, strict typing,
+runs **13,000+ tests** behind a **85% branch-coverage floor**, strict typing,
 architecture-boundary and docs-consistency gates.
 [GOVERNANCE.md](https://github.com/baselithcore/baselithcore/blob/main/GOVERNANCE.md) says how decisions get made and what needs a
 proposal before code; [CODE_OF_CONDUCT.md](https://github.com/baselithcore/baselithcore/blob/main/CODE_OF_CONDUCT.md) applies to every
@@ -263,7 +279,7 @@ space the project uses. Questions belong in
 **AGPL-3.0-only** — see [LICENSE](https://github.com/baselithcore/baselithcore/blob/main/LICENSE).
 [LICENSE.exception](https://github.com/baselithcore/baselithcore/blob/main/LICENSE.exception) adds a permission under AGPL section 7:
 a plugin that uses the framework as a library — rather than patching files under
-`core/` — may be licensed under any terms you choose, including closed ones, and
+`baselith/core/` — may be licensed under any terms you choose, including closed ones, and
 section 13 never reaches it. Offered to everyone on identical terms; your plugin
 carries the notice described in section 3(c), and [plugin
 packaging](https://docs.baselithcore.xyz/plugins/packaging/) says what it must say.

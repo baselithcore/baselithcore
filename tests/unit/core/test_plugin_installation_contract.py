@@ -7,10 +7,12 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from core.cli.commands.plugin import add, add_docker, sync_docker
-from core.cli.commands.plugin import parser as plugin_parser
-from core.cli.commands.plugin.install_validation import validate_install_manifest
-from core.cli.handlers import cmd_plugin
+from baselith.core.cli.commands.plugin import add, add_docker, sync_docker
+from baselith.core.cli.commands.plugin import parser as plugin_parser
+from baselith.core.cli.commands.plugin.install_validation import (
+    validate_install_manifest,
+)
+from baselith.core.cli.handlers import cmd_plugin
 
 
 def plugin(tmp_path, name="sample", **extra):
@@ -38,7 +40,7 @@ def test_docker_add_does_not_check_host_packages(tmp_path, monkeypatch):
 def test_plugin_sync_docker_command_is_registered(monkeypatch):
     import argparse
 
-    from core.cli.commands import plugin as plugin_pkg
+    from baselith.core.cli.commands import plugin as plugin_pkg
 
     root = argparse.ArgumentParser()
     subparsers = root.add_subparsers(dest="command")
@@ -132,7 +134,7 @@ def test_verified_prebuilt_frontend_is_not_rebuilt(tmp_path, monkeypatch):
     (path / "ui" / "out").mkdir(parents=True)
     (path / "ui" / "out" / "index.html").write_text("test")
 
-    from core.plugins.integrity import compute_plugin_hash
+    from baselith.core.plugins.integrity import compute_plugin_hash
 
     manifest["integrity_sha256"] = compute_plugin_hash(path)
     (path / "manifest.yaml").write_text(yaml.safe_dump(manifest))

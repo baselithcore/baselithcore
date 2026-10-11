@@ -4,7 +4,7 @@ import socket
 
 import pytest
 
-from core.marketplace.registry import PluginRegistry
+from baselith.core.marketplace.registry import PluginRegistry
 
 
 def _fake_getaddrinfo(mapping: dict[str, list[str]]):

@@ -9,12 +9,12 @@ import logging
 import os
 import sys
 
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from core.config import get_core_config
+from baselith.core.config import get_core_config
 from examples.reference_product.agent import FAQAgent
 
 # Configure logging

@@ -142,7 +142,7 @@ jobs:
           # Pin to the release TAG, not to the SHA that started the run. When
           # ci.yml calls this workflow, that SHA is the commit *before*
           # semantic-release bumped the version — checking it out would ship an
-          # image tagged 0.31.0 whose core/_version.py still said 0.30.0. The
+          # image tagged 0.31.0 whose baselith/core/_version.py still said 0.30.0. The
           # tag is pushed by the release job before this one starts. Empty (a
           # bare workflow_dispatch) keeps the default ref.
           ref: ${{ inputs.tag || github.event.release.tag_name }}

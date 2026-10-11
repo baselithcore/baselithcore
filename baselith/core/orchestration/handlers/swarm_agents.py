@@ -1,0 +1,416 @@
+"""
+Virtual agent specifications for the swarm handler.
+
+Default multi-perspective agent roster (Researcher / Analyst / Synthesizer /
+Critic) used by :class:`baselith.core.orchestration.handlers.swarm_handler.SwarmHandler`.
+Extracted to keep modules under the 500-line cap; symbols are re-exported
+from ``swarm_handler`` for backward compatibility.
+"""
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from baselith.core.orchestration.contract import ContractValidator
+
+
+@dataclass
+class VirtualAgentSpec:
+    """Specification for a virtual agent in the swarm.
+
+    Attributes:
+        name: Display name.
+        role: Short role identifier (auction capability matching).
+        capabilities: Capability tags the colony matches tasks against.
+        system_prompt: The agent's identity/instructions.
+        allowed_tools: When set, the sub-agent may invoke only these tools —
+            enforced through :func:`contract_for_spec` at the tool
+            chokepoint. ``None`` inherits the request-level contract.
+        path_scope: Glob patterns bounding which paths this agent may touch;
+            overlapping scopes between concurrently spawned agents are
+            reported by :func:`detect_scope_conflicts` so parallel writers
+            cannot silently collide.
+        model: Per-agent model override for its LLM calls (cheap executor /
+            strong reviewer splits). ``None`` uses the service default.
+    """
+
+    name: str
+    role: str
+    capabilities: list[str]
+    system_prompt: str
+    allowed_tools: list[str] | None = None
+    path_scope: list[str] | None = None
+    model: str | None = None
+
+
+def contract_for_spec(spec: VirtualAgentSpec) -> "ContractValidator | None":
+    """Build a per-subagent contract validator from the spec's tool scope.
+
+    Returns None when the spec declares no ``allowed_tools`` (the sub-agent
+    then inherits whatever contract the request context carries).
+    """
+    if spec.allowed_tools is None:
+        return None
+    from baselith.core.orchestration.contract import (
+        AgentContract,
+        Capabilities,
+        ContractValidator,
+    )
+
+    contract = AgentContract(
+        name=f"subagent:{spec.name}",
+        version="1.0",
+        identity=spec.role,
+        capabilities=Capabilities(allowed_tools=list(spec.allowed_tools)),
+    )
+    return ContractValidator(contract)
+
+
+def _patterns_overlap(left: str, right: str) -> bool:
+    """Heuristic glob-overlap: equal, or one pattern matches the other.
+
+    ``fnmatch`` of one pattern against the other treats the target's
+    wildcards as literals, which catches the practical collisions (equal
+    patterns, and a broad pattern like ``src/**`` subsuming ``src/api/**``)
+    without a full glob-intersection solver.
+    """
+    from fnmatch import fnmatch
+
+    return left == right or fnmatch(right, left) or fnmatch(left, right)
+
+
+def detect_scope_conflicts(specs: list[VirtualAgentSpec]) -> list[str]:
+    """Report overlapping ``path_scope`` patterns between spawned agents.
+
+    Returns one human-readable conflict line per overlapping spec pair;
+    empty when every scoped pair is disjoint. Unscoped specs are skipped —
+    an agent without a declared scope is not assumed to write anywhere.
+    """
+    conflicts: list[str] = []
+    scoped = [s for s in specs if s.path_scope]
+    for i, first in enumerate(scoped):
+        for second in scoped[i + 1 :]:
+            overlapping = [
+                (a, b)
+                for a in (first.path_scope or [])
+                for b in (second.path_scope or [])
+                if _patterns_overlap(a, b)
+            ]
+            if overlapping:
+                a, b = overlapping[0]
+                conflicts.append(
+                    f"agents '{first.name}' and '{second.name}' have "
+                    f"overlapping path scopes ({a!r} vs {b!r})"
+                )
+    return conflicts
+
+
+# Default virtual agents for the swarm
+DEFAULT_VIRTUAL_AGENTS = [
+    VirtualAgentSpec(
+        name="Researcher",
+        role="research",
+        capabilities=["web_search", "document_analysis", "fact_checking"],
+        system_prompt=(
+            "You are a Research Agent. Your role is to gather and verify information. "
+            "Be thorough, cite sources, and focus on accuracy."
+        ),
+    ),
+    VirtualAgentSpec(
+        name="Analyst",
+        role="analysis",
+        capabilities=["data_analysis", "pattern_recognition", "statistical_reasoning"],
+        system_prompt=(
+            "You are an Analysis Agent. Your role is to analyze data and identify patterns. "
+            "Be analytical, use structured approaches, and provide quantitative insights."
+        ),
+    ),
+    VirtualAgentSpec(
+        name="Synthesizer",
+        role="synthesis",
+        capabilities=["summarization", "integration", "report_generation"],
+        system_prompt=(
+            "You are a Synthesis Agent. Your role is to combine insights from multiple sources. "
+            "Create coherent narratives and comprehensive summaries."
+        ),
+    ),
+    VirtualAgentSpec(
+        name="Critic",
+        role="validation",
+        capabilities=["critical_thinking", "fact_verification", "quality_assurance"],
+        system_prompt=(
+            "You are a Critic Agent. Your role is to challenge assumptions and verify conclusions. "
+            "Look for logical fallacies, missing information, and potential biases."
+        ),
+    ),
+]
+
+# Embedded fallback for the registry-served ``swarm_decomposition`` catalog
+# prompt (baselith/core/prompts/catalog/swarm_decomposition.md); ``{{ var }}`` syntax —
+# the literal JSON example keeps single braces (the renderer only matches
+# ``{{ identifier }}``).
+DECOMPOSITION_PROMPT_TEMPLATE = """Analyze the following complex request and:
+1. Decompose it into 2-4 independent sub-tasks.
+2. For each sub-task, define a specialized virtual agent role.
+
+Request: {{ query }}
+
+Respond with a JSON array of objects:
+[
+    {
+        "description": "detailed task description",
+        "capability": "research|analysis|synthesis|validation",
+        "agent_name": "Specialized Name",
+        "agent_role": "brief_role_identifier",
+        "agent_prompt": "Specific system instructions for this agent"
+    },
+    ...
+]
+"""
+
+
+def build_decomposition_prompt(query: str) -> str:
+    """Render the swarm decomposition prompt from the registry catalog.
+
+    Registry-served (versioned, label-resolved, provenance span) with the
+    embedded template as fallback when the registry is unavailable.
+    """
+    from baselith.core.prompts.catalog import resolve_catalog_prompt
+
+    return resolve_catalog_prompt(
+        "swarm_decomposition",
+        {"query": query},
+        fallback_template=DECOMPOSITION_PROMPT_TEMPLATE,
+    )
+
+
+DEFAULT_MAX_DYNAMIC_SUBTASKS = 4
+
+
+def max_dynamic_subtasks() -> int:
+    """Hard cap on model-emitted sub-tasks per decomposition.
+
+    The prompt asks for 2-4 but that is advisory only; this cap bounds the
+    dynamic agents (and parallel executions) a single completion can spawn.
+    Env override: ``BASELITH_SWARM_MAX_SUBTASKS`` (min 1).
+    """
+    import os
+
+    raw = os.getenv("BASELITH_SWARM_MAX_SUBTASKS", str(DEFAULT_MAX_DYNAMIC_SUBTASKS))
+    try:
+        return max(int(raw), 1)
+    except ValueError:
+        return DEFAULT_MAX_DYNAMIC_SUBTASKS
+
+
+__all__ = [
+    "DECOMPOSITION_PROMPT_TEMPLATE",
+    "gather_memory_context",
+    "resolve_agent_persona",
+    "DEFAULT_MAX_DYNAMIC_SUBTASKS",
+    "build_decomposition_prompt",
+    "build_synthesis_prompt",
+    "contract_for_spec",
+    "DEFAULT_VIRTUAL_AGENTS",
+    "detect_scope_conflicts",
+    "VirtualAgentSpec",
+    "max_dynamic_subtasks",
+]
+
+
+async def gather_memory_context(colony: Any, description: str) -> str:
+    """Recall memories (and graph relations) relevant to one sub-task.
+
+    Returns a Markdown fragment to splice into the virtual agent's prompt, or
+    an empty string when the colony has no memory manager or recall fails —
+    memory is an enrichment, never a precondition for executing the task.
+    """
+    from baselith.core.observability.logging import get_logger
+
+    logger = get_logger(__name__)
+    if not getattr(colony, "memory_manager", None):
+        return ""
+
+    memory_context = ""
+    try:
+        memories = await colony.memory_manager.recall(query=description, limit=5)
+        if memories:
+            memory_context = "\n## Relevant Memories\n" + "\n".join(
+                f"- {m.content}" for m in memories
+            )
+
+        # Graph expansion (GraphRAG)
+        if colony.memory_manager.graph_provider:
+            graph_results = await colony.memory_manager.graph_provider.query_graph(
+                query=description
+            )
+            if graph_results:
+                memory_context += "\n## Entity Relationships\n" + "\n".join(
+                    f"- {r['source']} {r['relation']} {r['target']}"
+                    for r in graph_results
+                )
+    except Exception as e:
+        logger.warning(f"Memory retrieval failed during sub-task execution: {e}")
+    return memory_context
+
+
+def resolve_agent_persona(
+    specs: list[VirtualAgentSpec], agent: Any
+) -> tuple[str, str | None]:
+    """Return ``(system_prompt, model_override)`` for an assigned agent.
+
+    The profile's metadata wins (dynamic agents carry their generated prompt
+    there); otherwise the matching static spec supplies the persona and the
+    per-agent model override — the cheap-executor / strong-reviewer split.
+    """
+    spec = next((a for a in specs if f"virtual_{a.role}" == agent.id), None)
+    system_prompt = agent.metadata.get("system_prompt")
+    if not system_prompt:
+        system_prompt = spec.system_prompt if spec else "You are a helpful assistant."
+    model_override = agent.metadata.get("model") or (spec.model if spec else None)
+    return str(system_prompt), model_override
+
+
+def register_dynamic_agent(colony: Any, spec: VirtualAgentSpec) -> str:
+    """Register a dynamically generated agent with the colony; return its id."""
+    import uuid
+
+    from baselith.core.swarm.types import AgentProfile, Capability
+
+    metadata: dict = {"system_prompt": spec.system_prompt}
+    if spec.model is not None:
+        metadata["model"] = spec.model
+    profile = AgentProfile(
+        id=f"dynamic_{spec.role}_{uuid.uuid4().hex[:8]}",
+        name=spec.name,
+        capabilities=[
+            Capability(name=cap, proficiency=1.0) for cap in spec.capabilities
+        ],
+        metadata=metadata,
+    )
+    colony.register_agent(profile)
+    return profile.id
+
+
+def build_synthesis_prompt(
+    original_query: str, sub_results: list[dict[str, Any]]
+) -> tuple[str, str]:
+    """``(results_text, prompt)`` for the swarm's final synthesis call."""
+    results_text = "\n\n".join(
+        f"### Contribution from {r.get('agent', 'Agent')}:\n{r.get('result', 'N/A')}"
+        for r in sub_results
+        if r.get("success")
+    )
+    prompt = f"""Synthesize the following contributions from different specialized agents into a cohesive and complete response.
+
+## Original Question
+{original_query}
+
+## Agent Contributions
+{results_text}
+
+## Instructions
+Create a final response that:
+1. Integrates all relevant contributions
+2. Is well-structured and readable
+3. Highlights key points
+4. Resolves any contradictions
+"""
+    return results_text, prompt
+
+
+async def _plan_subtasks(llm_service: Any, query: str) -> list[dict]:
+    """One LLM decomposition, capped and validated; raises when unusable."""
+    import json
+
+    from baselith.core.observability.logging import get_logger
+
+    response = await llm_service.generate_response(
+        build_decomposition_prompt(query), json=True
+    )
+    tasks = json.loads(response)
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("decomposition is not a non-empty list")
+    # Hard cap on model-emitted sub-tasks: the "2-4" in the prompt is
+    # advisory only — without a cap a single adversarial or malformed
+    # completion could spawn an unbounded number of dynamic agents and
+    # parallel executions (cost/resource DoS).
+    limit = max_dynamic_subtasks()
+    sane = [t for t in tasks if isinstance(t, dict)][:limit]
+    if len(sane) < len(tasks):
+        get_logger(__name__).warning(
+            "swarm_decomposition_truncated emitted=%d kept=%d cap=%d",
+            len(tasks),
+            len(sane),
+            limit,
+        )
+    if not sane:
+        raise ValueError("decomposition yielded no valid task objects")
+    return sane
+
+
+async def decompose_task(
+    llm_service: Any,
+    colony: Any,
+    query: str,
+    dynamic_agent_ids: list[str],
+    checkpoint: Any | None = None,
+) -> list[dict]:
+    """Decompose a complex query into sub-tasks, registering dynamic agents.
+
+    Args:
+        llm_service: Service used for the decomposition completion (may be
+            ``None`` — falls back to a single analysis task).
+        colony: Colony the dynamic agents are registered with.
+        query: The root query to decompose.
+        dynamic_agent_ids: Output list — the ids of every dynamic agent
+            registered for this request are appended here so the caller can
+            unregister them when the request completes (the colony lives for
+            the process; without cleanup each request leaked its agents into
+            every later request's auctions).
+        checkpoint: Optional checkpoint (manager or scope). The decomposition
+            is then a recorded step: a resumed run gets the same sub-tasks
+            back — the LLM is not asked again — so every finished sub-task's
+            record still matches. Dynamic agents are re-registered from the
+            record (they live in the per-request colony, not the checkpoint).
+    """
+    from baselith.core.observability.logging import get_logger
+    from baselith.core.orchestration.checkpoint_scope import durable_step
+
+    logger = get_logger(__name__)
+
+    if not llm_service:
+        return [{"description": query, "capability": "analysis"}]
+
+    try:
+        sane: list[dict] = await durable_step(
+            checkpoint,
+            "swarm_decompose",
+            {"query": query},
+            lambda: _plan_subtasks(llm_service, query),
+            category="swarm",
+        )
+        for t in sane:
+            if "agent_name" in t:
+                spec = VirtualAgentSpec(
+                    name=str(t["agent_name"]),
+                    role=str(t.get("agent_role", "worker")),
+                    capabilities=[str(t.get("capability", "analysis"))],
+                    system_prompt=str(t.get("agent_prompt", "")),
+                )
+                dynamic_agent_ids.append(register_dynamic_agent(colony, spec))
+        return sane
+    except Exception as e:
+        from baselith.core.orchestration.checkpoint_errors import (
+            CheckpointConflictError,
+        )
+
+        if isinstance(e, CheckpointConflictError):
+            raise
+        logger.warning(f"Dynamic decomposition failed: {e}")
+
+    # Fallback to defaults
+    return [
+        {"description": f"Research on: {query}", "capability": "research"},
+        {"description": f"Analysis of: {query}", "capability": "analysis"},
+    ]

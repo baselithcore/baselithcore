@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.guardrails import pii as pii_module
-from core.guardrails.output_guard import OutputGuard
-from core.guardrails.pii import get_pii_engine
+from baselith.core.guardrails import pii as pii_module
+from baselith.core.guardrails.output_guard import OutputGuard
+from baselith.core.guardrails.pii import get_pii_engine
 
 
 def test_iban_is_redacted_by_default_regexes():

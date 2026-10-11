@@ -1,4 +1,4 @@
-"""Deferred embedder/reranker loading (core.nlp.lazy) and its chat wiring."""
+"""Deferred embedder/reranker loading (baselith.core.nlp.lazy) and its chat wiring."""
 
 from __future__ import annotations
 
@@ -7,8 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.chat.dependencies import ChatDependencyConfig, create_default_dependencies
-from core.nlp import LazyEmbedder, LazyReranker, aget_embedder, aget_reranker
+from baselith.core.chat.dependencies import (
+    ChatDependencyConfig,
+    create_default_dependencies,
+)
+from baselith.core.nlp import LazyEmbedder, LazyReranker, aget_embedder, aget_reranker
 
 
 def _raising_factory(_model: str | None) -> None:
@@ -34,8 +37,8 @@ def test_default_dependencies_build_without_loading_models() -> None:
 
 def test_default_factories_are_not_called_at_construction() -> None:
     with (
-        patch("core.chat.dependencies.get_embedder") as emb,
-        patch("core.chat.dependencies.get_reranker") as rer,
+        patch("baselith.core.chat.dependencies.get_embedder") as emb,
+        patch("baselith.core.chat.dependencies.get_reranker") as rer,
     ):
         create_default_dependencies(ChatDependencyConfig(history_enabled=False))
     emb.assert_not_called()
@@ -105,8 +108,8 @@ async def test_async_accessors_run_factory_in_worker_thread() -> None:
         return f"model:{name}"
 
     with (
-        patch("core.nlp.models.get_embedder", side_effect=fake),
-        patch("core.nlp.models.get_reranker", side_effect=fake),
+        patch("baselith.core.nlp.models.get_embedder", side_effect=fake),
+        patch("baselith.core.nlp.models.get_reranker", side_effect=fake),
     ):
         assert await aget_embedder("e") == "model:e"
         assert await aget_reranker("r") == "model:r"
@@ -115,7 +118,7 @@ async def test_async_accessors_run_factory_in_worker_thread() -> None:
 
 async def test_lazy_embedder_routes_queries_to_encode_query() -> None:
     """The search side reaches the wrapped model's ``encode_query``."""
-    from core.nlp.lazy import LazyEmbedder
+    from baselith.core.nlp.lazy import LazyEmbedder
 
     class _Model:
         async def encode(self, sentences: object, **_: object) -> str:

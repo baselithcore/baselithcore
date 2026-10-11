@@ -36,12 +36,12 @@ def _bench(fn: Callable[[], object], iterations: int) -> tuple[float, float]:
 
 def _cases() -> list[tuple[str, Callable[[], object], int]]:
     """Build the (name, callable, iterations) benchmark cases."""
-    from core.api.pagination import paginate_sequence
-    from core.auth.scopes import scope_satisfied
-    from core.prompts.rendering import render_template
-    from core.security.encryption import FieldEncryptor
-    from core.tenancy.encryption import derive_tenant_key_material
-    from core.webhooks.signing import build_signature_header
+    from baselith.core.api.pagination import paginate_sequence
+    from baselith.core.auth.scopes import scope_satisfied
+    from baselith.core.prompts.rendering import render_template
+    from baselith.core.security.encryption import FieldEncryptor
+    from baselith.core.tenancy.encryption import derive_tenant_key_material
+    from baselith.core.webhooks.signing import build_signature_header
 
     # Prompt rendering
     template = "Hello {{ name }}, welcome to {{ product }} ({{ tier }} tier)."

@@ -6,8 +6,8 @@ import sys
 # Insert at 0 to take precedence over 'tests' directory which also has a 'core' folder
 sys.path.insert(0, os.getcwd())
 
-from core.adversarial.red_team import RedTeamAgent
-from core.adversarial.types import AttackCategory, AttackVector, Severity
+from baselith.core.adversarial.red_team import RedTeamAgent
+from baselith.core.adversarial.types import AttackCategory, AttackVector, Severity
 
 
 async def run_repro():

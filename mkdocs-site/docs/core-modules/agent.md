@@ -3,13 +3,13 @@ title: Agent API (typed)
 description: The one-import typed Agent — Pydantic-validated output, plain-Python tools, automatic retry
 ---
 
-`core/agent/` is the **developer-facing entry point** for building agents on
+`baselith/core/agent/` is the **developer-facing entry point** for building agents on
 BaselithCore: declare a model, an optional Pydantic `output_type`, and
 plain-Python tools — then `await agent.run(...)` and get a validated result.
 
 ```python
 from pydantic import BaseModel
-from core.agent import Agent
+from baselith.core.agent import Agent
 
 class CityInfo(BaseModel):
     city: str
@@ -56,7 +56,7 @@ result.iterations        # LLM round-trips used
   sent, oldest first. A service that predates the message API still works — the
   history is flattened into a transcript for it. The round trip itself is
   [`generate_over_messages`](services.md#one-round-trip-for-a-message-history)
-  (`core/services/llm/message_transport.py`), now shared with the
+  (`baselith/core/services/llm/message_transport.py`), now shared with the
   [ReAct loop](reasoning.md#the-turn-is-a-message-not-a-rebuilt-prompt) —
   same transport, same degradation, no behaviour change on this side.
 - **Conversations** — `agent.run(prompt, history=[...])` continues a stored
@@ -65,7 +65,17 @@ result.iterations        # LLM round-trips used
   `tool_use` raises `ValueError`). `AgentResult.messages` includes them.
 - **Events** — `agent.run_events(prompt, history=...)` runs the same loop and
   yields `TextDelta`, `ToolCallStarted`, `ToolCallFinished`, then `Completed`
-  (or `Failed` instead of raising). Text arrives per model turn. Tools and
+  (or `Failed` instead of raising). Text streams **token by token** within a
+  turn: a provider with streamed message turns (`supports_streaming_tools`;
+  OpenAI and vLLM today) yields many `TextDelta`, one per chunk, while any
+  other path (other providers, `LLM_STREAM_AGENT_TEXT=false`, prompt-coerced
+  tools, `output_type`) yields one `TextDelta` per turn. A consumer must accept
+  any number of deltas per turn; `Completed.result.text` is the consolidated
+  answer. Tool calls are never streamed (`ToolCallStarted` fires once the call
+  is complete). A failure before a turn's first chunk retries and fails over
+  as usual; one after text was emitted is never restarted — the run ends with
+  `Failed(StreamInterruptedError)` whose `partial_text` is what was delivered.
+  Leaving the iteration closes the provider stream. Tools and
   `output_type` are supported. With several parallel tool calls in one turn,
   every `ToolCallStarted` precedes execution and the `ToolCallFinished` events
   arrive after the whole batch; `ToolCallFinished.content` is the observation
@@ -89,10 +99,11 @@ result.iterations        # LLM round-trips used
 | `tools` | `()` | Callables or `ToolDefinition`s |
 | `max_retries` | `2` | Validation-failure correction rounds |
 | `max_iterations` | `6` | Hard cap on LLM round-trips (tools + retries) |
+| `max_identical_calls` | `None` (off) | Brake on a looping model: the first N calls of one tool with identical arguments run, the next is not executed and the model is told to answer with what it has, and a further one ends the run with `RepeatedToolCallError`. |
 | `task_category` | `None` | Cost-aware routing hint (`TaskCategory` value) |
 | `llm_service` | shared service | Injection seam for tests |
 | `autonomy_policy` | standalone guard | Left at its default, tools **explicitly declared** `category="destructive"` are refused (see [Safe defaults for a standalone run](#safe-defaults-for-a-standalone-run)); every other tool runs as before. An `AutonomyPolicy` replaces the guard with the real approval gate: tools whose category needs approval at the active level go through the enforcement chokepoint. `None` is the explicit opt-out — no guard, gate inert. |
-| `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
+| `tool_ledger` | process-wide ledger | With a stable `run_id`, every non-`read_only` tool is recorded before it executes and replayed instead of re-executed on a retry of the same run. Defaults to the ledger `ORCHESTRATOR_TOOL_LEDGER` selected (`baselith/core/orchestration/ledger_factory.py`) — durable where the deployment has Postgres; pass one explicitly to override it |
 | `tool_timeout` | `120.0` (`DEFAULT_TOOL_TIMEOUT_SECONDS`) | Per-call wall-clock cap in seconds, shrunk further to whatever an ambient `LoopBudget` has left. `None` removes the cap — the behaviour before this release, where a tool that never returned pinned the agent |
 | `loop_limits` | orchestrator defaults | Caps for a run with no ambient `LoopBudget`: by default the orchestrator's `LoopLimits()` (`budget_usd`, `max_tool_calls`, `ORCHESTRATOR_LOOP_MAX_TOKENS`, `ORCHESTRATOR_LOOP_MAX_SECONDS`) with the iteration cap widened to `max_iterations`. An explicit `LoopLimits` replaces them; `None` disables the default budget. Under an ambient budget the default and `None` reuse it, while an explicit `LoopLimits` is still enforced through a nested child budget that also charges the ambient one (once). |
 
@@ -106,13 +117,16 @@ reach into.
 | Exception | When |
 |---|---|
 | `AgentOutputValidationError` | `output_type` was never satisfied within `max_retries`. |
-| `RuntimeError` | `max_iterations` exhausted before a final answer. |
+| `AgentIterationLimitError` | `max_iterations` exhausted before a final answer. |
+| `RepeatedToolCallError` | The model kept repeating an identical tool call after being told to stop (`max_identical_calls`); `.tool_name` names it. |
+
+Both loop errors derive from `AgentLoopError`, itself a `RuntimeError` (so an existing `except RuntimeError` keeps working), and carry `.tool_calls_made` so a host can tell its user what the agent was stuck on.
 | `BudgetExceededError` | A `LoopBudget` cap was hit — the ambient one, or the run's own default budget (`loop_limits`). Fail-closed — a runaway loop cannot keep dispatching tools. |
 | `ApprovalPendingError` | A tool needs a human decision that is not available yet; the run pauses **durably**. Only reachable when the agent was given an `autonomy_policy`; without one the approval gate is inert. |
 
 The last two are new failure modes for callers that previously only had to handle
 validation and iteration exhaustion. Both come from the shared enforcement
-chokepoint (`core.orchestration.enforcement`), so an `Agent` embedded in an
+chokepoint (`baselith.core.orchestration.enforcement`), so an `Agent` embedded in an
 orchestrated request is subject to exactly the same caps as any other path.
 
 !!! note "Effectful tools are deduplicated by default now"
@@ -120,7 +134,7 @@ orchestrated request is subject to exactly the same caps as any other path.
     a payment or an outbound webhook on every retry of the same `run_id` — the
     deduplication the runtime documents, missing from the surface the
     quickstart teaches. It now falls back to the process-wide ledger from
-    `core/orchestration/ledger_factory.py`: durable where Postgres is
+    `baselith/core/orchestration/ledger_factory.py`: durable where Postgres is
     configured, in-process (with a warning naming the consequence) where it is
     not. Set `ORCHESTRATOR_TOOL_LEDGER=off` to get the old behaviour back
     deployment-wide — see
@@ -136,7 +150,7 @@ orchestrated request is subject to exactly the same caps as any other path.
 !!! info "A retry may take a different path — it still replays"
     Ledger keys are content-addressed: tool, canonical arguments, tenant, the
     `run_id`, and how many identical calls the run already requested
-    (`core/orchestration/call_keys.py`). A retried run whose model asks for
+    (`baselith/core/orchestration/call_keys.py`). A retried run whose model asks for
     `notify` before `charge_card` this time — or adds a lookup in between —
     replays both instead of charging again, while two deliberately identical
     calls in one run stay two effects. Rows written under the old positional
@@ -146,11 +160,13 @@ orchestrated request is subject to exactly the same caps as any other path.
 !!! tip "Resume from a checkpoint: `agent.run(prompt, checkpoint=manager)`"
     Hand `run` a
     [`CheckpointManager`](orchestration.md#durable-resume-of-the-typed-agent)
-    and each approved tool call is recorded through `run_step`; a resumed run
-    replays the recorded observations without calling the tools, even with no
-    durable ledger configured. `run_id` defaults to the checkpoint's. Turns run
-    their calls sequentially in this mode. Without a checkpoint nothing
-    changes.
+    and each model turn and each approved tool call is recorded through
+    `run_step`; a resumed run replays the recorded turns without calling the
+    model and the recorded observations without calling the tools — even with
+    no durable ledger configured — and continues from the first turn that was
+    never recorded. A replayed turn charges no cost or tokens (it still counts
+    as an iteration). `run_id` defaults to the checkpoint's. Turns run their
+    calls sequentially in this mode. Without a checkpoint nothing changes.
 
 ## Safe defaults for a standalone run
 
@@ -185,7 +201,7 @@ else changes:
 **A run with no ambient budget gets one.** Without a `LoopBudget` an
 `Agent.run` was bounded by `max_iterations` alone — no dollar, token or
 wall-clock cap. Now the run binds a budget built from the orchestrator's
-defaults as the ambient one (`core.orchestration.budget_context.standalone_budget`),
+defaults as the ambient one (`baselith.core.orchestration.budget_context.standalone_budget`),
 so every LLM call is charged to it and every tool call counted; the iteration
 cap is widened to `max_iterations`, so that stays the cap that governs the
 loop. Inside an orchestrated request — or nested in another standalone run —
@@ -223,13 +239,13 @@ and OpenAI constrain the emitted arguments to the schema. Any other tool (an
 optional argument, an untyped or bare `object` parameter, a `pattern` or
 `minLength` constraint) is sent exactly as before. Providers without strict
 tools (Ollama, Gemini) drop the flag; an OpenAI-compatible endpoint receives
-the standard `strict` field (`core/agent/_strict_tools.py`).
+the standard `strict` field (`baselith/core/agent/_strict_tools.py`).
 
 ## How a tool call runs
 
 Resolution, argument validation and the gates live in
-`core/agent/_tool_dispatch.py`; the execution itself lives in
-`core/agent/_tool_runtime.py`, which gives the typed loop the three properties
+`baselith/core/agent/_tool_dispatch.py`; the execution itself lives in
+`baselith/core/agent/_tool_runtime.py`, which gives the typed loop the three properties
 the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
 
 - **Off the event loop.** A synchronous tool runs in a worker thread
@@ -245,7 +261,7 @@ the [ReAct executor](reasoning.md#concurrent-multi-tool-turns) already had:
 - **Overlapped.** When one turn carries several tool calls, the model emitted
   all of them before seeing any result, so they are independent by
   construction. The approved ones run concurrently under a semaphore of
-  `MAX_PARALLEL_TOOL_CALLS = 8` (`core/reasoning/react_tools.py`), so the turn
+  `MAX_PARALLEL_TOOL_CALLS = 8` (`baselith/core/reasoning/react_tools.py`), so the turn
   costs the slowest call instead of the sum. Each result is written back at
   the index of the call that produced it, so the `tool_result` blocks stay in
   the order the model asked regardless of completion order.
@@ -284,7 +300,7 @@ budget and guardrails.
 The declarative collaborative counterpart — a crew in ten lines:
 
 ```python
-from core.agent import Agent, Crew, Task
+from baselith.core.agent import Agent, Crew, Task
 
 researcher = Agent(system_prompt="You are a meticulous researcher.")
 writer = Agent(system_prompt="You write crisp executive summaries.")
@@ -320,7 +336,7 @@ result.task_results   # per-task: name, output, text, agent_index,
   aborts the crew with `BudgetExceededError`.
 
 For auction-based allocation, capability matching, and structured handoffs,
-use the platform surface in [`core/swarm`](swarm.md) instead — `Crew` is the
+use the platform surface in [`baselith/core/swarm`](swarm.md) instead — `Crew` is the
 deliberate low-ceremony subset.
 
 ### Hierarchical process (manager-led)
@@ -328,7 +344,7 @@ deliberate low-ceremony subset.
 `Crew(process="hierarchical", manager=Agent(...))` — `manager` is required
 (and only used) for this process; its absence raises `ValueError` at
 construction. Each task runs a bounded delegate → execute → review cycle
-(`core/agent/crew_hierarchical.py`):
+(`baselith/core/agent/crew_hierarchical.py`):
 
 1. **Delegate** — the manager writes a short delegation brief from the task
    prompt; the brief is appended to the worker's prompt.
@@ -346,7 +362,7 @@ order, with each accepted output threading into the next task's context as in
 the sequential process.
 
 ```python
-from core.agent import Agent, Crew, Task
+from baselith.core.agent import Agent, Crew, Task
 
 manager = Agent(system_prompt="You are an exacting engineering manager.")
 crew = Crew(
@@ -384,19 +400,49 @@ for agent_index, usage in result.breakdown().items():
 ```
 
 `AgentUsage`, `CostFn`, `ReviewDecision`, and `ReviewVerdict` are exported
-from `core.agent` alongside the existing crew types.
+from `baselith.core.agent` alongside the existing crew types.
+
+### Durable crews (`Crew.run(checkpoint=...)`)
+
+Under a checkpoint a crew resumes where it stopped instead of re-running from
+task 1. `Crew.run(inputs, checkpoint=...)` mirrors
+`Agent.run(checkpoint=...)`; without the argument it uses the run's ambient
+checkpoint, which the orchestrator binds while a flow handler runs — so a crew
+started from inside a handler is durable with no extra wiring, and one run
+outside any checkpoint behaves exactly as before.
+
+Every agent call the crew makes is a recorded step under a child scope of the
+run ([composite runners](orchestration.md#composite-runners-child-scopes-and-what-each-one-records)),
+keyed by its role, task index and a hash of its prompt:
+
+- **sequential / parallel** — one step per task: a resumed crew replays the
+  finished tasks' outputs (and threads them into later prompts verbatim) and
+  runs only the interrupted task and those after it. Parallel tasks still run
+  concurrently; their saves are serialised.
+- **hierarchical** — the manager's brief, the worker run, the review and the
+  bounded revision are four separate steps, so a crash during the review
+  re-runs neither the brief nor the worker.
+- **inside a task** — the task's agent gets its own scope as `checkpoint=`,
+  so the tool calls of an interrupted task replay instead of running twice,
+  and its idempotency-ledger keys are scoped to the task.
+
+A replayed `TaskResult` carries the recorded `output` (a structured
+`output_type` is re-validated into the model), `text`, tool-call names and
+iteration count; `messages` are not recorded, and `latency_ms` measures the
+replay (~0). A manager failure that fails open is not recorded, so the resumed
+run asks again.
 
 ## Group chat (`GroupChat` + speaker selection)
 
 The collaboration topologies above are structured — `Crew` is a task DAG, the
 [swarm](swarm.md) is a task market. `GroupChat`
-(`core/agent/group_chat.py`) is the emergent third shape: participants share
+(`baselith/core/agent/group_chat.py`) is the emergent third shape: participants share
 one growing transcript and a *speaker selector* decides who talks next, so
 coordination arises from the conversation itself rather than a pre-planned
 graph.
 
 ```python
-from core.agent import Agent, ChatMessage, GroupChat, LLMManagerSelector
+from baselith.core.agent import Agent, ChatMessage, GroupChat, LLMManagerSelector
 
 class AgentParticipant:
     """Adapt an Agent to the Participant protocol."""
@@ -464,6 +510,16 @@ bounded by:
    budget is used as is and its breach propagates. `budget=None` disables
    both.
 
+### Durable chats (`GroupChat.run(topic, checkpoint=...)`)
+
+Under a checkpoint (explicit, or the run's ambient one) every round — the
+speaker the selector chose and what they said — is a recorded step keyed by
+the round number. A resumed chat replays the transcript so far without calling
+the selector or any participant, re-checks the `terminate` predicate on it,
+and continues from the first unrecorded round. While a participant speaks,
+its round's scope is the ambient checkpoint, so a participant that runs a
+crew or a typed agent through it records its own work too.
+
 All group-chat symbols (`GroupChat`, `GroupChatResult`, `ChatMessage`,
 `Participant`, `SpeakerSelector` and the three selectors) are exported from
-`core.agent`.
+`baselith.core.agent`.

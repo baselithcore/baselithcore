@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.observability.sentry import _before_send
+from baselith.core.observability.sentry import _before_send
 
 
 def _scrub(payload: dict[str, Any]) -> dict[str, Any]:

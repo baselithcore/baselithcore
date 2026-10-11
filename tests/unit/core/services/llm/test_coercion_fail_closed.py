@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.services.llm._coercion import parse_tool_reply
-from core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
+from baselith.core.services.llm._coercion import parse_tool_reply
+from baselith.core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
 from tests.unit.core.services.llm.test_coercion_resilience import (
     _CALL,
     _POP_SPEC,

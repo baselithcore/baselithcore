@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from core.skill_evolution.gating import SkillGate
-from core.skill_evolution.types import SkillProposal
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.skill_evolution.gating import SkillGate
+from baselith.core.skill_evolution.types import SkillProposal
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 
 def _validator(score: float):

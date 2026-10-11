@@ -62,7 +62,7 @@ def _build_schema():
     for key, value in overrides.items():
         os.environ[key] = value
     try:
-        from core.api.factory import create_app
+        from baselith.core.api.factory import create_app
 
         # Building the app emits configuration warnings (weak key, short
         # retention, ...). Python records those in each module's
@@ -80,15 +80,15 @@ def _build_schema():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-        # Reset every lazily-cached `_*_config` singleton in core.config so
+        # Reset every lazily-cached `_*_config` singleton in baselith.core.config so
         # later tests re-read the restored environment.
         import importlib
         import pkgutil
 
-        import core.config as config_pkg
+        import baselith.core.config as config_pkg
 
         for info in pkgutil.iter_modules(config_pkg.__path__):
-            module = importlib.import_module(f"core.config.{info.name}")
+            module = importlib.import_module(f"baselith.core.config.{info.name}")
             for attr in list(vars(module)):
                 if attr.startswith("_") and attr.endswith("_config"):
                     setattr(module, attr, None)

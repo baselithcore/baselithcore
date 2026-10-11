@@ -7,8 +7,8 @@ import time
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from core.world_model.mandate_conditions import evaluate_intent_conditions
-from core.world_model.mandates import (
+from baselith.core.world_model.mandate_conditions import evaluate_intent_conditions
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     IntentMandate,
@@ -147,7 +147,7 @@ class TestVerifyChainEnforcement:
 
     def test_rejected_conditions_do_not_consume_intent(self) -> None:
         """A condition failure must leave the intent replayable (fixable cart)."""
-        from core.world_model.mandates import InMemoryReplayGuard
+        from baselith.core.world_model.mandates import InMemoryReplayGuard
 
         user_key = Ed25519PrivateKey.generate()
         merchant_key = Ed25519PrivateKey.generate()

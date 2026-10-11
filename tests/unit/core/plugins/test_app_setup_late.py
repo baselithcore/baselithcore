@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from starlette.responses import PlainTextResponse
 from starlette.testclient import TestClient
 
-from core.plugins import Plugin, apply_late_app_hook
+from baselith.core.plugins import Plugin, apply_late_app_hook
 
 
 async def _spa(scope, receive, send):  # type: ignore[no-untyped-def]

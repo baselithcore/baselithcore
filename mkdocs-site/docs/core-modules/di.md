@@ -3,7 +3,7 @@ title: Dependency Injection
 description: DI Container, lifecycle management, and lazy loading
 ---
 
-The `core/di` module provides a lightweight, performant Dependency Injection container.
+The `baselith/core/di` module provides a lightweight, performant Dependency Injection container.
 
 ---
 
@@ -29,16 +29,16 @@ graph LR
 ## Module Structure
 
 ```text
-core/di/
+baselith/core/di/
 ├── __init__.py         # Public exports
 ├── container.py        # DependencyContainer, ServiceRegistry, Scope
 └── lazy_registry.py    # LazyServiceRegistry for on-demand init
 ```
 
-Public exports (`from core.di import ...`):
+Public exports (`from baselith.core.di import ...`):
 
 ```python
-from core.di import (
+from baselith.core.di import (
     DependencyContainer,
     ServiceRegistry,
     ServiceLifetime,
@@ -60,7 +60,7 @@ The `DependencyContainer` manages service registration and resolution with
 factory functions and three lifetimes:
 
 ```python
-from core.di import DependencyContainer, ServiceLifetime
+from baselith.core.di import DependencyContainer, ServiceLifetime
 
 # Create container
 container = DependencyContainer()
@@ -151,7 +151,7 @@ typically one scope per HTTP request. `Scope` works as both a sync and async
 context manager:
 
 ```python
-from core.di import DependencyContainer, ServiceLifetime
+from baselith.core.di import DependencyContainer, ServiceLifetime
 
 container = DependencyContainer()
 container.register(DbSession, create_session, ServiceLifetime.SCOPED)
@@ -197,7 +197,7 @@ implementations directly (no factories or lifetimes). All methods are
 classmethods:
 
 ```python
-from core.di import ServiceRegistry, ServiceNotFoundError
+from baselith.core.di import ServiceRegistry, ServiceNotFoundError
 
 ServiceRegistry.register(LLMServiceProtocol, LLMService())
 
@@ -220,7 +220,7 @@ resources (LLM, vector store, databases) that are only initialized on first
 use. Initialization is thread-safe and async-safe via double-checked locking.
 
 ```python
-from core.di import get_lazy_registry, ResourceType
+from baselith.core.di import get_lazy_registry, ResourceType
 
 registry = get_lazy_registry()  # global singleton
 
@@ -281,7 +281,7 @@ class LazyServiceRegistry:
 ### Lifecycle helpers
 
 ```python
-from core.di import get_lazy_registry, reset_lazy_registry
+from baselith.core.di import get_lazy_registry, reset_lazy_registry
 
 registry = get_lazy_registry()       # process-wide singleton
 
@@ -366,7 +366,7 @@ Mock services in tests by registering instances and clearing afterwards:
 
 ```python
 import pytest
-from core.di import DependencyContainer, reset_lazy_registry
+from baselith.core.di import DependencyContainer, reset_lazy_registry
 
 @pytest.fixture
 def container():

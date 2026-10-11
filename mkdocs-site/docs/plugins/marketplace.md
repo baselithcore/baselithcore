@@ -9,8 +9,8 @@ The **Plugin Marketplace**, accessible at [marketplace.baselithcore.xyz](https:/
 
 !!! info "Where the marketplace lives in the framework"
     Discovery, installation and publishing are built into the framework as the
-    `baselith plugin marketplace` command group (`core/cli/commands/plugin/parser.py`),
-    backed by the `core.marketplace` package (`PluginRegistry`, `PluginInstaller`,
+    `baselith plugin marketplace` command group (`baselith/core/cli/commands/plugin/parser.py`),
+    backed by the `baselith.core.marketplace` package (`PluginRegistry`, `PluginInstaller`,
     `PluginValidator`, `PluginPublisher`). There is no marketplace page in the admin
     console; use the CLI, or the Python API described in
     [Core Modules › Marketplace](../core-modules/marketplace.md).
@@ -168,13 +168,13 @@ plugin_dependencies:
 `python_dependencies` entries are pip requirement strings (PEP 440), so bounded ranges
 (`>=1.0,<2.0`) and compatible-release specifiers (`~=1.24`) work. `min_core_version`,
 `max_core_version` and each `plugin_dependencies` value use the framework's own
-constraint parser (`core/plugins/version.py`): a full `MAJOR.MINOR.PATCH` version with a
+constraint parser (`baselith/core/plugins/version.py`): a full `MAJOR.MINOR.PATCH` version with a
 single operator (`==`, `!=`, `>`, `>=`, `<`, `<=`, `^`, `~`). `plugin_dependencies` is a
 **mapping** of plugin name → constraint, not a list.
 
 These constraints are evaluated when the plugin loads, not at install time, and the gate
 is **fail-closed**: an unsatisfied constraint skips the plugin
-(`core/plugins/load_gates.py`). `BASELITH_ENFORCE_PLUGIN_COMPAT=false` is the explicit
+(`baselith/core/plugins/load_gates.py`). `BASELITH_ENFORCE_PLUGIN_COMPAT=false` is the explicit
 downgrade back to warn-only, for booting while a manifest is corrected. Because
 `plugin_dependencies` are part of the check, disabling a plugin also skips anything that
 depends on it.
@@ -183,4 +183,4 @@ depends on it.
 
 ## Plugin Integrity
 
-Plugins may declare an `integrity_sha256` digest in their manifest. The loader verifies it via `core.plugins.integrity.verify_plugin_integrity` before executing any plugin code. Compute and embed the digest with `baselith plugin sign <path>` — see the [Packaging Guide](packaging.md#integrity) for details. Operators can require a valid digest on every plugin by setting `BASELITH_REQUIRE_SIGNED_PLUGINS=true`.
+Plugins may declare an `integrity_sha256` digest in their manifest. The loader verifies it via `baselith.core.plugins.integrity.verify_plugin_integrity` before executing any plugin code. Compute and embed the digest with `baselith plugin sign <path>` — see the [Packaging Guide](packaging.md#integrity) for details. Operators can require a valid digest on every plugin by setting `BASELITH_REQUIRE_SIGNED_PLUGINS=true`.

@@ -3,7 +3,7 @@ title: Knowledge Graph (L2 Memory)
 description: Structured entity relationship modeling via FalkorDB
 ---
 
-The `core/graph` module implements the second tier (L2) of the BaselithCore memory system. While Vector Memory (L3) handles semantic similarity, the Knowledge Graph models **structured relationships** between entities, allowing for complex reasoning and factual recall.
+The `baselith/core/graph` module implements the second tier (L2) of the BaselithCore memory system. While Vector Memory (L3) handles semantic similarity, the Knowledge Graph models **structured relationships** between entities, allowing for complex reasoning and factual recall.
 
 ## Overview
 
@@ -36,14 +36,14 @@ graph LR
 
 ## Basic Usage
 
-The `graph_db` singleton (`core.graph.GraphDb`) is the primary interface for
+The `graph_db` singleton (`baselith.core.graph.GraphDb`) is the primary interface for
 managing the knowledge graph. It is a **synchronous** client over redis-py —
 none of its methods are coroutines — and it is lazy: no connection is opened
 until the first call. When `GRAPH_DB_ENABLED` is off every method is a no-op
 that returns `None`, `[]`, `0` or `False`.
 
 ```python
-from core.graph import graph_db
+from baselith.core.graph import graph_db
 
 # 1. Upsert a node
 graph_db.upsert_node(
@@ -113,19 +113,19 @@ The `code_graph` utilities allow the system to build and query a representation 
 
 ```python
 graph_db.upsert_code_node(
-    "core/memory/manager.py",
+    "baselith/core/memory/manager.py",
     "File",
     "manager.py",
-    "core/memory/manager.py",
+    "baselith/core/memory/manager.py",
 )
 graph_db.upsert_code_node(
-    "core/memory/manager.py::MemoryManager",
+    "baselith/core/memory/manager.py::MemoryManager",
     "Class",
     "MemoryManager",
-    "core/memory/manager.py",
+    "baselith/core/memory/manager.py",
 )
 graph_db.upsert_code_relation(
-    "core/memory/manager.py", "DEFINES", "core/memory/manager.py::MemoryManager"
+    "baselith/core/memory/manager.py", "DEFINES", "baselith/core/memory/manager.py::MemoryManager"
 )
 ```
 
@@ -135,14 +135,14 @@ graph_db.upsert_code_relation(
   visualisation-ready neighbourhood of a node; `search_node(prop, value)`
   resolves a node id from a property such as `path` or `name`.
 - **Document Feedback**: `record_document_feedback(document_id, feedback,
-  comment=None)` (`core/graph/linking.py`) merges a `Document` node and bumps
+  comment=None)` (`baselith/core/graph/linking.py`) merges a `Document` node and bumps
   `feedback_total`, `feedback_positive` / `feedback_negative` (for
   `"positive"` / `"negative"`), `last_feedback_at`, and
   `last_feedback_comment` (truncated to 500 characters).
 
-### Graph-RAG service (`core.services.graph`)
+### Graph-RAG service (`baselith.core.services.graph`)
 
-`core.services.graph.GraphService` wraps a `GraphDb` client with Graph-RAG
+`baselith.core.services.graph.GraphService` wraps a `GraphDb` client with Graph-RAG
 document operations: `upsert_document`, `transition_document_to_kb`,
 `link_entities`, `register_rag_usage` and `reason(intent, entities)`.
 
@@ -150,7 +150,7 @@ document operations: `upsert_document`, `transition_document_to_kb`,
     Nothing in the default app constructs `GraphService`: no route, handler,
     chat workflow or startup hook calls it. Build it from host or plugin code
     around the shared client — `GraphService(graph_db)` with
-    `from core.graph import graph_db` — when a plugin needs Graph-RAG
+    `from baselith.core.graph import graph_db` — when a plugin needs Graph-RAG
     bookkeeping on top of the raw `GraphDb` operations above.
 
 ---
@@ -187,7 +187,7 @@ The GraphDB module implements strict logical isolation for multi-tenant deployme
 | `GRAPH_DB_TIMEOUT` | `2.0`                    | Redis socket timeout in seconds (minimum 0.1)  |
 | `GRAPH_CACHE_TTL`  | `3600`                   | TTL in seconds for cached read-only results    |
 
-Defaults come from `core/config/storage.py`; `.env.example` ships the same
+Defaults come from `baselith/core/config/storage.py`; `.env.example` ships the same
 values, so a deployment built from it starts with the graph on and pointed at
 the local FalkorDB/Redis instance.
 

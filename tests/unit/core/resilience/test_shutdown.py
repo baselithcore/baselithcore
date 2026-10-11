@@ -1,10 +1,10 @@
 """
-Tests for core.resilience.shutdown module.
+Tests for baselith.core.resilience.shutdown module.
 """
 
 import pytest
 
-from core.resilience.shutdown import (
+from baselith.core.resilience.shutdown import (
     GracefulShutdown,
     get_shutdown_handler,
 )

@@ -1,9 +1,9 @@
 """SSRF protection tests for the web_scraper plugin.
 
-Covers the Task 5 migration: ``plugins.web_scraper.utils`` now delegates its
+Covers the Task 5 migration: ``baselith.plugins.web_scraper.utils`` now delegates its
 public SSRF surface (``check_ssrf_safe``, ``get_pinned_url_for_host``, and
 the legacy ``is_private_ip``/``resolve_safe_ips``) to the unified
-``core.security.ssrf`` module, and ``PlaywrightFetcher`` gained a route
+``baselith.core.security.ssrf`` module, and ``PlaywrightFetcher`` gained a route
 guard that re-validates every request (not just the pre-``goto`` check),
 including sub-resource loads (scripts, images, fetch/XHR).
 
@@ -19,29 +19,29 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.config.scraper import ScraperConfig
-from plugins.web_scraper.fetchers.playwright_fetcher import PlaywrightFetcher
-from plugins.web_scraper.utils import (
+from baselith.core.config.scraper import ScraperConfig
+from baselith.plugins.web_scraper.fetchers.playwright_fetcher import PlaywrightFetcher
+from baselith.plugins.web_scraper.utils import (
     check_ssrf_safe,
     get_pinned_url_for_host,
     is_private_ip,
     resolve_safe_ips,
 )
 
-# ``core.scraper.*`` (and ``core.scraper`` itself) are backward-compat shims
-# that self-replace via ``sys.modules[__name__] = <plugins.web_scraper module>``
-# (see core/scraper/__init__.py and siblings). Once anything in the suite
-# imports through that dotted path (e.g. ``core.scraper.tools``), Python's
+# ``baselith.core.scraper.*`` (and ``baselith.core.scraper`` itself) are backward-compat shims
+# that self-replace via ``sys.modules[__name__] = <baselith.plugins.web_scraper module>``
+# (see baselith/core/scraper/__init__.py and siblings). Once anything in the suite
+# imports through that dotted path (e.g. ``baselith.core.scraper.tools``), Python's
 # import machinery resolves the submodule using the *aliased* parent's
-# ``__path__`` — which points at ``plugins/web_scraper`` — and re-executes
-# the target file fresh under the ``core.scraper.<name>`` key. The loader
+# ``__path__`` — which points at ``baselith/plugins/web_scraper`` — and re-executes
+# the target file fresh under the ``baselith.core.scraper.<name>`` key. The loader
 # then does its normal "set submodule as attribute on parent" step, and
-# since the parent is literally the same object as the ``plugins.web_scraper``
-# package, this silently clobbers the ``plugins.web_scraper.<name>``
+# since the parent is literally the same object as the ``baselith.plugins.web_scraper``
+# package, this silently clobbers the ``baselith.plugins.web_scraper.<name>``
 # *attribute* with that independently-executed twin module (though the
-# canonical ``sys.modules["plugins.web_scraper.<name>"]`` entry is untouched).
+# canonical ``sys.modules["baselith.plugins.web_scraper.<name>"]`` entry is untouched).
 #
-# ``pytest.MonkeyPatch.setattr("plugins.web_scraper.utils.x", ...)`` resolves
+# ``pytest.MonkeyPatch.setattr("baselith.plugins.web_scraper.utils.x", ...)`` resolves
 # its dotted string via attribute-chain traversal (``_pytest.monkeypatch.
 # resolve``), so once that clobbering has happened anywhere else in the test
 # session it silently patches the twin instead of the module that
@@ -51,9 +51,9 @@ from plugins.web_scraper.utils import (
 # (a plain dict lookup, immune to the attribute clobbering) instead, so the
 # module object we mutate is guaranteed to be the same one the code under
 # test resolves its globals against, regardless of collection order.
-_UTILS_MODULE = sys.modules["plugins.web_scraper.utils"]
+_UTILS_MODULE = sys.modules["baselith.plugins.web_scraper.utils"]
 _PLAYWRIGHT_FETCHER_MODULE = sys.modules[
-    "plugins.web_scraper.fetchers.playwright_fetcher"
+    "baselith.plugins.web_scraper.fetchers.playwright_fetcher"
 ]
 
 
@@ -117,7 +117,7 @@ class TestCheckSsrfSafeDelegation:
         assert check_ssrf_safe("http://does-not-resolve.example/") is False
 
     def test_malformed_url_is_blocked_not_raised(self, strict_scraper_config):
-        # Regression: core.security.ssrf._parse_and_screen wraps urlparse()'s
+        # Regression: baselith.core.security.ssrf._parse_and_screen wraps urlparse()'s
         # bare ValueError ("Invalid IPv6 URL") as SsrfError. check_ssrf_safe
         # only catches SsrfError, so before that fix a malformed URL crashed
         # here instead of degrading to False.

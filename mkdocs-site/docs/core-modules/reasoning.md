@@ -4,7 +4,7 @@ description: Chain-of-Thought, Tree-of-Thoughts, and Self-Correction
 ---
 <!-- markdownlint-disable MD046 -->
 
-The `core/reasoning` module implements advanced reasoning patterns.
+The `baselith/core/reasoning` module implements advanced reasoning patterns.
 
 ## Available Patterns
 
@@ -16,7 +16,7 @@ The `core/reasoning` module implements advanced reasoning patterns.
 | **Tree-of-Thoughts** | Parallel exploration  | `tot/`               |
 
 `AgentPattern.PLAN_AND_EXECUTE` exists in `patterns.py` only as a registry and
-selector label — there is no plan-and-execute engine in `core/reasoning`. The
+selector label — there is no plan-and-execute engine in `baselith/core/reasoning`. The
 planning side lives in [Planning](planning.md) (`TaskPlanner`,
 `plan_to_workflow`).
 
@@ -121,7 +121,12 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     `TOT_STRATEGY` default) run Tree of Thoughts. An unknown value is rejected
     with `error: True` and `metadata["error"] == "unsupported_strategy"`; a
     tool strategy whose inputs are missing falls back to Tree of Thoughts with
-    a warning. `metadata["strategy"]` always names the strategy that actually
+    a warning — except on a **resumed** run whose persisted tools could not be
+    rebuilt (no [`set_resume_tool_resolver`](orchestration.md#durable-checkpointing-resume)
+    match): that answers `error: True` with
+    `metadata["error"] == "resume_tools_unresolved"` and the missing names,
+    because a different engine would be a different run.
+    `metadata["strategy"]` always names the strategy that actually
     ran, and `metadata["requested_strategy"]` records a request that was not
     honoured. Both engines are reachable through the orchestrator, not only
     standalone.
@@ -137,7 +142,7 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
 ### Basic Usage
 
 ```python
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 async def search(query: str) -> str:
     return f"Results for: {query}"
@@ -175,7 +180,7 @@ print(result.final_answer)
 ### Native tool calling
 
 `ReActAgent` can drive the loop over the LLM service's **structured
-tool-calling API** (`core/reasoning/react_native.py`) instead of regex-parsing
+tool-calling API** (`baselith/core/reasoning/react_native.py`) instead of regex-parsing
 `Action: tool(args)` text. Tools are described to the model as JSON-Schema
 specs and invocations come back as parsed `LLMResult.tool_calls` — typed
 keyword arguments, multi-tool turns, no text parsing.
@@ -232,7 +237,7 @@ apart, or one whose `tool_use` has no answering `tool_result` at all.
 
 !!! note "Why `is_error` can be read off the observation text"
     The flag comes from `observation_is_error(observation)`
-    (`core/reasoning/react_tools.py`) — true when the observation starts with
+    (`baselith/core/reasoning/react_tools.py`) — true when the observation starts with
     `Error`. That prefix is one a tool cannot forge: the loop's own narration is
     the only part of an observation *outside* the
     [untrusted-output envelope](orchestration.md#untrusted-output-envelope),
@@ -245,11 +250,11 @@ apart, or one whose `tool_use` has no answering `tool_result` at all.
 
 When the model emits several tool calls in one turn, it produced all of them
 **before seeing any of their results** — they are independent by construction.
-`agent._execute_tool_calls()` (`core/reasoning/react_tools.py`) therefore runs
+`agent._execute_tool_calls()` (`baselith/core/reasoning/react_tools.py`) therefore runs
 them concurrently, so the turn costs the slowest call instead of the sum:
 
 ```python
-# core/reasoning/react_native.py — one turn, N calls
+# baselith/core/reasoning/react_native.py — one turn, N calls
 observations = await agent._execute_tool_calls(
     [(call.name, call.arguments) for call in calls]
 )
@@ -344,7 +349,7 @@ whole iteration budget. Orchestrated path: override per request via
 
 **Futility guard (opt-in)** — the streak above counts *how many* failures;
 `stall_threshold` counts how many times the **same** failure came back, using
-the failure fingerprint from [`core/loops`](loops.md). A tool failing
+the failure fingerprint from [`baselith/core/loops`](loops.md). A tool failing
 differently each time is still producing information; a tool returning the
 identical error is burning budget while looking busy. Default `None`
 (disabled) — enabling it is an ops decision, not a silent behavior change:
@@ -368,7 +373,7 @@ effect** — in whatever order the regenerated turns ask for it. Without a
 checkpoint, invocation behavior is unchanged.
 
 ```python
-from core.reasoning.react import ReActAgent
+from baselith.core.reasoning.react import ReActAgent
 
 agent = ReActAgent(tools=tools, checkpoint=context["checkpoint"])
 result = await agent.run(task)
@@ -380,7 +385,7 @@ A call with different arguments is a different effect and executes fresh; a
 deliberate second identical call in the same pass (occurrence 1) executes too.
 The step key and the ledger key inside it draw on one occurrence
 (`CheckpointManager.next_occurrence`), so the two layers agree on which call
-is which; the wrapper lives in `core/reasoning/react_ledger.py`, shared by
+is which; the wrapper lives in `baselith/core/reasoning/react_ledger.py`, shared by
 the text loop and `run_native_loop`. Checkpoints written under the old
 positional `(cursor, tool, args)` key still replay along their original path.
 In durable mode a multi-tool turn executes sequentially so per-step saves do
@@ -391,7 +396,7 @@ not interleave — see the note under
 run's recorded steps; the idempotency ledger covers the same call arriving
 again from outside (a redelivered task, a second replica). Both loop variants
 claim a ledger entry for every non-`read_only` tool through
-`claim_ledger_entry` (`core/reasoning/react_tool_gate.py`), and the ledger a
+`claim_ledger_entry` (`baselith/core/reasoning/react_tool_gate.py`), and the ledger a
 host did not wire is now resolved from configuration by `new_ledger()` —
 one process-wide instance chosen by `ORCHESTRATOR_TOOL_LEDGER`, instead of a
 fresh in-process one per agent. `ORCHESTRATOR_TOOL_LEDGER=off` yields no
@@ -414,7 +419,7 @@ Both loop variants bound their resource use on long runs:
   approved tool call cost nothing, and the agent could spin to its own
   constructor `max_iterations` regardless of the request budget.
 - **History compaction** — before each LLM turn the conversation is
-  deterministically compacted (`core/reasoning/history.py`) against
+  deterministically compacted (`baselith/core/reasoning/history.py`) against
   `BASELITH_REACT_HISTORY_MAX_TOKENS` (default `8000`; `0` disables compaction
   entirely). By default no extra LLM call — predictable cost, no added
   prompt-injection surface (the LLM summary below is opt-in). The trace keeps full fidelity; only what is sent to the model
@@ -433,7 +438,7 @@ Both loop variants bound their resource use on long runs:
   `0` — the task itself, which the model would otherwise be left guessing at.
 - **Optional LLM-summarised compaction** — with
   `ORCHESTRATOR_COMPACTION_SUMMARIZE=true` (default `false`) the native loop
-  calls `compact_history_for_loop()` (`core/reasoning/history_summary.py`),
+  calls `compact_history_for_loop()` (`baselith/core/reasoning/history_summary.py`),
   which, once the history is over budget, replaces the older *complete* turns
   with a single summary written by one LLM call, then runs the deterministic
   pass above over the result. The contract:
@@ -507,7 +512,7 @@ BaselithCore includes a **Pattern Registry** and a **Heuristic Selector** to aut
 ### Usage: Pattern Selector
 
 ```python
-from core.reasoning.patterns import PatternSelector
+from baselith.core.reasoning.patterns import PatternSelector
 
 selector = PatternSelector()
 result = selector.select("Calculate the ROI of a $10k investment over 5 years.")
@@ -529,7 +534,7 @@ The `ComplexityClassifier` helps you decide whether to use an autonomous agent o
     or plugin code when deciding how to route a request.
 
 ```python
-from core.reasoning import ComplexityClassifier  # lives in core/reasoning/complexity.py
+from baselith.core.reasoning import ComplexityClassifier  # lives in baselith/core/reasoning/complexity.py
 
 assessment = ComplexityClassifier.assess("Send a reminder email to user #123")
 if assessment.use_agent:
@@ -560,7 +565,7 @@ the final answer plus the structured trace. `reason` awaits
 method), so it composes cleanly with the async orchestration stack:
 
 ```python
-from core.reasoning import ChainOfThought, ReasoningStep
+from baselith.core.reasoning import ChainOfThought, ReasoningStep
 
 cot = ChainOfThought()
 
@@ -584,7 +589,7 @@ optional LLM service — search parameters are passed to `solve()`, not the cons
 `tree_visualization`, `tree_data`):
 
 ```python
-from core.reasoning import TreeOfThoughts
+from baselith.core.reasoning import TreeOfThoughts
 
 tot = TreeOfThoughts()
 
@@ -612,13 +617,14 @@ backward-compatible alias subclass that parallelizes evaluation with
 ### ToT Structure
 
 ```text
-core/reasoning/
+baselith/core/reasoning/
 ├── mcts_common.py  # Shared MCTS utilities (uct_score, backpropagate_*)
 └── tot/
     ├── __init__.py
     ├── tree.py         # Tree structure (ThoughtNode, export helpers)
     ├── mcts.py         # MCTS search (uct_select, backpropagate, mcts_search[_async])
     ├── engine.py       # TreeOfThoughts / TreeOfThoughtsAsync solve loop
+    ├── durable.py      # Checkpoint recording of generation / evaluation calls
     └── cache.py        # ThoughtCache (LRU + TTL)
 ```
 
@@ -672,6 +678,30 @@ result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
 prefix `TOT_`) supplies the defaults the orchestrator's reasoning handler
 passes in — see [Configuration](#configuration).
 
+#### Durable search (`solve(..., checkpoint=...)`)
+
+Under a checkpoint — `solve(checkpoint=...)`, the run's ambient one, or the
+reasoning handler's `context["checkpoint"]` — a search survives a crash
+without starting from zero. The granularity is **one LLM call**:
+
+- every thought-generation call (in the fallback expansion, together with the
+  sandbox runs of its `[EXECUTE]` blocks) is a recorded step keyed by a hash
+  of the state it expands and `k`;
+- every thought evaluation is a recorded step keyed by a hash of the thought.
+
+Selection (UCT, ties broken by order), backpropagation and the `patience`
+early stop are deterministic functions of those results, so a resumed search
+**replays the recorded calls, rebuilds the identical tree and returns the
+same answer** an uninterrupted search would have, paying only for the calls
+the crashed attempt never finished. Only a successful call is recorded: a
+generation that failed (an empty expansion) or an evaluation that degraded to
+`0.0` is asked again on resume, and a different result there simply leads the
+search down a different, equally valid path. The wall-clock deadline is per
+attempt, so a resumed search can stop earlier than the original would have.
+The steps live under a `tot` child scope identified by the problem and the
+search parameters, so two searches in one run never share records. On replay
+the [`ThoughtCache`](#tree-of-thoughts-tot) is not consulted.
+
 #### Deadline and convergence bounds on async MCTS
 
 `iterations` alone is a *work* bound, not a *time* bound. One iteration of
@@ -682,7 +712,7 @@ evaluation calls, all serialized — at the defaults (`iterations=30`,
 
 - **Wall-clock deadline** — every iteration calls `check_deadline()` on the
   ambient [`LoopBudget`](orchestration.md) from
-  `core.orchestration.budget_context`. Past `max_seconds` it raises
+  `baselith.core.orchestration.budget_context`. Past `max_seconds` it raises
   `BudgetExceededError("max_seconds")`, which the orchestrator treats as a
   terminated flow. This matters because the orchestrator ticks the budget
   **once for the whole flow** — before this check, nothing inside the search
@@ -698,7 +728,7 @@ evaluation calls, all serialized — at the defaults (`iterations=30`,
   spending LLM budget for nothing.
 
 ```python
-from core.reasoning.tot.mcts import mcts_search_async
+from baselith.core.reasoning.tot.mcts import mcts_search_async
 
 best = await mcts_search_async(
     root,
@@ -732,7 +762,7 @@ config=None)` runs an iterative critique/repair loop. `correct(response, context
 returns a `CorrectionResult`:
 
 ```python
-from core.reasoning import SelfCorrector
+from baselith.core.reasoning import SelfCorrector
 
 corrector = SelfCorrector(max_corrections=2)
 
@@ -753,14 +783,14 @@ When `max_corrections` is omitted it falls back to `ReasoningConfig.self_correct
 
 ## Integration with Orchestrator
 
-The `reasoning_agent` plugin (`plugins/reasoning_agent/plugin.py`) exposes the
+The `reasoning_agent` plugin (`baselith/plugins/reasoning_agent/plugin.py`) exposes the
 engine to the orchestrator through `ReasoningFlowHandler`. Per-request
 `context` keys override the plugin config (`configs/plugins.yaml` →
 `reasoning_agent:`), which overrides the defaults (`max_steps=5`,
 `branching_factor=3`):
 
 ```python
-# plugins/reasoning_agent/plugin.py (abridged)
+# baselith/plugins/reasoning_agent/plugin.py (abridged)
 class ReasoningFlowHandler:
     def __init__(self, agent, config_provider=None):
         self.agent = agent                       # ReasoningAgent (wraps TreeOfThoughtsAsync)
@@ -831,7 +861,7 @@ Data from 1000+ runs on mixed problems:
 
 ```python
 # Metrics tracking example
-from core.reasoning import ChainOfThought
+from baselith.core.reasoning import ChainOfThought
 import time
 
 cot = ChainOfThought()
@@ -854,7 +884,7 @@ print(f"Answer: {answer}")
 
 ## Configuration
 
-`ReasoningConfig` (`core/config/reasoning.py`, env prefix `TOT_`) is consumed
+`ReasoningConfig` (`baselith/core/config/reasoning.py`, env prefix `TOT_`) is consumed
 by the self-correction and thought-cache components:
 
 | Setting | Default | Read by |
@@ -872,7 +902,7 @@ TOT_THOUGHT_CACHE_MAXSIZE=1000
 TOT_THOUGHT_CACHE_TTL=1800.0
 ```
 
-The orchestrator's `ReasoningHandler` (`core/orchestration/handlers/reasoning.py`)
+The orchestrator's `ReasoningHandler` (`baselith/core/orchestration/handlers/reasoning.py`)
 reads three more fields as the defaults of its Tree-of-Thoughts run. A request
 context carrying `k`, `max_steps` or `strategy` still overrides them:
 

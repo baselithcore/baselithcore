@@ -10,10 +10,10 @@ substituted for the hardened one without anyone being told.
 
 import pytest
 
-from core.config.sandbox import SandboxConfig
-from core.services.sandbox import docker_factory as docker_factory_module
-from core.services.sandbox.docker_factory import DockerFactory
-from core.services.sandbox.policy import build_sandbox_runtime_kwargs
+from baselith.core.config.sandbox import SandboxConfig
+from baselith.core.services.sandbox import docker_factory as docker_factory_module
+from baselith.core.services.sandbox.docker_factory import DockerFactory
+from baselith.core.services.sandbox.policy import build_sandbox_runtime_kwargs
 
 _MIB = 1024 * 1024
 

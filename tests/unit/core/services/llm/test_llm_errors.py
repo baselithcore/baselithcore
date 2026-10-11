@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.services.llm.errors import (
+from baselith.core.services.llm.errors import (
     LLMClientError,
     LLMConnectionError,
     LLMRateLimitError,
@@ -13,7 +13,7 @@ from core.services.llm.errors import (
     map_provider_exception,
     retry_after_from_exception,
 )
-from core.services.llm.exceptions import LLMProviderError, RateLimitError
+from baselith.core.services.llm.exceptions import LLMProviderError, RateLimitError
 
 
 class _Headers(dict):

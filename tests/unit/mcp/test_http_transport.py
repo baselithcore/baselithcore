@@ -1,5 +1,6 @@
 """Tests for the MCP Streamable HTTP transport (server + client sides)."""
 
+import json
 import socket
 from types import SimpleNamespace
 
@@ -7,14 +8,14 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from core.mcp.http_client_transport import HTTPClientTransport
-from core.mcp.http_transport import (
+from baselith.core.mcp.http_client_transport import HTTPClientTransport
+from baselith.core.mcp.http_transport import (
     PROTOCOL_HEADER,
     SESSION_HEADER,
     SessionStore,
     create_mcp_http_router,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 
 def _config(**overrides):
@@ -211,7 +212,7 @@ class _StubAuthManager:
 
 
 async def test_auth_required_rejects_anonymous(monkeypatch):
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     anonymous = SimpleNamespace(user_id="anonymous", is_authenticated=False)
     monkeypatch.setattr(
@@ -282,7 +283,7 @@ async def test_metadata_absent_when_auth_disabled():
 
 
 async def test_auth_required_accepts_authenticated(monkeypatch):
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     stub = _StubAuthManager(_user("user-1"))
     monkeypatch.setattr(auth_manager_module, "get_auth_manager", lambda: stub)
@@ -303,7 +304,7 @@ async def test_auth_required_accepts_authenticated(monkeypatch):
 
 
 # The store API is async since it grew a Redis-backed sibling (see
-# core.mcp.http_sessions and tests/unit/mcp/test_http_sessions.py); the
+# baselith.core.mcp.http_sessions and tests/unit/mcp/test_http_sessions.py); the
 # semantics below are unchanged.
 
 
@@ -343,7 +344,7 @@ async def test_session_store_per_owner_cap():
 
 
 async def test_cross_identity_session_rejected_over_http(monkeypatch):
-    import core.auth.manager as auth_manager_module
+    import baselith.core.auth.manager as auth_manager_module
 
     users = {
         "Bearer a": _user("alice"),
@@ -422,13 +423,13 @@ async def test_client_transport_end_to_end(monkeypatch):
 
 
 async def test_mcp_client_http_branch_uses_transport():
-    from core.mcp.client import MCPClient
+    from baselith.core.mcp.client import MCPClient
 
     class _FakeTransport:
         def __init__(self):
             self.sent = []
 
-        async def send(self, message):
+        async def send(self, message, **_handlers):
             self.sent.append(message)
             if message.get("method") == "tools/list":
                 return {
@@ -453,15 +454,19 @@ async def test_mcp_client_http_branch_uses_transport():
 
 
 def test_sse_parsing_matches_request_id():
+    from baselith.core.mcp.bounded_http import SSEParser
+    from baselith.core.mcp.reply_matching import is_reply
+
     body = (
-        'data: {"jsonrpc":"2.0","method":"noise"}\n\n'
-        'data: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}\n\n'
+        b'data: {"jsonrpc":"2.0","method":"noise"}\n\n'
+        b'data: {"jsonrpc":"2.0","id":7,"result":{"ok":true}}\n\n'
     )
-    parsed = HTTPClientTransport._parse_sse(body, 7)
-    assert parsed["result"] == {"ok": True}
-    # Without a matching id the last decoded event wins.
-    fallback = HTTPClientTransport._parse_sse(body, None)
-    assert fallback["id"] == 7
+    events = [json.loads(d) for d in SSEParser().feed(body)]
+    replies = [e for e in events if is_reply(e, 7)]
+    assert [r["result"] for r in replies] == [{"ok": True}]
+    # No "last decoded event wins" fallback any more: an event that is not a
+    # reply to OUR id is never taken as one.
+    assert not any(is_reply(e, 8) for e in events)
 
 
 if __name__ == "__main__":  # pragma: no cover

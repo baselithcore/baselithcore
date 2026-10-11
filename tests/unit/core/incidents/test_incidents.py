@@ -1,11 +1,11 @@
-"""Tests for the NIS2 Art. 23 incident-reporting subsystem (core/incidents)."""
+"""Tests for the NIS2 Art. 23 incident-reporting subsystem (baselith/core/incidents)."""
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.config.incidents import IncidentReportingConfig
-from core.incidents import (
+from baselith.core.config.incidents import IncidentReportingConfig
+from baselith.core.incidents import (
     IncidentNotFoundError,
     IncidentService,
     IncidentSeverity,

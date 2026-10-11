@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from core.cache.single_flight import SingleFlight
+from baselith.core.cache.single_flight import SingleFlight
 
 
 @pytest.mark.asyncio

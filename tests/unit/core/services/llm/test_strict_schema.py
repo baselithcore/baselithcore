@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.services.llm._strict_schema import to_strict_schema
+from baselith.core.services.llm._strict_schema import to_strict_schema
 
 
 def test_a_defaulted_field_becomes_required() -> None:

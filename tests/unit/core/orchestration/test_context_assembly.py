@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from core.orchestration.limits import LoopBudget
-from core.orchestration.mixins._context_assembly import inject_memory_context
+from baselith.core.orchestration.limits import LoopBudget
+from baselith.core.orchestration.mixins._context_assembly import inject_memory_context
 
 
 class _Orchestrator:
@@ -103,7 +103,7 @@ class _CapabilityHost:
 def test_skill_catalog_is_rendered_for_the_request_query() -> None:
     """Progressive disclosure only works when the catalog is ranked by the
     request: ``render_catalog()`` with no query dumps every card."""
-    from core.orchestration.mixins._context_assembly import inject_capabilities
+    from baselith.core.orchestration.mixins._context_assembly import inject_capabilities
 
     service = _SkillService()
     context: dict[str, Any] = {}
@@ -113,7 +113,7 @@ def test_skill_catalog_is_rendered_for_the_request_query() -> None:
 
 
 def test_skill_catalog_query_is_optional() -> None:
-    from core.orchestration.mixins._context_assembly import inject_capabilities
+    from baselith.core.orchestration.mixins._context_assembly import inject_capabilities
 
     service = _SkillService()
     inject_capabilities(_CapabilityHost(service), {})

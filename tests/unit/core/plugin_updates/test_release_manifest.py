@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.release_manifest import (
+from baselith.core.plugin_updates.release_manifest import (
     SIGNATURE_KEY,
     ReleaseManifestError,
     canonical_bytes,
@@ -19,7 +19,7 @@ from core.plugin_updates.release_manifest import (
     sign_release_manifest,
     verify_release_manifest,
 )
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 def _tree(root: Path) -> Path:

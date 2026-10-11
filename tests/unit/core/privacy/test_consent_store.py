@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 
-from core.privacy.consent import ConsentService, SQLiteConsentStore
+from baselith.core.privacy.consent import ConsentService, SQLiteConsentStore
 
 
 class TestDurability:
@@ -71,8 +71,11 @@ class TestConfiguration:
     def test_service_uses_the_durable_store_when_configured(
         self, tmp_path, monkeypatch
     ):
-        from core.config import privacy as privacy_config
-        from core.privacy.consent import get_consent_service, reset_consent_service
+        from baselith.core.config import privacy as privacy_config
+        from baselith.core.privacy.consent import (
+            get_consent_service,
+            reset_consent_service,
+        )
 
         monkeypatch.setenv("PRIVACY_CONSENT_DB_PATH", str(tmp_path / "c.db"))
         privacy_config._privacy_config = None
@@ -86,8 +89,8 @@ class TestConfiguration:
             privacy_config._privacy_config = None
 
     def test_service_defaults_to_in_memory(self, monkeypatch):
-        from core.config import privacy as privacy_config
-        from core.privacy.consent import (
+        from baselith.core.config import privacy as privacy_config
+        from baselith.core.privacy.consent import (
             InMemoryConsentStore,
             get_consent_service,
             reset_consent_service,

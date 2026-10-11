@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.orchestration.handlers.rag import StandardRagHandler
+from baselith.core.orchestration.handlers.rag import StandardRagHandler
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ async def test_standard_rag_handler_flow():
     """Test standard RAG flow."""
     # We patch the class's dependency resolution or use dependency injection via config?
     # StandardRagHandler uses 'from ... import get_...' inside init or calls global Getters.
-    # Best way is to patch the module 'core.orchestration.handlers.rag' imports.
+    # Best way is to patch the module 'baselith.core.orchestration.handlers.rag' imports.
 
     with pytest.MonkeyPatch.context() as m:
         # Mock VectorStore
@@ -46,28 +46,32 @@ async def test_standard_rag_handler_flow():
         mock_embedder.encode = AsyncMock(return_value=[0.1, 0.2])
 
         m.setattr(
-            "core.orchestration.handlers.rag.get_vectorstore_service", lambda: mock_vs
+            "baselith.core.orchestration.handlers.rag.get_vectorstore_service",
+            lambda: mock_vs,
         )
-        m.setattr("core.orchestration.handlers.rag.get_llm_service", lambda: mock_llm)
         m.setattr(
-            "core.orchestration.handlers.rag.get_chat_config", lambda: mock_config
+            "baselith.core.orchestration.handlers.rag.get_llm_service", lambda: mock_llm
+        )
+        m.setattr(
+            "baselith.core.orchestration.handlers.rag.get_chat_config",
+            lambda: mock_config,
         )
 
         # Patching get_embedder where it's imported in the handler module or ensuring it's mockable
-        # Since it is imported inside __init__, we need to patch sys.modules or the function in core.nlp
+        # Since it is imported inside __init__, we need to patch sys.modules or the function in baselith.core.nlp
 
-        # We need to make sure core.nlp is importable or already imported
+        # We need to make sure baselith.core.nlp is importable or already imported
         try:
-            import core.nlp
+            import baselith.core.nlp
 
-            m.setattr(core.nlp, "get_embedder", lambda x: mock_embedder)
+            m.setattr(baselith.core.nlp, "get_embedder", lambda x: mock_embedder)
         except ImportError:
-            # If core.nlp cannot be imported for some reason, we mock the module in sys.modules
+            # If baselith.core.nlp cannot be imported for some reason, we mock the module in sys.modules
             import sys
 
             mock_nlp = MagicMock()
             mock_nlp.get_embedder = lambda x: mock_embedder
-            m.setattr(sys.modules, "core.nlp", mock_nlp)
+            m.setattr(sys.modules, "baselith.core.nlp", mock_nlp)
 
         handler = StandardRagHandler()
 
@@ -78,7 +82,7 @@ async def test_standard_rag_handler_flow():
         assert "couldn't find relevant information" in result["response"].lower()
 
         # Test with results
-        from core.models.domain import Document, SearchResult
+        from baselith.core.models.domain import Document, SearchResult
 
         mock_vs.search.return_value = [
             SearchResult(document=Document(id="1", content="Info"), score=0.9)

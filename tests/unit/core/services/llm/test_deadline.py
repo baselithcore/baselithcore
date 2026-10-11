@@ -1,5 +1,5 @@
 """
-Tests for core/services/llm/_deadline.py.
+Tests for baselith/core/services/llm/_deadline.py.
 
 The wrapper must be a plain await outside an orchestrated request, and map
 a deadline overrun to BudgetExceededError("max_seconds") — the same signal
@@ -10,9 +10,16 @@ import asyncio
 
 import pytest
 
-from core.orchestration.budget_context import activate_budget, deactivate_budget
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.services.llm._deadline import await_within_deadline
+from baselith.core.orchestration.budget_context import (
+    activate_budget,
+    deactivate_budget,
+)
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.services.llm._deadline import await_within_deadline
 
 
 async def _value() -> int:

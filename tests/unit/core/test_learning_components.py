@@ -4,10 +4,16 @@ Unit Tests for Continuous Learning Primitives
 Tests for learning types, experience replay, reward model and policy optimizer.
 """
 
-from core.learning.experience_buffer import ExperienceReplay
-from core.learning.policy_optimizer import PolicyOptimizer
-from core.learning.reward_model import RewardModel
-from core.learning.types import Episode, Experience, LearningMetrics, Reward, RewardType
+from baselith.core.learning.experience_buffer import ExperienceReplay
+from baselith.core.learning.policy_optimizer import PolicyOptimizer
+from baselith.core.learning.reward_model import RewardModel
+from baselith.core.learning.types import (
+    Episode,
+    Experience,
+    LearningMetrics,
+    Reward,
+    RewardType,
+)
 
 # ============================================================================
 # Types Tests

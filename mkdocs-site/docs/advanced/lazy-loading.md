@@ -19,16 +19,16 @@ laziness decides what connects.
 ## Import-time laziness
 
 A package whose `__init__.py` imports every submodule makes the cost of
-touching *any* of its names the cost of *all* of them. `core.plugins` and
-`core.orchestration` both did, and the bill landed on code that wanted one
+touching *any* of its names the cost of *all* of them. `baselith.core.plugins` and
+`baselith.core.orchestration` both did, and the bill landed on code that wanted one
 small thing:
 
 | Import | Before | After |
 | --- | --- | --- |
 | `import baselith` | 79 modules | 79 modules |
-| `from core.plugins import SkillResult` | 955 modules, 0.36 s | 226 modules, 0.05 s |
-| `from core.orchestration import AutonomyPolicy` | 3 209 modules | 95 modules |
-| `from core.agent import Agent` | 3 209 modules, 0.61 s | 1 107 modules, 0.28 s |
+| `from baselith.core.plugins import SkillResult` | 955 modules, 0.36 s | 226 modules, 0.05 s |
+| `from baselith.core.orchestration import AutonomyPolicy` | 3 209 modules | 95 modules |
+| `from baselith.core.agent import Agent` | 3 209 modules, 0.61 s | 1 107 modules, 0.28 s |
 
 `SkillResult` is four Pydantic fields. Reaching it imported the plugin
 registry, the loader, the hot-reload controller, a FastAPI router and the
@@ -38,13 +38,13 @@ that package's `__init__`.
 ### How it works
 
 [PEP 562](https://peps.python.org/pep-0562/) module `__getattr__`, built by
-`core._lazy.lazy_exports`. The package keeps the same literal `__all__` and
+`baselith.core._lazy.lazy_exports`. The package keeps the same literal `__all__` and
 adds a table mapping each exported name to the submodule that defines it. A
 name is imported the first time it is read, then cached in the package
 namespace, so later reads are dictionary lookups.
 
 ```python
-from core._lazy import lazy_exports
+from baselith.core._lazy import lazy_exports
 
 _EXPORTS: Final[dict[str, str]] = {
     "SkillResult": "result",
@@ -56,21 +56,21 @@ _EXPORTS: Final[dict[str, str]] = {
 __getattr__ = lazy_exports(__name__, _EXPORTS)
 ```
 
-No import site changes. `from core.plugins import SkillResult` still works,
-and so does `core.plugins.loader` — a name that is not an exported symbol is
+No import site changes. `from baselith.core.plugins import SkillResult` still works,
+and so does `baselith.core.plugins.loader` — a name that is not an exported symbol is
 tried as a submodule before `AttributeError` is raised, which preserves the
 side effect the eager imports had of binding submodules as attributes.
 
 ### Provider SDKs
 
-The same principle applies inside a function. `core.services.llm.provider_factory`
+The same principle applies inside a function. `baselith.core.services.llm.provider_factory`
 imported the anthropic, openai, ollama and huggingface clients at module
 scope in order to construct exactly one of them: 0.38 s and roughly 1 800
 modules on every path that reached the LLM service. Each import now sits
 inside the branch that builds that provider.
 
 The consequence for tests: patch a provider where it is **defined**
-(`core.services.llm.providers.openai_provider.OpenAIProvider`), not as an
+(`baselith.core.services.llm.providers.openai_provider.OpenAIProvider`), not as an
 attribute of the factory, which no longer has one.
 
 ### Keeping it
@@ -114,7 +114,7 @@ The new lazy loading system:
    (required or optional) — everything else is never registered
 3. **Creates the required ones the lifespan cannot defer eagerly** — `postgres`,
    `vectorstore`, `evaluation` and `evolution` are built at startup when a
-   plugin *requires* them (`core/api/lifespan.py`); every other required
+   plugin *requires* them (`baselith/core/api/lifespan.py`); every other required
    resource (`llm`, `redis`, `graph`, `memory`, …) and every *optional* resource
    is created on the first `get_or_create()` call
 4. **Respects dependencies** between services (e.g., memory requires vectorstore)
@@ -138,9 +138,9 @@ graph TB
 
 | Component               | File                                | Function                     |
 | ----------------------- | ----------------------------------- | ---------------------------- |
-| **ResourceAnalyzer**    | `core/plugins/resource_analyzer.py` | Analyzes plugin requirements |
-| **LazyServiceRegistry** | `core/di/lazy_registry.py`          | Registry for lazy services   |
-| **Service Factories**   | `core/bootstrap/lazy_init.py`       | Factories for initialization |
+| **ResourceAnalyzer**    | `baselith/core/plugins/resource_analyzer.py` | Analyzes plugin requirements |
+| **LazyServiceRegistry** | `baselith/core/di/lazy_registry.py`          | Registry for lazy services   |
+| **Service Factories**   | `baselith/core/bootstrap/lazy_init.py`       | Factories for initialization |
 
 ---
 
@@ -148,10 +148,10 @@ graph TB
 
 Service initialization is lazy, but **plugin activation is not** for enabled plugins.
 At startup the lifespan (`PluginRuntimeHooks.auto_activate`,
-`core/api/_plugin_runtime.py`) iterates the discovered plugins and **eagerly activates
+`baselith/core/api/_plugin_runtime.py`) iterates the discovered plugins and **eagerly activates
 every one that `configs/plugins.yaml` enables**, so its routers, handlers, MCP tools
 and static mounts are wired before the first HTTP request. "Enabled" is the rule
-discovery already applied (`core.plugins.config_file.plugin_enabled`): no config file
+discovery already applied (`baselith.core.plugins.config_file.plugin_enabled`): no config file
 enables every plugin; a non-empty file enables the plugins it names unless their entry
 says `enabled: false`. This is gated by `PLUGIN_AUTO_LOAD` (default `true`):
 
@@ -164,12 +164,12 @@ says `enabled: false`. This is gated by `PLUGIN_AUTO_LOAD` (default `true`):
 On-request activation (`PluginActivationMiddleware`) only applies to plugins that
 are in the enabled discovery set but not yet imported. `ResourceAnalyzer.discover_plugins`
 drops `enabled: false` entries (and, when the file is non-empty, any plugin absent
-from it), and `_activate_locked` (`core/api/_plugin_runtime.py`) refuses those
+from it), and `_activate_locked` (`baselith/core/api/_plugin_runtime.py`) refuses those
 plugins — even transitively as another plugin's dependency — logging
 `Refusing to auto-activate plugin <name>: not in the enabled discovery set
 (disabled or absent from config)`; the request gets a `503`. Enable the plugin
 in the config, or use the admin endpoint
-`POST /api/plugins/{plugin_name}/enable` (`core/plugins/api.py`).
+`POST /api/plugins/{plugin_name}/enable` (`baselith/core/plugins/api.py`).
 
 A plugin's declared `plugin_dependencies` are activated first, transitively. Because the
 loader keys lifecycle state by the **canonical plugin name** (the manifest `name`, which
@@ -186,7 +186,7 @@ doesn't match its target's name fails activation with `instance not found` / `Ke
 Declare resource requirements in your plugin metadata:
 
 ```python
-from core.plugins import Plugin, PluginMetadata
+from baselith.core.plugins import Plugin, PluginMetadata
 
 class MyPlugin(Plugin):
     @property
@@ -221,7 +221,7 @@ You have two options to run in isolated mode:
 
 ### Available Resources
 
-The nine keys of `RESOURCE_FACTORIES` (`core/bootstrap/lazy_init.py`);
+The nine keys of `RESOURCE_FACTORIES` (`baselith/core/bootstrap/lazy_init.py`);
 dependencies come from `ResourceAnalyzer.DEFAULT_DEPENDENCIES`:
 
 | Resource              | Description                                  | Dependencies                                                   |
@@ -243,8 +243,8 @@ dependencies come from `ResourceAnalyzer.DEFAULT_DEPENDENCIES`:
 ### Via Dependency Injection
 
 ```python
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol
 
 class MyPlugin(Plugin):
     async def initialize(self, config):
@@ -259,7 +259,7 @@ class MyPlugin(Plugin):
 ### Via LazyRegistry
 
 ```python
-from core.di.lazy_registry import get_lazy_registry
+from baselith.core.di.lazy_registry import get_lazy_registry
 
 class MyPlugin(Plugin):
     async def some_method(self):
@@ -287,7 +287,7 @@ class MyPlugin(Plugin):
 
 ### Example: Only `browser_agent` Enabled
 
-`plugins/browser_agent/manifest.yaml` declares `required_resources: [llm]` and
+`baselith/plugins/browser_agent/manifest.yaml` declares `required_resources: [llm]` and
 `optional_resources: [internet]`.
 
 #### Before (Eager Loading)

@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
-from core.mcp import server as server_mod
-from core.mcp.server import MCPServer
+from baselith.core.mcp import server as server_mod
+from baselith.core.mcp.server import MCPServer
 
 
 def _server_with_subscribers() -> MCPServer:

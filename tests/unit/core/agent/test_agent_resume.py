@@ -7,12 +7,12 @@ shape of a regenerated turn — and asserts the counts did not move.
 
 from __future__ import annotations
 
-from core.agent import Agent
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.idempotency import InMemoryToolLedger
-from core.reasoning.react import ToolDefinition
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.agent import Agent
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.idempotency import InMemoryToolLedger
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 from tests.unit.core.agent.test_agent import _mock_service
 
 
@@ -119,7 +119,14 @@ class TestLedgerResume:
 
 class TestCheckpointResume:
     async def test_the_checkpoint_alone_replays_on_a_different_path(self) -> None:
-        """A fresh ledger per pass: only the checkpoint can be deduplicating."""
+        """A fresh ledger per pass: only the checkpoint can be deduplicating.
+
+        Model turns are recorded too now, so a resumed pass replays the same
+        turns; the different path here is that of a run whose turns were not
+        recorded (a checkpoint written before they were, or a turn that was
+        in flight at the crash): the regenerated turns ask for the same
+        effects in another order, and the tool steps still replay.
+        """
         effects = _Effects()
         store = InMemoryCheckpointStore()
         checkpoint = Checkpoint(run_id="run-cp", query="q")
@@ -132,7 +139,13 @@ class TestCheckpointResume:
         ).run("q", checkpoint=CheckpointManager(store, checkpoint))
 
         loaded = await store.load("run-cp")
-        assert loaded is not None and len(loaded.steps) == 2
+        assert loaded is not None
+        loaded.steps = {
+            key: step
+            for key, step in loaded.steps.items()
+            if step["tool_name"] != "llm_turn"
+        }
+        assert len(loaded.steps) == 2
         resumed = await Agent(
             tools=effects.tools(),
             llm_service=_resumed_pass(),
@@ -149,10 +162,12 @@ class TestCheckpointResume:
         """Without an explicit ``run_id`` the checkpoint's is used for the ledger."""
         effects = _Effects()
         ledger = InMemoryToolLedger()
-        store = InMemoryCheckpointStore()
 
         for _ in range(2):
-            # A brand-new checkpoint each time: only the ledger can dedupe.
+            # A brand-new checkpoint (and store) each time: only the ledger can
+            # dedupe. One store would refuse the second fresh copy of the run
+            # as a stale write.
+            store = InMemoryCheckpointStore()
             checkpoint = Checkpoint(run_id="run-shared", query="q")
             await store.save(checkpoint)
             await Agent(

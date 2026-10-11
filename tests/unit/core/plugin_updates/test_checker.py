@@ -8,14 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.cache import UpdateCache
-from core.plugin_updates.checker import check_plugin, installed_versions
-from core.plugin_updates.models import Refusal, ReleaseInfo
-from core.plugin_updates.release_manifest import file_digests, sign_release_manifest
-from core.plugin_updates.sources import DEFAULT_MAX_ARTIFACT_BYTES, SourceError
-from core.plugins import overlay
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.plugin_updates.cache import UpdateCache
+from baselith.core.plugin_updates.checker import check_plugin, installed_versions
+from baselith.core.plugin_updates.models import Refusal, ReleaseInfo
+from baselith.core.plugin_updates.release_manifest import (
+    file_digests,
+    sign_release_manifest,
+)
+from baselith.core.plugin_updates.sources import DEFAULT_MAX_ARTIFACT_BYTES, SourceError
+from baselith.core.plugins import overlay
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 def _signed_tarball(
@@ -179,7 +182,7 @@ async def test_unexpected_error_is_contained(tmp_path: Path) -> None:
 
 
 def test_tar_path_traversal_rejected(tmp_path: Path) -> None:
-    from core.plugin_updates.checker import _unpack
+    from baselith.core.plugin_updates.checker import _unpack
 
     evil = tmp_path / "evil.tgz"
     with tarfile.open(evil, "w:gz") as tar:
@@ -202,9 +205,9 @@ def _tar_of(path: Path, members: dict[str, bytes]) -> Path:
 def test_unpack_refuses_too_many_members(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugin_updates import checker
+    from baselith.core.plugin_updates import checker
 
-    monkeypatch.setattr("core.plugin_updates.archive.MAX_ARCHIVE_MEMBERS", 3)
+    monkeypatch.setattr("baselith.core.plugin_updates.archive.MAX_ARCHIVE_MEMBERS", 3)
     tgz = _tar_of(tmp_path / "m.tgz", {f"p/f{i}": b"" for i in range(4)})
     with pytest.raises(checker.ArchiveLimitError, match="more than 3 members"):
         checker._unpack(tgz, tmp_path / "out")
@@ -212,7 +215,7 @@ def test_unpack_refuses_too_many_members(
 
 
 def test_unpack_refuses_an_oversize_total(tmp_path: Path) -> None:
-    from core.plugin_updates import checker
+    from baselith.core.plugin_updates import checker
 
     tgz = _tar_of(tmp_path / "b.tgz", {"p/a": b"x" * 60, "p/b": b"x" * 60})
     with pytest.raises(checker.ArchiveLimitError, match="more than 100 bytes"):
@@ -416,7 +419,7 @@ async def test_hardlink_member_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("kind", [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE])
 def test_unpack_refuses_links_and_special_files(tmp_path: Path, kind: bytes) -> None:
-    from core.plugin_updates import checker
+    from baselith.core.plugin_updates import checker
 
     tgz = tmp_path / "l.tgz"
     with tarfile.open(tgz, "w:gz") as tar:
@@ -436,7 +439,7 @@ def test_unpack_refuses_links_and_special_files(tmp_path: Path, kind: bytes) -> 
 def test_unpack_refuses_colliding_members(
     tmp_path: Path, names: tuple[str, str]
 ) -> None:
-    from core.plugin_updates import checker
+    from baselith.core.plugin_updates import checker
 
     tgz = tmp_path / "d.tgz"
     with tarfile.open(tgz, "w:gz") as tar:
@@ -465,7 +468,7 @@ async def test_refusal_removes_a_cached_final_tarball(tmp_path: Path) -> None:
 
 async def test_run_check_resolves_trust_roots_per_plugin(tmp_path: Path) -> None:
     """A callable ``trusted_keys`` is asked once per plugin, by name."""
-    from core.plugin_updates.checker import run_check
+    from baselith.core.plugin_updates.checker import run_check
 
     asked: list[str] = []
 

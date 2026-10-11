@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     DEFAULT_JUDGE_MAX_PARALLEL,
     DEFAULT_JUDGE_SAMPLES,
     RecordedRun,
@@ -55,7 +55,7 @@ class TestDefaults:
         assert DEFAULT_JUDGE_MAX_PARALLEL == 4
 
     def test_settings_expose_the_knobs(self) -> None:
-        from core.config.evaluation import EvaluationConfig
+        from baselith.core.config.evaluation import EvaluationConfig
 
         config = EvaluationConfig()
         assert config.judge_samples == 3
@@ -129,7 +129,7 @@ class TestMedianGating:
         assert judge.calls == 1
 
     async def test_default_sample_count_comes_from_settings(self, monkeypatch) -> None:
-        import core.evaluation.regression_runner as runner
+        import baselith.core.evaluation.regression_runner as runner
 
         monkeypatch.setattr(runner, "_judge_defaults", lambda: (2, 4))
         judge = ScriptedJudge([0.9, 0.9])

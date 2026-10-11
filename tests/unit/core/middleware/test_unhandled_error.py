@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from core.middleware.observability import RequestIdMiddleware
-from core.middleware.unhandled_error import UnhandledErrorMiddleware
+from baselith.core.middleware.observability import RequestIdMiddleware
+from baselith.core.middleware.unhandled_error import UnhandledErrorMiddleware
 
 
 async def _boom(scope: Any, receive: Any, send: Any) -> None:
@@ -89,7 +89,7 @@ def test_a_500_is_logged_once_through_the_full_stack(monkeypatch) -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    import core.api.errors as errors
+    import baselith.core.api.errors as errors
 
     mock_logger = MagicMock()
     monkeypatch.setattr(errors, "logger", mock_logger)

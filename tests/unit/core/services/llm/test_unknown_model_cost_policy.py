@@ -7,7 +7,7 @@ pricing check anywhere: the only place the policy could fire was the six
 answered and outside the try that wraps generation. A ``reject`` deployment
 therefore paid for a completed generation and then threw the answer away with
 an uncaught exception, while its sibling
-(``core.orchestration.budget_context``) had already decided that a policy
+(``baselith.core.orchestration.budget_context``) had already decided that a policy
 rejection is a "don't charge", not a run-aborting error.
 
 Both halves are covered here: the refusal now happens before the spend, and a
@@ -22,15 +22,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.quotas import cost_enforcement as ce_mod
-from core.quotas.cost_enforcement import (
+from baselith.core.quotas import cost_enforcement as ce_mod
+from baselith.core.quotas.cost_enforcement import (
     UnknownModelCostRejected,
     enforce_tenant_cost_budget,
 )
-from core.services.llm.service import LLMService
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.usage import Usage
 
 pytestmark = [pytest.mark.unit]
 
@@ -47,7 +47,7 @@ def _isolated_token_ledger():
     so anything reported here would accumulate for the rest of the session
     and trip its 10 000-token agent cap in unrelated tests.
     """
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -78,12 +78,14 @@ def booked(monkeypatch):
     async def _record(usd, **_kwargs):
         recorded.append(usd)
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
     return recorded
 
 
 def _service(*, native: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=PRICED,
@@ -116,7 +118,7 @@ class TestTheRefusalHappensBeforeTheSpend:
         service = _service(native=True)
         native = AsyncMock(return_value=LLMResult(text="hi", tokens_used=10))
 
-        with patch("core.services.llm.structured._native_with_retry", native):
+        with patch("baselith.core.services.llm.structured._native_with_retry", native):
             with pytest.raises(UnknownModelCostRejected):
                 await generate_structured(service, "q", model=UNPRICED)
 
@@ -142,7 +144,7 @@ class TestACompletedTurnIsNeverDestroyedByThePolicy:
 
             return _chunks(), None, "anthropic", UNPRICED
 
-        with patch("core.services.llm._streaming.open_stream", _open_stream):
+        with patch("baselith.core.services.llm._streaming.open_stream", _open_stream):
             chunks = [c async for c in service.generate_response_stream("q")]
 
         assert chunks == ["half"]
@@ -152,7 +154,7 @@ class TestACompletedTurnIsNeverDestroyedByThePolicy:
     async def test_record_usage_cost_swallows_the_rejection(
         self, reject_policy, booked
     ):
-        from core.services.llm._accounting import record_usage_cost
+        from baselith.core.services.llm._accounting import record_usage_cost
 
         await record_usage_cost(UNPRICED, Usage(input_tokens=100, output_tokens=50))
 
@@ -161,8 +163,8 @@ class TestACompletedTurnIsNeverDestroyedByThePolicy:
 
 class TestTheDefaultPolicyIsUnchanged:
     async def test_an_unpriced_model_still_meters_unknown_price(self, booked):
-        from core.models.pricing import UNKNOWN_PRICE
-        from core.services.llm._accounting import record_usage_cost
+        from baselith.core.models.pricing import UNKNOWN_PRICE
+        from baselith.core.services.llm._accounting import record_usage_cost
 
         await record_usage_cost(UNPRICED, Usage(input_tokens=100, output_tokens=50))
 

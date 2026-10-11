@@ -144,7 +144,7 @@ liveness probes (`/health`, `/health/ready`) are always called unversioned.
 
 !!! note "`tenant_id` is informational"
     The server derives the tenant from the **authenticated identity**
-    (`core/middleware/tenant.py`) and never reads `X-Tenant-ID`; the header
+    (`baselith/core/middleware/tenant.py`) and never reads `X-Tenant-ID`; the header
     only helps proxies and logs. The `tenant_id` field of the chat body
     (`ChatRequest.tenant_id`) is accepted for compatibility but is not read
     by the chat route either — there is no request-level tenant override.

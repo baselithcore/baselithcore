@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates.models import ReleaseInfo
-from core.plugin_updates.upgrade import detect_install_method, upgrade_path
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates.models import ReleaseInfo
+from baselith.core.plugin_updates.upgrade import detect_install_method, upgrade_path
 
 
 def _rel(version: str) -> ReleaseInfo:

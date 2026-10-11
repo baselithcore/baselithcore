@@ -4,7 +4,7 @@ description: Provider-independent conversation types for the message-based agent
 ---
 <!-- markdownlint-disable MD046 -->
 
-`core/services/llm/messages.py` is the provider-independent shape of a
+`baselith/core/services/llm/messages.py` is the provider-independent shape of a
 conversation. An agentic loop does not have a prompt, it has a **history**: the
 model asks for tools, the tools answer, the model reads the answers and decides
 again. Sending that as a string throws away everything the next turn needs —
@@ -13,7 +13,7 @@ wants replayed verbatim — and rewrites the prompt prefix on every iteration, s
 nothing before it can ever be served from the provider's prompt cache.
 
 ```python
-from core.services.llm.messages import (
+from baselith.core.services.llm.messages import (
     Message,
     ToolResultBlock,
     message_from_result,
@@ -142,7 +142,7 @@ not part of the conversation being measured.
 ## Provider capability
 
 Speaking messages is a **capability**, not a requirement. It is declared by a
-separate protocol, `core.services.llm.interfaces.MessageCapableProvider`, rather
+separate protocol, `baselith.core.services.llm.interfaces.MessageCapableProvider`, rather
 than by adding members to `LLMProviderProtocol` — folding it into the base
 protocol would make every message-less provider fail a type check for a method it
 is not expected to have.
@@ -180,7 +180,7 @@ class MessageCapableProvider(Protocol):
 ## The service seam
 
 `LLMService.generate_messages(...)` is the entry point; `LLMService` sets
-`supports_messages = True`. `core.services.llm.message_runtime.supports_message_api(service)`
+`supports_messages = True`. `baselith.core.services.llm.message_runtime.supports_message_api(service)`
 decides the mode per request, and **both halves matter**:
 
 - **Native** — when `LLM_ENABLE_NATIVE_TOOLS` is on (default `true`) *and* the
@@ -213,6 +213,28 @@ result = await llm_service.generate_messages(
 
 Every argument after `messages` is keyword-only.
 
+### Streaming a turn (`on_text`)
+
+`generate_messages(..., on_text=callback)` hands each text chunk to `callback`
+as the provider produces it and still returns the whole consolidated
+`LLMResult` (exactly one usage record is booked per call). It streams only on
+the native path, on a provider that declares `supports_streaming_tools`
+(`OpenAIProvider` and `VLLMProvider`, via `generate_messages_stream`), with
+`LLM_STREAM_AGENT_TEXT` on (default `true`) and no `response_format`; every
+other path ignores the callback and returns the turn at once, so a caller must
+handle a turn that never called it. vLLM streams live only for models known not to reason inline (llama, mistral, gemma,
+qwen2, … or `LLM_VLLM_LIVE_STREAM_MODELS`); any other served name holds its answer
+until `</think>` so reasoning never leaks. A name carrying an inline-reasoner
+marker (`r1`, `reason`, `think`, `qwq`, `qwen3`, `gpt-oss`, …) always holds,
+even when it also names a base family (`deepseek-r1-distill-llama-70b`) or
+matches `LLM_VLLM_LIVE_STREAM_MODELS`. Tool calls arrive whole on the result, and
+inline reasoning (`<think>…</think>`, even split across chunks) never reaches
+the callback. Before the first chunk a failure retries and fails over the
+fallback chain; after it, the turn is committed and a failure raises
+`StreamInterruptedError` (never retried or failed over) carrying
+`partial_text`; the spend of the partial turn is booked as an estimate.
+Cancelling the caller closes the provider stream.
+
 ---
 
 ## Cache breakpoints
@@ -234,9 +256,9 @@ never spent on nothing.
 ## In the agent loop
 
 Both loops keep the history and only ever append to it — the typed
-`core/agent/agent.py` and the ReAct loop the orchestrator runs
-(`core/reasoning/react_native.py`), through the one round trip in
-[`core/services/llm/message_transport.py`](services.md#one-round-trip-for-a-message-history):
+`baselith/core/agent/agent.py` and the ReAct loop the orchestrator runs
+(`baselith/core/reasoning/react_native.py`), through the one round trip in
+[`baselith/core/services/llm/message_transport.py`](services.md#one-round-trip-for-a-message-history):
 
 ```text
 user(prompt)

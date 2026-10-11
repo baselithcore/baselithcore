@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from core.connectors import (
+from baselith.core.connectors import (
     ConnectorSpec,
     CredentialField,
     SecretsCredentialResolver,
@@ -14,7 +14,7 @@ from core.connectors import (
     get_credential_resolver,
     set_credential_resolver,
 )
-from core.connectors.credentials import secret_names
+from baselith.core.connectors.credentials import secret_names
 
 SPEC = ConnectorSpec(
     name="acme_crm",

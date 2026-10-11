@@ -6,7 +6,7 @@ here::
     from baselith import Agent, Crew, Task
 
 The framework's implementation lives under ``core.*``, a package name that
-only makes sense from inside this repository. ``core.agent`` and the rest
+only makes sense from inside this repository. ``baselith.core.agent`` and the rest
 keep working exactly as before and are not deprecated; this module is the
 name downstream code should import, and the only surface covered by the
 ``stable`` tier of the [stability
@@ -29,10 +29,10 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any, Final
 
-from core._version import __version__
+from baselith.core._version import __version__
 
 if TYPE_CHECKING:  # pragma: no cover - import-time contract for type checkers
-    from core.agent import (
+    from baselith.core.agent import (
         Agent,
         AgentOutputValidationError,
         AgentResult,
@@ -53,55 +53,55 @@ if TYPE_CHECKING:  # pragma: no cover - import-time contract for type checkers
         Task,
         TaskResult,
     )
-    from core.api.factory import create_app
-    from core.config import get_app_config, get_core_config
-    from core.orchestration.autonomy import AutonomyPolicy
-    from core.orchestration.contract import AgentContract
-    from core.orchestration.limits import LoopBudget
-    from core.plugins.result import SkillResult, fail, ok, partial
-    from core.reasoning.react_types import ToolDefinition
+    from baselith.core.api.factory import create_app
+    from baselith.core.config import get_app_config, get_core_config
+    from baselith.core.orchestration.autonomy import AutonomyPolicy
+    from baselith.core.orchestration.contract import AgentContract
+    from baselith.core.orchestration.limits import LoopBudget
+    from baselith.core.plugins.result import SkillResult, fail, ok, partial
+    from baselith.core.reasoning.react_types import ToolDefinition
 
 #: ``exported name -> module that defines it``. The single source of truth
 #: for both the lazy loader and ``__all__``; a name absent here is not part
 #: of the public API, whatever ``core.*`` exports.
 _EXPORTS: Final[dict[str, str]] = {
     # Typed agents and crews — the surface the quickstart teaches.
-    "Agent": "core.agent",
-    "AgentOutputValidationError": "core.agent",
-    "AgentResult": "core.agent",
-    "AgentUsage": "core.agent",
-    "CostFn": "core.agent",
-    "Crew": "core.agent",
-    "CrewResult": "core.agent",
-    "Task": "core.agent",
-    "TaskResult": "core.agent",
-    "ReviewDecision": "core.agent",
-    "ReviewVerdict": "core.agent",
+    "Agent": "baselith.core.agent",
+    "AgentOutputValidationError": "baselith.core.agent",
+    "AgentResult": "baselith.core.agent",
+    "AgentUsage": "baselith.core.agent",
+    "CostFn": "baselith.core.agent",
+    "Crew": "baselith.core.agent",
+    "CrewResult": "baselith.core.agent",
+    "Task": "baselith.core.agent",
+    "TaskResult": "baselith.core.agent",
+    "ReviewDecision": "baselith.core.agent",
+    "ReviewVerdict": "baselith.core.agent",
     # Multi-agent conversation.
-    "CapabilitySelector": "core.agent",
-    "ChatMessage": "core.agent",
-    "GroupChat": "core.agent",
-    "GroupChatResult": "core.agent",
-    "LLMManagerSelector": "core.agent",
-    "Participant": "core.agent",
-    "RoundRobinSelector": "core.agent",
-    "SpeakerSelector": "core.agent",
+    "CapabilitySelector": "baselith.core.agent",
+    "ChatMessage": "baselith.core.agent",
+    "GroupChat": "baselith.core.agent",
+    "GroupChatResult": "baselith.core.agent",
+    "LLMManagerSelector": "baselith.core.agent",
+    "Participant": "baselith.core.agent",
+    "RoundRobinSelector": "baselith.core.agent",
+    "SpeakerSelector": "baselith.core.agent",
     # Writing tools and skills: the result envelope and the explicit
     # tool declaration a plain callable is inferred into.
-    "SkillResult": "core.plugins.result",
-    "ToolDefinition": "core.reasoning.react_types",
-    "fail": "core.plugins.result",
-    "ok": "core.plugins.result",
-    "partial": "core.plugins.result",
+    "SkillResult": "baselith.core.plugins.result",
+    "ToolDefinition": "baselith.core.reasoning.react_types",
+    "fail": "baselith.core.plugins.result",
+    "ok": "baselith.core.plugins.result",
+    "partial": "baselith.core.plugins.result",
     # Runtime limits: what makes a loop terminate, what it may do
     # unattended, and what it promises its caller.
-    "AgentContract": "core.orchestration.contract",
-    "AutonomyPolicy": "core.orchestration.autonomy",
-    "LoopBudget": "core.orchestration.limits",
+    "AgentContract": "baselith.core.orchestration.contract",
+    "AutonomyPolicy": "baselith.core.orchestration.autonomy",
+    "LoopBudget": "baselith.core.orchestration.limits",
     # The server and its configuration.
-    "create_app": "core.api.factory",
-    "get_app_config": "core.config",
-    "get_core_config": "core.config",
+    "create_app": "baselith.core.api.factory",
+    "get_app_config": "baselith.core.config",
+    "get_core_config": "baselith.core.config",
 }
 
 #: Spelled out rather than derived from :data:`_EXPORTS`, so that the public

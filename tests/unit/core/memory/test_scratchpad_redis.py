@@ -2,9 +2,9 @@
 
 import pytest
 
-from core.context import reset_tenant_context, set_tenant_context
-from core.memory.scratchpad import Scratchpad
-from core.memory.scratchpad_redis import RedisScratchpadBackend
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.memory.scratchpad import Scratchpad
+from baselith.core.memory.scratchpad_redis import RedisScratchpadBackend
 
 
 class FakeRedis:
@@ -106,7 +106,7 @@ def test_facade_caps_apply_over_redis_backend(fake):
     )
     pad.update_section("t1", "a", "ok")
     pad.update_section("t1", "b", "ok")
-    from core.memory.scratchpad import ScratchpadOverflowError
+    from baselith.core.memory.scratchpad import ScratchpadOverflowError
 
     with pytest.raises(ScratchpadOverflowError):
         pad.update_section("t1", "c", "third section")
@@ -343,7 +343,7 @@ class TestAsyncBackend:
         await pad.aupdate_section("t1", "a", "ok")
         assert await pad.aread_section("t1", "a") == "ok"
         assert "## a" in await pad.aread_all("t1")
-        from core.memory.scratchpad import ScratchpadOverflowError
+        from baselith.core.memory.scratchpad import ScratchpadOverflowError
 
         with pytest.raises(ScratchpadOverflowError):
             await pad.aupdate_section("t1", "b", "x" * 32)
@@ -352,7 +352,7 @@ class TestAsyncBackend:
 class TestAsyncClientIsLoopKeyed:
     """The async client memo must not outlive its event loop.
 
-    ``core.cache.redis_cache.create_redis_client`` keys its shared pool by the
+    ``baselith.core.cache.redis_cache.create_redis_client`` keys its shared pool by the
     running loop, precisely because an asyncio Redis connection is bound to
     the loop that opened it. Memoising the client on the backend defeated
     that: a backend reused from a second loop (a worker restarted, a sync
@@ -371,7 +371,9 @@ class TestAsyncClientIsLoopKeyed:
             return client
 
         monkeypatch.setattr(
-            "core.cache.redis_cache.create_redis_client", _factory, raising=False
+            "baselith.core.cache.redis_cache.create_redis_client",
+            _factory,
+            raising=False,
         )
         backend = RedisScratchpadBackend(
             redis_client=fake, url="redis://localhost:6379/0", ttl_seconds=0
@@ -395,7 +397,9 @@ class TestAsyncClientIsLoopKeyed:
             return client
 
         monkeypatch.setattr(
-            "core.cache.redis_cache.create_redis_client", _factory, raising=False
+            "baselith.core.cache.redis_cache.create_redis_client",
+            _factory,
+            raising=False,
         )
         backend = RedisScratchpadBackend(
             redis_client=fake, url="redis://localhost:6379/0", ttl_seconds=0

@@ -37,11 +37,11 @@ def _collection_fields():
 
     from pydantic_settings import BaseSettings
 
-    import core.config
+    import baselith.core.config
 
     found = []
-    for mod in pkgutil.iter_modules(core.config.__path__):
-        module = importlib.import_module(f"core.config.{mod.name}")
+    for mod in pkgutil.iter_modules(baselith.core.config.__path__):
+        module = importlib.import_module(f"baselith.core.config.{mod.name}")
         for _name, obj in vars(module).items():
             if not (
                 inspect.isclass(obj)
@@ -162,7 +162,7 @@ class TestEnvExampleTemplateLoads:
 
         from pydantic_settings import BaseSettings
 
-        import core.config
+        import baselith.core.config
 
         repo_root = Path(__file__).resolve().parents[4]
         for raw in (repo_root / ".env.example").read_text().splitlines():
@@ -175,8 +175,8 @@ class TestEnvExampleTemplateLoads:
                 monkeypatch.setenv(key, value.strip())
 
         failures = []
-        for mod in pkgutil.iter_modules(core.config.__path__):
-            module = importlib.import_module(f"core.config.{mod.name}")
+        for mod in pkgutil.iter_modules(baselith.core.config.__path__):
+            module = importlib.import_module(f"baselith.core.config.{mod.name}")
             for name, obj in vars(module).items():
                 if (
                     inspect.isclass(obj)

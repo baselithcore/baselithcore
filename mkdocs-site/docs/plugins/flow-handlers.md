@@ -45,7 +45,7 @@ sequenceDiagram
 
 ## FlowHandler vs StreamHandler
 
-Two protocols are defined in `core/orchestration/protocols.py`:
+Two protocols are defined in `baselith/core/orchestration/protocols.py`:
 
 | Protocol | Method | Registered by | Use case |
 |----------|--------|---------------|----------|
@@ -54,19 +54,19 @@ Two protocols are defined in `core/orchestration/protocols.py`:
 
 !!! warning "Plugins register `FlowHandler`s only"
     `PluginRegistry` registers every value returned by `get_flow_handlers()` as a
-    **non-streaming** handler (`core/plugins/registration.py`). The orchestrator copies
+    **non-streaming** handler (`baselith/core/plugins/registration.py`). The orchestrator copies
     those into its flow-handler table and never populates its stream-handler table for
-    plugin intents (`core/orchestration/mixins/handlers.py`). When a client calls
+    plugin intents (`baselith/core/orchestration/mixins/handlers.py`). When a client calls
     `process_stream()` for a plugin intent, the orchestrator runs the full `process()`
     pipeline and yields the complete response as a **single chunk**
-    (`core/orchestration/mixins/execution.py`).
+    (`baselith/core/orchestration/mixins/execution.py`).
 
     Stream handlers exist for the built-in `qa_docs` intent (`StandardRagStreamHandler`)
     and for anything host code wires explicitly with
     `orchestrator.register_handler(intent, handler, stream_handler=...)`. That is
     the same `register_handler` seam `RagWorkflowHandler`
-    (`core/chat/rag_workflow.py`) and `WorkflowFlowHandler`
-    (`core/workflows/flow_handler.py`) are registered through, as flow handlers
+    (`baselith/core/chat/rag_workflow.py`) and `WorkflowFlowHandler`
+    (`baselith/core/workflows/flow_handler.py`) are registered through, as flow handlers
     only. A registered stream handler runs under the same per-request budget,
     tenant guard and memory controls as `process()`. See
     [Orchestration › Streaming pipeline](../core-modules/orchestration.md#streaming-pipeline).
@@ -85,13 +85,13 @@ response.
 ### Getting services
 
 Handlers obtain the LLM the same way the built-in RAG handler does
-(`core/orchestration/handlers/rag.py`): `core.services.llm.get_llm_service()` returns the
+(`baselith/core/orchestration/handlers/rag.py`): `baselith.core.services.llm.get_llm_service()` returns the
 shared `LLMService` for the current context (it honours per-plugin LLM policies). The
-service implements `LLMServiceProtocol` (`core/interfaces/services.py`), which exposes
+service implements `LLMServiceProtocol` (`baselith/core/interfaces/services.py`), which exposes
 exactly two calls:
 
 ```python
-from core.services.llm import get_llm_service
+from baselith.core.services.llm import get_llm_service
 
 llm = get_llm_service()
 
@@ -102,7 +102,7 @@ async for chunk in llm.generate_response_stream(prompt, model=None):
 ```
 
 Anything the plugin owns — API clients, configuration — is passed into the handler's
-constructor from `get_flow_handlers()`, the pattern `plugins/reasoning_agent/plugin.py`
+constructor from `get_flow_handlers()`, the pattern `baselith/plugins/reasoning_agent/plugin.py`
 follows. Resolve the LLM lazily: `get_flow_handlers()` runs while the plugin is being
 registered, before the request that will need the model.
 
@@ -111,8 +111,8 @@ registered, before the request that will need the model.
 ```python
 from typing import Any
 
-from core.orchestration.protocols import FlowHandler
-from core.services.llm import get_llm_service
+from baselith.core.orchestration.protocols import FlowHandler
+from baselith.core.services.llm import get_llm_service
 
 
 class WeatherHandler(FlowHandler):
@@ -171,7 +171,7 @@ class WeatherHandler(FlowHandler):
         return "Milan"  # Fallback
 ```
 
-`core.orchestration.handlers.BaseFlowHandler` is an alternative base: an ABC with
+`baselith.core.orchestration.handlers.BaseFlowHandler` is an alternative base: an ABC with
 `agents`/`services` dictionaries and `get_agent()`/`get_service()` helpers, used by the
 built-in handlers.
 
@@ -183,8 +183,8 @@ return the aggregated text, because the orchestrator delivers plugin results who
 ```python
 from typing import Any
 
-from core.orchestration.protocols import FlowHandler
-from core.services.llm import get_llm_service
+from baselith.core.orchestration.protocols import FlowHandler
+from baselith.core.services.llm import get_llm_service
 
 
 class StoryHandler(FlowHandler):
@@ -209,8 +209,8 @@ the `Orchestrator` instance can attach one to an intent:
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from core.orchestration.protocols import StreamHandler
-from core.services.llm import get_llm_service
+from baselith.core.orchestration.protocols import StreamHandler
+from baselith.core.services.llm import get_llm_service
 
 
 class StoryStreamHandler(StreamHandler):
@@ -245,7 +245,7 @@ of **intent name → handler**; there is no per-intent sync/stream structure:
 ```python
 from typing import Any
 
-from core.plugins import AgentPlugin
+from baselith.core.plugins import AgentPlugin
 
 
 class MyPlugin(AgentPlugin):
@@ -293,7 +293,7 @@ class MyPlugin(AgentPlugin):
         ]
 ```
 
-How the registry treats each entry (`core/plugins/registration.py`):
+How the registry treats each entry (`baselith/core/plugins/registration.py`):
 
 - Every value is wrapped in a lazy proxy. On first use the proxy activates the owning
   plugin if needed, then calls `getattr(handler, "handle", handler)(query, context)` and
@@ -305,7 +305,7 @@ How the registry treats each entry (`core/plugins/registration.py`):
 - Pass configuration as a callable (`self.get_config`) rather than reading it while
   building handlers: `get_config()` returns values from the `initialize(config)` call.
 
-Intent pattern keys (`core/orchestration/intent_classifier.py`):
+Intent pattern keys (`baselith/core/orchestration/intent_classifier.py`):
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -374,9 +374,9 @@ Handle errors gracefully to avoid crashes and provide useful feedback:
 ```python
 from typing import Any
 
-from core.observability import get_logger
-from core.orchestration.protocols import FlowHandler
-from core.resilience import CircuitBreakerError
+from baselith.core.observability import get_logger
+from baselith.core.orchestration.protocols import FlowHandler
+from baselith.core.resilience import CircuitBreakerError
 
 logger = get_logger(__name__)
 
@@ -417,7 +417,7 @@ class RobustHandler(FlowHandler):
             return {"response": "An internal error occurred. The team has been notified.", "error": True}
 ```
 
-Framework exception types live in `core/exceptions.py` (`BaselithError`, `PluginError`,
+Framework exception types live in `baselith/core/exceptions.py` (`BaselithError`, `PluginError`,
 `PluginConfigError`, ...). An unhandled exception escaping `handle()` is caught by the
 orchestrator and returned as `{"response": "Error processing request: ...", "error": True}`.
 
@@ -430,14 +430,14 @@ orchestrator and returned as `{"response": "Error processing request: ...", "err
     Use structured logging with context (request_id, tenant_id) for easier debugging in production.
 
 !!! tip "Metric Tracking"
-    `core.observability.metrics` is a module of `prometheus_client` objects — there is no
+    `baselith.core.observability.metrics` is a module of `prometheus_client` objects — there is no
     `increment()` helper. Record handler latency on the plugin histogram the framework
     already exports:
 
     ```python
     import time
 
-    from core.observability.metrics import PLUGIN_CALL_LATENCY_SECONDS
+    from baselith.core.observability.metrics import PLUGIN_CALL_LATENCY_SECONDS
 
     start = time.perf_counter()
     try:
@@ -514,7 +514,7 @@ async def test_story_handler_aggregates_stream(monkeypatch):
 ```python
 import time
 
-from core.observability import get_logger
+from baselith.core.observability import get_logger
 
 logger = get_logger("my-handler")
 
@@ -542,7 +542,7 @@ async def handle(self, query: str, context: dict) -> dict:
 ### Distributed Tracing
 
 ```python
-from core.observability import get_tracer
+from baselith.core.observability import get_tracer
 
 tracer = get_tracer("my-handler")
 
@@ -589,14 +589,14 @@ async def handle(self, query: str, context: dict) -> dict:
 
 ### Caching Results
 
-`core.cache.TTLCache` is an in-memory LRU cache with per-entry TTL and an async API
+`baselith.core.cache.TTLCache` is an in-memory LRU cache with per-entry TTL and an async API
 (`RedisTTLCache` offers the same interface over Redis):
 
 ```python
 from typing import Any
 
-from core.cache import TTLCache
-from core.orchestration.protocols import FlowHandler
+from baselith.core.cache import TTLCache
+from baselith.core.orchestration.protocols import FlowHandler
 
 
 class CachedHandler(FlowHandler):
@@ -615,14 +615,14 @@ class CachedHandler(FlowHandler):
 
 ### Rate Limiting
 
-`core.resilience.RateLimiter` is a sliding-window limiter keyed by any string
+`baselith.core.resilience.RateLimiter` is a sliding-window limiter keyed by any string
 (in-memory by default, `RedisRateLimiter` backend for multi-worker deployments):
 
 ```python
 from typing import Any
 
-from core.orchestration.protocols import FlowHandler
-from core.resilience import RateLimiter
+from baselith.core.orchestration.protocols import FlowHandler
+from baselith.core.resilience import RateLimiter
 
 
 class RateLimitedHandler(FlowHandler):
@@ -643,8 +643,8 @@ class RateLimitedHandler(FlowHandler):
 ```python
 from typing import Any
 
-from core.orchestration.protocols import FlowHandler
-from core.resilience import CircuitBreakerConfig, get_circuit_breaker, retry
+from baselith.core.orchestration.protocols import FlowHandler
+from baselith.core.resilience import CircuitBreakerConfig, get_circuit_breaker, retry
 
 # Named breakers are shared process-wide; the same name returns the same instance.
 weather_breaker = get_circuit_breaker(

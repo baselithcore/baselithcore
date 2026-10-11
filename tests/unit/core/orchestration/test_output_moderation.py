@@ -14,9 +14,12 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from core.guardrails.moderation import ModerationVerdict
-from core.orchestration.guard_pipeline import guard_output_async
-from core.orchestration.stream_guard import MODERATION_CHECK_INTERVAL, moderate_stream
+from baselith.core.guardrails.moderation import ModerationVerdict
+from baselith.core.orchestration.guard_pipeline import guard_output_async
+from baselith.core.orchestration.stream_guard import (
+    MODERATION_CHECK_INTERVAL,
+    moderate_stream,
+)
 
 
 class _StubModerator:
@@ -40,7 +43,7 @@ def output_moderation_on(monkeypatch):
 
 
 def _install(monkeypatch, stub: _StubModerator) -> None:
-    from core.guardrails import moderation as moderation_module
+    from baselith.core.guardrails import moderation as moderation_module
 
     monkeypatch.setattr(moderation_module, "get_moderator", lambda: stub)
 

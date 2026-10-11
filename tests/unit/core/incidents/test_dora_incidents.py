@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.config.incidents import IncidentReportingConfig
-from core.incidents import (
+from baselith.core.config.incidents import IncidentReportingConfig
+from baselith.core.incidents import (
     DoraClassification,
     DoraImpactAssessment,
     DoraIncident,

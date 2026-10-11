@@ -15,13 +15,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.security import SecurityManager
+from baselith.core.middleware.security import SecurityManager
 
 _LEAKY = "Audience doesn't match"
 
 
 def _manager(mock_security_config) -> SecurityManager:
-    with patch("core.middleware.rate_limiter.create_redis_client") as mock_factory:
+    with patch(
+        "baselith.core.middleware.rate_limiter.create_redis_client"
+    ) as mock_factory:
         mock_factory.return_value = AsyncMock()
         manager = SecurityManager(mock_security_config)
     manager.rate_limiter = AsyncMock()
@@ -40,9 +42,9 @@ def _request() -> MagicMock:
 
 async def _enforce_with_auth_error(manager, message: str, mock_logger_target: str):
     """Run enforce_auth against an AuthError and return (exc_info, logger mock)."""
-    from core.auth.types import AuthError
+    from baselith.core.auth.types import AuthError
 
-    with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+    with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
         mock_auth = AsyncMock()
         mock_auth.authenticate.side_effect = AuthError(message)
         mock_get_auth.return_value = mock_auth
@@ -61,7 +63,9 @@ class TestAuthFailureDetailIsGeneric:
         self, mock_security_config
     ):
         exc, mock_logger = await _enforce_with_auth_error(
-            _manager(mock_security_config), _LEAKY, "core.middleware.security.logger"
+            _manager(mock_security_config),
+            _LEAKY,
+            "baselith.core.middleware.security.logger",
         )
 
         assert exc.value.status_code == 401
@@ -86,7 +90,7 @@ class TestAuthFailureDetailIsGeneric:
         """
         manager = _manager(mock_security_config)
 
-        with patch("core.auth.manager.get_auth_manager") as mock_get_auth:
+        with patch("baselith.core.auth.manager.get_auth_manager") as mock_get_auth:
             mock_auth = AsyncMock()
             anonymous = MagicMock()
             anonymous.is_authenticated = False
@@ -99,7 +103,9 @@ class TestAuthFailureDetailIsGeneric:
                 )
 
         error_exc, _ = await _enforce_with_auth_error(
-            _manager(mock_security_config), _LEAKY, "core.middleware.security.logger"
+            _manager(mock_security_config),
+            _LEAKY,
+            "baselith.core.middleware.security.logger",
         )
         assert anon_exc.value.detail == error_exc.value.detail
 
@@ -108,7 +114,7 @@ class TestAuthFailureDetailIsGeneric:
         _, mock_logger = await _enforce_with_auth_error(
             _manager(mock_security_config),
             "bad kid 'x'\nAUDIT | AUTH | ok | user=admin",
-            "core.middleware.security.logger",
+            "baselith.core.middleware.security.logger",
         )
 
         # Positional arg 2 of the audit line is the sanitized reason.

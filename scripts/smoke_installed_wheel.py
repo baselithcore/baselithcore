@@ -21,7 +21,7 @@ installed package) and runs, in order:
 ``cli``      ``baselith --help`` exits 0.
 ``migrate``  ``baselith db migrate`` applies the packaged migrations to the
              database the ``DB_*`` environment names.
-``boot``     ``uvicorn core.api.factory:create_app --factory`` starts, and
+``boot``     ``uvicorn baselith.core.api.factory:create_app --factory`` starts, and
              ``/health`` and ``/health/ready`` answer 200 with the database
              reported up (``--require-redis`` also demands Redis).
 
@@ -80,7 +80,7 @@ def check_import(root: Path = REPO_ROOT) -> str:
     missing = sorted(name for name in module.__all__ if not hasattr(module, name))
     if missing:
         raise SmokeError(f"`from baselith import *` did not bind {missing}")
-    core = importlib.import_module("core")
+    core = importlib.import_module("baselith.core")
     assert_outside(str(core.__file__), root)
     return str(module.__file__)
 
@@ -178,7 +178,7 @@ def check_boot(port: int, timeout: float, *, require_redis: bool) -> None:
         sys.executable,
         "-m",
         "uvicorn",
-        "core.api.factory:create_app",
+        "baselith.core.api.factory:create_app",
         "--factory",
         "--host",
         "127.0.0.1",

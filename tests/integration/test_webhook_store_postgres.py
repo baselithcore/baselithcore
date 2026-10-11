@@ -29,9 +29,10 @@ from tests.integration.test_tool_ledger_postgres import (
 
 pytestmark = [pytest.mark.integration]
 
-MODULE = "core.webhooks.store_postgres"
+MODULE = "baselith.core.webhooks.store_postgres"
 MIGRATION = (
     Path(__file__).resolve().parents[2]
+    / "baselith"
     / "core"
     / "db"
     / "migrations"
@@ -76,14 +77,14 @@ def tenant() -> Iterator[str]:
 
 @pytest.fixture
 def store(monkeypatch, tenant: str) -> Any:
-    from core.webhooks.store_postgres import PostgresWebhookStore
+    from baselith.core.webhooks.store_postgres import PostgresWebhookStore
 
     monkeypatch.setattr(f"{MODULE}.get_async_cursor", _real_cursor_factory())
     return PostgresWebhookStore()
 
 
 def _endpoint(tenant: str, **extra: Any) -> Any:
-    from core.webhooks.types import WebhookEndpoint
+    from baselith.core.webhooks.types import WebhookEndpoint
 
     fields: dict[str, Any] = {
         "tenant_id": tenant,
@@ -120,10 +121,10 @@ async def test_secrets_are_ciphertext_at_rest_when_keys_are_set(
 ):
     import psycopg
 
-    from core.security.encryption import FieldEncryptor
+    from baselith.core.security.encryption import FieldEncryptor
 
     encryptor = FieldEncryptor.from_keys({"k1": "a" * 32}, active_key_id="k1")
-    monkeypatch.setattr("core.security.get_field_encryptor", lambda: encryptor)
+    monkeypatch.setattr("baselith.core.security.get_field_encryptor", lambda: encryptor)
 
     endpoint = await store.add_endpoint(_endpoint(tenant))
 
@@ -142,7 +143,7 @@ async def test_secrets_are_ciphertext_at_rest_when_keys_are_set(
 
 
 async def test_deliveries_are_recorded_updated_and_listed(store, tenant):
-    from core.webhooks.types import DeliveryStatus, WebhookDelivery
+    from baselith.core.webhooks.types import DeliveryStatus, WebhookDelivery
 
     delivery = WebhookDelivery(
         endpoint_id="whe_x",

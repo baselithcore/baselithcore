@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._resolve import (
+from baselith.core.plugins._resolve import (
     is_valid_plugin_name,
     safe_plugin_path,
     sort_by_dependencies,
@@ -16,7 +16,7 @@ from core.plugins._resolve import (
 
 class TestPluginNameValidation:
     @pytest.mark.parametrize(
-        "name", ["baselithbot", "api_routers", "web-scraper", "a.b_c-1", "x"]
+        "name", ["examplebot", "api_routers", "web-scraper", "a.b_c-1", "x"]
     )
     def test_accepts_ordinary_identifiers(self, name: str) -> None:
         assert is_valid_plugin_name(name)

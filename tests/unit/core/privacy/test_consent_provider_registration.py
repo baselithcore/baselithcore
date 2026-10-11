@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from core.api.startup_checks import register_consent_provider
+from baselith.core.api.startup_checks import register_consent_provider
 
 
 def reset_privacy_config() -> None:
     """Drop the cached privacy config so the env is re-read (no public reset)."""
-    import core.config.privacy as privacy_config
+    import baselith.core.config.privacy as privacy_config
 
     privacy_config._privacy_config = None
 
@@ -22,8 +22,8 @@ def reset_privacy_config() -> None:
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch):
     """Isolate the privacy singletons and the config between tests."""
-    import core.privacy.consent as consent
-    import core.privacy.service as service
+    import baselith.core.privacy.consent as consent
+    import baselith.core.privacy.service as service
 
     # The provider registry is a process-global shared by every consumer, so it
     # has to be cleared too or providers leak between tests.
@@ -39,7 +39,7 @@ def _reset(monkeypatch: pytest.MonkeyPatch):
 
 
 def _provider_names() -> list[str]:
-    from core.privacy import get_data_subject_service
+    from baselith.core.privacy import get_data_subject_service
 
     return [p.name for p in get_data_subject_service().registry.all()]
 
@@ -76,8 +76,8 @@ def test_registration_is_idempotent_and_refreshes_the_instance(
     after a reconfiguration: keeping the old instance would point the DSR at a
     consent store nobody writes to any more.
     """
-    import core.privacy.consent as consent
-    from core.privacy import get_consent_service, get_data_subject_service
+    import baselith.core.privacy.consent as consent
+    from baselith.core.privacy import get_consent_service, get_data_subject_service
 
     monkeypatch.setenv("PRIVACY_ENABLED", "true")
     reset_privacy_config()
@@ -97,7 +97,7 @@ async def test_a_subject_export_then_reaches_the_consent_records(
     monkeypatch.setenv("PRIVACY_ENABLED", "true")
     reset_privacy_config()
 
-    from core.privacy import get_consent_service, get_data_subject_service
+    from baselith.core.privacy import get_consent_service, get_data_subject_service
 
     await get_consent_service().grant("u-1", "analytics", notice_version="v3")
     register_consent_provider()

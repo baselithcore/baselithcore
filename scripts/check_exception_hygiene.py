@@ -1,4 +1,4 @@
-"""Silent-exception ratchet for ``core/``.
+"""Silent-exception ratchet for ``baselith/core/``.
 
 A broad handler that swallows the error without a trace —
 
@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = Path(__file__).resolve().parent / "exception_hygiene_baseline.json"
 
 #: Trees scanned by the gate, relative to the repository root.
-SCANNED_ROOTS: tuple[str, ...] = ("core",)
+SCANNED_ROOTS: tuple[str, ...] = ("baselith/core",)
 #: Marker that opts a handler out of the gate; a reason must follow it.
 OPT_OUT_MARKER = "silent-ok:"
 BROAD_EXCEPTION_NAMES = frozenset({"Exception", "BaseException"})
@@ -169,7 +169,7 @@ def write_baseline(root: Path, baseline_path: Path) -> int:
     counts = scan_tree(root)
     payload = {
         "_comment": (
-            "Silent broad except handlers per core/ file when the gate was introduced. "
+            "Silent broad except handlers per baselith/core/ file when the gate was introduced. "
             "Counts may shrink but never grow; delete an entry once the file reaches zero. "
             "Regenerate with: python scripts/check_exception_hygiene.py --update-baseline"
         ),

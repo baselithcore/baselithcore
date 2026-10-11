@@ -9,8 +9,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.api import _recovery_startup
-from core.orchestration.checkpoint_factory import CheckpointStoreUnavailableError
+from baselith.core.api import _recovery_startup
+from baselith.core.orchestration.checkpoint_factory import (
+    CheckpointStoreUnavailableError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -29,10 +31,10 @@ async def test_boot_does_not_wait_and_the_store_initializes_once_the_db_returns(
 
     with (
         patch(
-            "core.orchestration.checkpoint_factory.initialize_default_checkpoint_store",
+            "baselith.core.orchestration.checkpoint_factory.initialize_default_checkpoint_store",
             init,
         ),
-        patch("core.db.reachability.probe_postgres", probe),
+        patch("baselith.core.db.reachability.probe_postgres", probe),
         patch.object(_recovery_startup, "_schedule_recovery_sweep") as sweep,
     ):
         started = time.monotonic()
@@ -54,10 +56,10 @@ async def test_retry_task_is_cancellable_at_shutdown() -> None:
     tasks: set[asyncio.Task[Any]] = set()
     with (
         patch(
-            "core.orchestration.checkpoint_factory.initialize_default_checkpoint_store",
+            "baselith.core.orchestration.checkpoint_factory.initialize_default_checkpoint_store",
             init,
         ),
-        patch("core.db.reachability.probe_postgres", probe),
+        patch("baselith.core.db.reachability.probe_postgres", probe),
     ):
         await _recovery_startup.start_checkpoint_recovery(tasks)
         await asyncio.sleep(0.05)

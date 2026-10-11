@@ -216,7 +216,7 @@ def silence_telemetry(monkeypatch):
 @pytest.fixture(autouse=True)
 def setup_tenant_context():
     """Set a default tenant context for all tests to satisfy strict isolation."""
-    from core.context import reset_tenant_context, set_tenant_context
+    from baselith.core.context import reset_tenant_context, set_tenant_context
 
     token = set_tenant_context("default")
     yield
@@ -232,7 +232,7 @@ def reset_user_context_between_tests():
     the bound id would otherwise survive into later tests that assert an
     unauthenticated (``None``) context.
     """
-    from core import context
+    from baselith.core import context
 
     context._user_context.set(None)
     yield
@@ -275,29 +275,36 @@ def _hermetic_tool_ledger():
 
     The ledger is also a process-wide singleton, so it is reset around every
     test: a claim left by one test must not decide another's outcome.
-    ``core.orchestration.ledger_factory`` has its own tests, which set the
-    variable themselves.
+    ``baselith.core.orchestration.ledger_factory`` has its own tests, which set the
+    variable themselves. MCP task handles get the same treatment for the same
+    reason (``MCP_TASK_STORE_BACKEND=auto`` would write every task to
+    Postgres); durable-store tests pass a backend to ``TaskStore`` explicitly.
     """
-    from core.orchestration.ledger_factory import reset_tool_ledger
+    import baselith.core.config.mcp as mcp_config
+    from baselith.core.orchestration.ledger_factory import reset_tool_ledger
 
-    saved = os.environ.get("ORCHESTRATOR_TOOL_LEDGER")
-    os.environ["ORCHESTRATOR_TOOL_LEDGER"] = "memory"
+    keys = ("ORCHESTRATOR_TOOL_LEDGER", "MCP_TASK_STORE_BACKEND")
+    saved = {key: os.environ.get(key) for key in keys}
+    os.environ.update(dict.fromkeys(keys, "memory"))
     _reset_orchestration_config()
+    mcp_config._mcp_config = None
     reset_tool_ledger()
     try:
         yield
     finally:
-        if saved is None:
-            os.environ.pop("ORCHESTRATOR_TOOL_LEDGER", None)
-        else:
-            os.environ["ORCHESTRATOR_TOOL_LEDGER"] = saved
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         _reset_orchestration_config()
+        mcp_config._mcp_config = None
         reset_tool_ledger()
 
 
 def _reset_orchestration_config() -> None:
     """Drop the cached orchestration settings so the env change is read."""
-    import core.config.orchestration as orchestration_config
+    import baselith.core.config.orchestration as orchestration_config
 
     orchestration_config._orchestration_config = None
 
@@ -307,7 +314,7 @@ def _reset_assumed_production_posture():
     """create_app() arms a process-global hardened posture when auth is on and
     no environment is declared; reset it around every test so the flag cannot
     bleed across the randomized suite."""
-    from core.utils import runtime_env
+    from baselith.core.utils import runtime_env
 
     runtime_env.reset_assumed_production()
     yield
@@ -323,7 +330,7 @@ def _reset_unknown_model_cost_policy():
     the singleton used to leave ``reject`` behind for whichever test ran next
     in the randomized order, which then failed for any unpriced model.
     """
-    from core.quotas import cost_enforcement
+    from baselith.core.quotas import cost_enforcement
 
     cost_enforcement._unknown_model_cost_config = None
     yield
@@ -336,9 +343,9 @@ async def cleanup_global_state_between_tests():
     yield
     # Cleanup after each test
     try:
-        from core.di import ServiceRegistry, reset_lazy_registry
-        from core.events import reset_event_bus
-        from core.events.listener import EventListener
+        from baselith.core.di import ServiceRegistry, reset_lazy_registry
+        from baselith.core.events import reset_event_bus
+        from baselith.core.events.listener import EventListener
 
         # Close and reset the global LLM service, if one was ever built.
         #
@@ -353,7 +360,7 @@ async def cleanup_global_state_between_tests():
         try:
             import asyncio
 
-            from core.services.llm import runtime as _llm_runtime
+            from baselith.core.services.llm import runtime as _llm_runtime
 
             svc = _llm_runtime._default_service
             if svc is not None:
@@ -376,7 +383,7 @@ async def cleanup_global_state_between_tests():
     # this shared LRU/TTL cache, so stale entries from a prior test could
     # otherwise satisfy a later test's evaluation and skew LLM call counts.
     try:
-        from core.reasoning.tot import cache as _tot_cache
+        from baselith.core.reasoning.tot import cache as _tot_cache
 
         if _tot_cache._global_thought_cache is not None:
             _tot_cache._global_thought_cache.clear()
@@ -384,12 +391,12 @@ async def cleanup_global_state_between_tests():
         pass
 
     # Clear the process-global vision API-key resolver registry. Plugins
-    # (e.g. baselithbot) register a resolver in ``initialize`` and only drop it
+    # register a resolver in ``initialize`` and only drop it
     # in ``shutdown``; tests that load/init a plugin without a paired shutdown
     # would otherwise leak a mock-backed resolver into VisionService and make
     # unrelated vision tests resolve bogus keys.
     try:
-        from core.services.vision import service as _vision_service
+        from baselith.core.services.vision import service as _vision_service
 
         _vision_service._key_resolvers.clear()
     except (ImportError, Exception):
@@ -403,9 +410,9 @@ def dummy_service():
 
 @pytest.fixture
 def make_state():
-    from core.models.chat.chat import ChatRequest
+    from baselith.core.models.chat.chat import ChatRequest
 
-    from core.chat.agent_state import AgentState
+    from baselith.core.chat.agent_state import AgentState
 
     def _make(query: str) -> AgentState:
         return AgentState(request=ChatRequest(query=query))

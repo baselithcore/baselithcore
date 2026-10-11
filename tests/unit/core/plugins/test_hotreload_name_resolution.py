@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import PluginLoader, PluginRegistry
-from core.plugins.hotreload import HotReloadController
-from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+from baselith.core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins.hotreload import HotReloadController
+from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
 pytestmark = [pytest.mark.unit]
 
@@ -25,7 +25,7 @@ DIR_NAME = "fancy_plugin"
 MANIFEST_NAME = "fancy-plugin"
 
 BODY = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class FancyPlugin(Plugin):
@@ -40,7 +40,7 @@ def _clean_sys_modules(monkeypatch: pytest.MonkeyPatch):
     before = set(sys.modules)
     yield
     for key in set(sys.modules) - before:
-        if key.startswith("plugins."):
+        if key.startswith("baselith.plugins."):
             del sys.modules[key]
 
 

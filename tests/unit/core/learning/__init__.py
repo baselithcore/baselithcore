@@ -1,1 +1,1 @@
-"""Unit tests for core.learning performance fixes."""
+"""Unit tests for baselith.core.learning performance fixes."""

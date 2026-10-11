@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from core.mcp.dispatch import RequestDispatcher
-from core.mcp.progress import report_progress
-from core.mcp.server import MCPServer
+from baselith.core.mcp.dispatch import RequestDispatcher
+from baselith.core.mcp.progress import report_progress
+from baselith.core.mcp.server import MCPServer
 
 
 class _Outbox:

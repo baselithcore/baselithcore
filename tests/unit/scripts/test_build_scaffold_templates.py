@@ -3,7 +3,7 @@
 ``templates/`` sits outside every package, so ``pip install baselith-core``
 used to offer nothing but the built-in ``minimal`` template: the richer
 starters existed only in a checkout. ``build_support.scaffold_templates``
-copies them into ``core/cli/scaffold_templates`` at build time; these tests
+copies them into ``baselith/core/cli/scaffold_templates`` at build time; these tests
 pin what it copies and keep its list in step with what the CLI scaffolds.
 """
 
@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_every_cli_project_template_is_shipped() -> None:
-    from core.cli.commands.init import PROJECT_TEMPLATES, available_templates
+    from baselith.core.cli.commands.init import PROJECT_TEMPLATES, available_templates
 
     directory_templates = {
         name for name in available_templates() if name not in PROJECT_TEMPLATES
@@ -40,7 +40,7 @@ def test_non_project_trees_are_not_shipped() -> None:
 
 
 def test_target_is_where_the_cli_looks() -> None:
-    from core.cli.commands import init
+    from baselith.core.cli.commands import init
 
     assert init.PACKAGED_TEMPLATES.relative_to(REPO_ROOT).as_posix() == PACKAGE_TARGET
 

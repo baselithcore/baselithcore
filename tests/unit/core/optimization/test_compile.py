@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from core.evaluation.prompt_eval import EvalCase, PromptEvaluator
-from core.observability import audit as audit_module
-from core.observability.audit import AuditEventType
-from core.optimization.compile import CompiledPrompt, compile_prompt
-from core.optimization.tune_gate import CANDIDATE_LABEL
-from core.prompts.registry import PromptRegistry
+from baselith.core.evaluation.prompt_eval import EvalCase, PromptEvaluator
+from baselith.core.observability import audit as audit_module
+from baselith.core.observability.audit import AuditEventType
+from baselith.core.optimization.compile import CompiledPrompt, compile_prompt
+from baselith.core.optimization.tune_gate import CANDIDATE_LABEL
+from baselith.core.prompts.registry import PromptRegistry
 
 pytestmark = [pytest.mark.unit]
 
@@ -40,7 +40,9 @@ def audit_sink(monkeypatch):
 @pytest.fixture
 def registry(monkeypatch):
     reg = PromptRegistry()
-    monkeypatch.setattr("core.prompts.registry.get_prompt_registry", lambda: reg)
+    monkeypatch.setattr(
+        "baselith.core.prompts.registry.get_prompt_registry", lambda: reg
+    )
     return reg
 
 

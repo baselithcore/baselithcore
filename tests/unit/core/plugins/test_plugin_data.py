@@ -1,4 +1,4 @@
-"""core.plugins.data_dir: per-plugin runtime state outside the plugin tree."""
+"""baselith.core.plugins.data_dir: per-plugin runtime state outside the plugin tree."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.plugin_data import DATA_DIR_ENV, data_dir, plugin_data_root
+from baselith.core.plugins.plugin_data import DATA_DIR_ENV, data_dir, plugin_data_root
 
 
 def test_default_root_is_data_plugins_under_cwd(
@@ -60,15 +60,15 @@ def test_invalid_names_refused(
 
 
 def test_exported_from_core_plugins() -> None:
-    import core.plugins
+    import baselith.core.plugins
 
-    assert core.plugins.data_dir is data_dir
+    assert baselith.core.plugins.data_dir is data_dir
 
 
 def test_root_inside_plugins_dir_or_overlay_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import core.plugins.plugin_data as pd
+    import baselith.core.plugins.plugin_data as pd
 
     plugins = Path(pd.__file__).resolve().parents[2] / "plugins"
     monkeypatch.setenv(DATA_DIR_ENV, str(plugins / "x" / "state"))

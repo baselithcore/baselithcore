@@ -1,5 +1,5 @@
 """
-Tests for core/services/llm/providers/anthropic_provider.py
+Tests for baselith/core/services/llm/providers/anthropic_provider.py
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,10 +10,12 @@ import pytest
 class TestAnthropicProviderInit:
     """Tests for AnthropicProvider initialization."""
 
-    @patch("core.services.llm.providers.anthropic_provider.anthropic")
+    @patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
     def test_init_with_api_key(self, mock_anthropic):
         """Verify provider initializes with API key."""
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test-key")
         # Force initialization
@@ -30,8 +32,10 @@ class TestAnthropicProviderInit:
 
     def test_init_without_api_key_raises(self):
         """Verify provider raises error without API key."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         with pytest.raises(LLMProviderError) as exc_info:
             AnthropicProvider(api_key="")
@@ -64,10 +68,12 @@ class TestAnthropicProviderGenerate:
         mock_client.messages.create.return_value = mock_response
 
         with patch(
-            "core.services.llm.providers.anthropic_provider.anthropic"
+            "baselith.core.services.llm.providers.anthropic_provider.anthropic"
         ) as mock_anthropic:
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             content, tokens = await provider.generate(
@@ -91,10 +97,12 @@ class TestAnthropicProviderGenerate:
         mock_client.messages.create.return_value = mock_response
 
         with patch(
-            "core.services.llm.providers.anthropic_provider.anthropic"
+            "baselith.core.services.llm.providers.anthropic_provider.anthropic"
         ) as mock_anthropic:
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate("Prompt", model="claude-3-sonnet", json_mode=True)
@@ -148,12 +156,14 @@ class TestAnthropicProviderGenerateStream:
         mock_client.messages.stream.return_value = mock_manager
 
         with patch(
-            "core.services.llm.providers.anthropic_provider.anthropic"
+            "baselith.core.services.llm.providers.anthropic_provider.anthropic"
         ) as mock_anthropic:
             mock_anthropic.AsyncAnthropic.return_value = mock_client
             mock_anthropic.NOT_GIVEN = "not_given"
 
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             chunks = []
@@ -194,15 +204,17 @@ class TestAnthropicProviderPromptCache:
 
         with (
             patch(
-                "core.services.llm.providers.anthropic_provider.anthropic"
+                "baselith.core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                "baselith.core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate("hi", model="claude-3-sonnet", system=long_system)
@@ -218,15 +230,17 @@ class TestAnthropicProviderPromptCache:
 
         with (
             patch(
-                "core.services.llm.providers.anthropic_provider.anthropic"
+                "baselith.core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                "baselith.core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate("hi", model="claude-3-sonnet", system="short")
@@ -240,7 +254,7 @@ class TestAnthropicProviderPromptCache:
         Tools render ahead of ``system``, so this caches the tool schema even
         when the system prompt is short or absent — the common agentic shape.
         """
-        from core.services.llm.tool_calling import LLMToolSpec
+        from baselith.core.services.llm.tool_calling import LLMToolSpec
 
         mock_client = self._mock_client()
         big_tools = [
@@ -254,15 +268,17 @@ class TestAnthropicProviderPromptCache:
 
         with (
             patch(
-                "core.services.llm.providers.anthropic_provider.anthropic"
+                "baselith.core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                "baselith.core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate_structured(
@@ -276,7 +292,7 @@ class TestAnthropicProviderPromptCache:
 
     async def test_small_tool_schema_gets_no_breakpoint(self):
         """A tool block too small to cache doesn't consume a breakpoint."""
-        from core.services.llm.tool_calling import LLMToolSpec
+        from baselith.core.services.llm.tool_calling import LLMToolSpec
 
         mock_client = self._mock_client()
         small_tools = [
@@ -289,15 +305,17 @@ class TestAnthropicProviderPromptCache:
 
         with (
             patch(
-                "core.services.llm.providers.anthropic_provider.anthropic"
+                "baselith.core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                "baselith.core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 True,
             ),
         ):
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate_structured(
@@ -314,15 +332,17 @@ class TestAnthropicProviderPromptCache:
 
         with (
             patch(
-                "core.services.llm.providers.anthropic_provider.anthropic"
+                "baselith.core.services.llm.providers.anthropic_provider.anthropic"
             ) as mock_anthropic,
             patch(
-                "core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
+                "baselith.core.services.llm.providers._anthropic_mapping._PROMPT_CACHE_ENABLED",
                 False,
             ),
         ):
             mock_anthropic.AsyncAnthropic.return_value = mock_client
-            from core.services.llm.providers.anthropic_provider import AnthropicProvider
+            from baselith.core.services.llm.providers.anthropic_provider import (
+                AnthropicProvider,
+            )
 
             provider = AnthropicProvider(api_key="sk-ant-test")
             await provider.generate("hi", model="claude-3-sonnet", system=long_system)

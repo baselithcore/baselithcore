@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
 
 
 def test_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

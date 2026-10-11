@@ -6,6 +6,12 @@ name: Nightly (unpinned toolchain)
 # night it ships instead of at the next deliberate bump (the exact failure
 # mode ruff 0.16.0 caused; see the pinning policy header in ci.yml).
 # Failures here are informational: fix by bumping pins in their own PR.
+#
+# It is also where the signals too slow, or too far from any one diff, to run
+# per pull request live: the interpreter matrix beyond the gated 3.12
+# (`forward_compat`), the disaster-recovery restore drill (`restore_drill`) and
+# mutation testing of the security code (`mutation_testing`). None of them is a
+# merge gate — gates live in .pre-commit-config.yaml and ci.yml.
 
 on:
   schedule:
@@ -41,27 +47,39 @@ jobs:
           pip install uv
           uv pip install --system --group dev -e . mypy --upgrade
           mypy --version
-          mypy core/ || true  # advisory: pre-existing debt tracked separately
+          mypy baselith/core/ || true  # advisory: pre-existing debt tracked separately
 
   forward_compat:
-    # Python 3.14 against the LOCKED dependency set. Two canaries, one file,
-    # deliberately not merged: `fresh_resolve_tests` below varies the
+    # Python 3.13 and 3.14 against the LOCKED dependency set. Two canaries, one
+    # file, deliberately not merged: `fresh_resolve_tests` below varies the
     # dependencies and holds the interpreter at 3.12, this one varies the
     # interpreter and holds the dependencies at uv.lock. Run together they say
     # which of the two moved when something breaks.
+    #
+    # 3.13 is in ci.yml's matrix too, but only on a `full` plan
+    # (scripts/ci_plan.py: a pull request into main, the merge queue, an
+    # unverified push); a pull request into develop runs 3.12 alone. Between
+    # promotions nothing ran 3.13, so a lock bump or a baselith/core/ change that breaks
+    # it surfaced at release time. Here it gets the same daily answer 3.14
+    # does. `fail-fast: false` so one interpreter's breakage never cancels the
+    # other's answer.
     #
     # It lived in ci.yml's test matrix as an `experimental` leg until the cost
     # was measured: `continue-on-error` meant it could never fail a build, so
     # every push and every PR paid for a signal nobody was gated on. Nightly
     # gives the same answer a day later, which is the right latency for
-    # "upstream has not published 3.14 wheels yet".
+    # "upstream has not published wheels for this interpreter yet".
     #
     # A failure here is information, not an incident: it means the ecosystem is
-    # not ready, or that something in core/ genuinely breaks on 3.14. Read it,
-    # do not silence it.
-    name: Forward-compat (Python 3.14, locked deps)
+    # not ready, or that something in baselith/core/ genuinely breaks on that
+    # interpreter. Read it, do not silence it.
+    name: Forward-compat (Python ${{ matrix.python-version }}, locked deps)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.13', '3.14']
     services:
       postgres:
         image: postgres:16-alpine
@@ -81,7 +99,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
-          python-version: '3.14'
+          python-version: ${{ matrix.python-version }}
       - name: Install uv
         run: pip install uv==0.12.0
       - name: Run Tests
@@ -136,3 +154,168 @@ jobs:
           DB_HOST: localhost
           REDIS_URL: redis://localhost:6379/0
         run: pytest -n auto -q -m "not slow"
+
+  restore_drill:
+    # Disaster-recovery drill: "we have backups" only means something once a
+    # backup has been restored. Every night this migrates a real database,
+    # seeds it, dumps it exactly the way the Helm backup CronJob does (the
+    # chart is rendered and its own pg-backup script runs in its own image —
+    # scripts/backup_restore_drill.py never re-types it), restores the dump
+    # into a fresh database with scripts/restore-db.sh, and fails unless the
+    # two are identical: every table's row count and content checksum,
+    # columns, constraints, indexes, row-level-security flags and policies,
+    # sequence positions. scripts/verify-backup.sh runs on the same dump, both
+    # levels. Postgres only: Qdrant snapshots and graph backups are not drilled
+    # here.
+    name: Backup restore drill (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Same pgvector image as ci.yml's integration jobs and the compose stack.
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.1-pg16@sha256:33198da2828a14c30348d2ccb4750833d5ed9a44c88d840a0e523d7417120337
+        env:
+          POSTGRES_DB: drill_src
+          POSTGRES_USER: baselith
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baselith -d drill_src"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      # libpq settings for the drill script; the dump and restore containers
+      # run on the host network, so they reach the service the same way.
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: baselith
+      PGPASSWORD: password
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4
+        with:
+          version: v3.20.0
+      - name: Install locked runtime dependencies
+        run: |
+          pip install uv==0.12.0
+          uv export --frozen --no-default-groups --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-runtime.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-runtime.txt
+          uv pip install --system --no-deps -e .
+      # The packaged Alembic migrations, through the same entry point ci.yml's
+      # integration job uses.
+      - name: Migrate the source database
+        env:
+          APP_ENV: development
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_NAME: drill_src
+          DB_USER: baselith
+          DB_PASSWORD: password
+        run: python -m baselith.core.db.migrate
+      - name: Seed known rows
+        run: python scripts/backup_restore_drill.py seed --db drill_src
+      - name: Back up the way the Helm CronJob does
+        id: backup
+        run: |
+          python scripts/backup_restore_drill.py backup \
+            --db drill_src --out-dir "${RUNNER_TEMP}/backups"
+      - name: Verify the dump (scripts/verify-backup.sh, both levels)
+        env:
+          BACKUP_FILE: ${{ steps.backup.outputs.file }}
+        run: |
+          scripts/verify-backup.sh "${BACKUP_FILE}"
+          scripts/verify-backup.sh "${BACKUP_FILE}" --drill
+      - name: Restore into a fresh database (scripts/restore-db.sh --direct)
+        env:
+          BACKUP_FILE: ${{ steps.backup.outputs.file }}
+        run: |
+          python scripts/backup_restore_drill.py restore \
+            --db drill_restored --backup-file "${BACKUP_FILE}"
+      - name: Restored database must equal the source
+        run: |
+          python scripts/backup_restore_drill.py compare \
+            --source drill_src --target drill_restored
+
+  mutation_testing:
+    # Mutation testing of the security-critical code: secret redaction
+    # (baselith/core/observability/redaction.py), the secrets provider
+    # (baselith/core/security/secrets.py) and the prompt-injection input guard
+    # (baselith/core/guardrails/input_guard.py). Coverage says a test ran the redaction
+    # regex; a surviving mutant says no test would notice if it stopped
+    # matching. Scope and test selection live in [tool.mutmut] in
+    # pyproject.toml, so a local `mutmut run` is the same run.
+    #
+    # Report-only: `continue-on-error`, and mutmut itself exits 0 with
+    # survivors. The surviving mutants, each with its diff, are the artifact —
+    # read them and add the test that kills them; there is no score to ratchet
+    # yet. mutmut is pinned here rather than in a dependency group: it is a
+    # nightly tool and nothing else imports it (zizmor in ci.yml is pinned the
+    # same way).
+    name: Mutation testing (security modules, report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+      - name: Install locked test dependencies and mutmut
+        run: |
+          pip install uv==0.12.0
+          uv export --frozen --no-default-groups --group test --no-emit-project \
+            --format requirements-txt -o /tmp/requirements-test.txt
+          uv pip install --system --no-config --require-hashes \
+            -r /tmp/requirements-test.txt
+          uv pip install --system --no-deps -e .
+          uv pip install --system mutmut==3.8.0
+      - name: Run mutmut
+        run: mutmut run --max-children "$(nproc)"
+      - name: Build the report
+        if: always()
+        run: |
+          mkdir -p mutation-report
+          mutmut export-cicd-stats
+          cp mutants/mutmut-cicd-stats.json mutation-report/
+          mutmut results > mutation-report/results.txt || true
+          : > mutation-report/survivors.diff
+          # `|| true`: no survivors is the good outcome, not a failed grep.
+          { grep -E ': survived$' mutation-report/results.txt || true; } \
+            | sed -E 's/^ +//; s/: survived$//' \
+            | while read -r mutant; do
+                mutmut show "${mutant}" >> mutation-report/survivors.diff
+                echo >> mutation-report/survivors.diff
+              done
+          {
+            echo '### Mutation testing (security modules)'
+            echo
+            echo '```json'
+            cat mutation-report/mutmut-cicd-stats.json
+            echo
+            echo '```'
+            echo
+            echo 'Surviving mutants with their diffs: survivors.diff in the mutation-report artifact.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: mutation-report
+          path: mutation-report/
+          if-no-files-found: ignore
+          retention-days: 30

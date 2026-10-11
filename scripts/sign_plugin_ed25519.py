@@ -6,7 +6,7 @@ Usage:
         Prints a fresh keypair. Store the private key in your secret manager;
         distribute the public key via BASELITH_PLUGIN_TRUST_ROOTS.
 
-    python scripts/sign_plugin_ed25519.py sign plugins/<name> --key-env SIGNING_KEY
+    python scripts/sign_plugin_ed25519.py sign baselith/plugins/<name> --key-env SIGNING_KEY
         Recomputes the plugin integrity hash, signs it with the hex private
         key read from the given environment variable (never from argv, so the
         key does not leak into shell history / process listings), and writes
@@ -19,11 +19,11 @@ used to skip ``hash_surface_version``: an advisory field, but the one a
 reviewer reads to tell a digest computed over the current surface from one
 computed over an older, narrower one — and re-signing here *removed* the stamp
 the other two tools had left. The manifest rewrite is therefore delegated to
-``core.plugins.manifest_rewrite``, the module both of them already use, rather
+``baselith.core.plugins.manifest_rewrite``, the module both of them already use, rather
 than kept as a third private implementation.
 
 Verification is enforced at load time when BASELITH_REQUIRE_PLUGIN_SIGNATURES
-is enabled (see core/plugins/signing.py).
+is enabled (see baselith/core/plugins/signing.py).
 """
 
 from __future__ import annotations
@@ -39,9 +39,12 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
-from core.plugins.manifest_rewrite import set_manifest_fields, supply_chain_fields
-from core.plugins.signing import (
+from baselith.core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
+from baselith.core.plugins.manifest_rewrite import (
+    set_manifest_fields,
+    supply_chain_fields,
+)
+from baselith.core.plugins.signing import (
     generate_keypair_hex,
     sign_plugin_hash,
     verify_plugin_signature,
@@ -75,7 +78,7 @@ def _read_manifest(manifest: Path) -> dict[str, Any]:
 def _write_manifest_fields(manifest: Path, hash_hex: str, signature_hex: str) -> None:
     """Stamp the three supply-chain keys, preserving the file's formatting.
 
-    Delegates to :mod:`core.plugins.manifest_rewrite` so this tool, the CLI and
+    Delegates to :mod:`baselith.core.plugins.manifest_rewrite` so this tool, the CLI and
     the pre-commit hook produce byte-identical manifests: the same three keys,
     the same line-by-line rewrite that keeps a manifest's comments (which carry
     the rationale for its declared permissions), and the same idempotence — an

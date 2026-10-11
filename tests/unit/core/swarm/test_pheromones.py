@@ -1,6 +1,6 @@
 import pytest
 
-from core.swarm.pheromones import PheromoneSystem
+from baselith.core.swarm.pheromones import PheromoneSystem
 
 
 @pytest.fixture

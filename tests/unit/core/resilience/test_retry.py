@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.resilience.retry import TimeoutError, retry, timeout
+from baselith.core.resilience.retry import TimeoutError, retry, timeout
 
 
 @pytest.fixture
@@ -25,10 +25,10 @@ def test_retry_sync_succeeds_after_retry(mock_resilience_config):
 
     with (
         patch(
-            "core.resilience.retry.get_resilience_config",
+            "baselith.core.resilience.retry.get_resilience_config",
             return_value=mock_resilience_config,
         ),
-        patch("core.resilience.retry.time.sleep") as mock_sleep,
+        patch("baselith.core.resilience.retry.time.sleep") as mock_sleep,
     ):
 
         @retry()
@@ -46,10 +46,10 @@ def test_retry_sync_succeeds_after_retry(mock_resilience_config):
 def test_retry_sync_exhausts_attempts(mock_resilience_config):
     with (
         patch(
-            "core.resilience.retry.get_resilience_config",
+            "baselith.core.resilience.retry.get_resilience_config",
             return_value=mock_resilience_config,
         ),
-        patch("core.resilience.retry.time.sleep"),
+        patch("baselith.core.resilience.retry.time.sleep"),
     ):
 
         @retry(max_attempts=2, base_delay=0.0, max_delay=0.0, jitter=False)
@@ -63,10 +63,10 @@ def test_retry_sync_exhausts_attempts(mock_resilience_config):
 def test_retry_sync_does_not_catch_non_retryable_exception(mock_resilience_config):
     with (
         patch(
-            "core.resilience.retry.get_resilience_config",
+            "baselith.core.resilience.retry.get_resilience_config",
             return_value=mock_resilience_config,
         ),
-        patch("core.resilience.retry.time.sleep") as mock_sleep,
+        patch("baselith.core.resilience.retry.time.sleep") as mock_sleep,
     ):
 
         @retry(retryable_exceptions=(ValueError,))
@@ -85,10 +85,10 @@ async def test_retry_async_succeeds_after_retry(mock_resilience_config):
 
     with (
         patch(
-            "core.resilience.retry.get_resilience_config",
+            "baselith.core.resilience.retry.get_resilience_config",
             return_value=mock_resilience_config,
         ),
-        patch("core.resilience.retry.asyncio.sleep") as mock_sleep,
+        patch("baselith.core.resilience.retry.asyncio.sleep") as mock_sleep,
     ):
 
         @retry()
@@ -140,7 +140,7 @@ class TestServerRequestedRetryAfter:
     async def test_retry_after_overrides_the_backoff_curve(self, monkeypatch):
         import importlib
 
-        retry_mod = importlib.import_module("core.resilience.retry")
+        retry_mod = importlib.import_module("baselith.core.resilience.retry")
 
         slept: list[float] = []
 
@@ -170,7 +170,7 @@ class TestServerRequestedRetryAfter:
     async def test_retry_after_is_capped_by_max_delay(self, monkeypatch):
         import importlib
 
-        retry_mod = importlib.import_module("core.resilience.retry")
+        retry_mod = importlib.import_module("baselith.core.resilience.retry")
 
         slept: list[float] = []
 
@@ -198,7 +198,7 @@ class TestServerRequestedRetryAfter:
     async def test_absent_retry_after_keeps_the_backoff_curve(self, monkeypatch):
         import importlib
 
-        retry_mod = importlib.import_module("core.resilience.retry")
+        retry_mod = importlib.import_module("baselith.core.resilience.retry")
 
         slept: list[float] = []
 
@@ -219,7 +219,7 @@ class TestServerRequestedRetryAfter:
         assert slept == [2.0]
 
     def test_unusable_retry_after_values_are_ignored(self):
-        from core.resilience.retry import _server_requested_delay
+        from baselith.core.resilience.retry import _server_requested_delay
 
         class _E(Exception):
             pass
@@ -241,25 +241,25 @@ class TestParseRetryAfterHeader:
         return exc
 
     def test_reads_delta_seconds(self):
-        from core.services.llm.service import _parse_retry_after
+        from baselith.core.services.llm.service import _parse_retry_after
 
         assert _parse_retry_after(self._exc_with_header("12")) == 12.0
 
     def test_ignores_http_date_form(self):
         """The date form needs the server's clock; a skewed one would produce a
         wildly wrong wait, so we fall back to the backoff curve."""
-        from core.services.llm.service import _parse_retry_after
+        from baselith.core.services.llm.service import _parse_retry_after
 
         exc = self._exc_with_header("Wed, 21 Oct 2026 07:28:00 GMT")
         assert _parse_retry_after(exc) is None
 
     def test_ignores_absurdly_long_window(self):
-        from core.services.llm.service import _parse_retry_after
+        from baselith.core.services.llm.service import _parse_retry_after
 
         assert _parse_retry_after(self._exc_with_header("100000")) is None
 
     def test_exception_without_response_is_safe(self):
-        from core.services.llm.service import _parse_retry_after
+        from baselith.core.services.llm.service import _parse_retry_after
 
         assert _parse_retry_after(Exception("plain")) is None
 
@@ -275,7 +275,7 @@ class TestSyncPathHonoursRetryAfter:
     def test_sync_wrapper_honours_retry_after(self, monkeypatch):
         import importlib
 
-        retry_mod = importlib.import_module("core.resilience.retry")
+        retry_mod = importlib.import_module("baselith.core.resilience.retry")
         slept: list[float] = []
         monkeypatch.setattr(retry_mod.time, "sleep", slept.append)
 
@@ -297,7 +297,7 @@ class TestSyncPathHonoursRetryAfter:
     def test_sync_wrapper_falls_back_to_the_curve(self, monkeypatch):
         import importlib
 
-        retry_mod = importlib.import_module("core.resilience.retry")
+        retry_mod = importlib.import_module("baselith.core.resilience.retry")
         slept: list[float] = []
         monkeypatch.setattr(retry_mod.time, "sleep", slept.append)
         calls = {"n": 0}

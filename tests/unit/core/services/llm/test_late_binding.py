@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import pytest
 
-from core.config.services import LLMConfig
-from core.context import reset_plugin_context, set_plugin_context
-from core.services.llm.policy import PluginLLMPolicy, set_plugin_llm_policy_resolver
-from core.services.llm.runtime import get_llm_service, reset_llm_service
-from core.services.llm.service import LLMService
+from baselith.core.config.services import LLMConfig
+from baselith.core.context import reset_plugin_context, set_plugin_context
+from baselith.core.services.llm.policy import (
+    PluginLLMPolicy,
+    set_plugin_llm_policy_resolver,
+)
+from baselith.core.services.llm.runtime import get_llm_service, reset_llm_service
+from baselith.core.services.llm.service import LLMService
 
 _SCRUB = (
     "LLM_PROVIDER",
@@ -48,7 +51,7 @@ class _FakeProvider:
         yield f"{self.label}|{model}", 3
 
     async def generate_image(self, prompt, **_kw):
-        from core.services.llm.images import GeneratedImage
+        from baselith.core.services.llm.images import GeneratedImage
 
         return GeneratedImage(data=b"x", media_type="image/png", model=self.label)
 
@@ -60,9 +63,15 @@ def _hermetic(monkeypatch):
     cfg = LLMConfig(
         provider="ollama", model="base-model", enable_cache=False, _env_file=None
     )
-    monkeypatch.setattr("core.services.llm.runtime.get_llm_config", lambda: cfg)
-    monkeypatch.setattr("core.services.llm.service.get_llm_config", lambda: cfg)
-    monkeypatch.setattr("core.services.llm.service.create_provider", _FakeProvider)
+    monkeypatch.setattr(
+        "baselith.core.services.llm.runtime.get_llm_config", lambda: cfg
+    )
+    monkeypatch.setattr(
+        "baselith.core.services.llm.service.get_llm_config", lambda: cfg
+    )
+    monkeypatch.setattr(
+        "baselith.core.services.llm.service.create_provider", _FakeProvider
+    )
     set_plugin_llm_policy_resolver(None)
     reset_llm_service()
     yield
@@ -148,7 +157,7 @@ async def test_an_explicit_config_is_an_opt_out():
 
 
 async def test_module_level_image_generation_follows_the_pin():
-    from core.services.llm.images import generate_image
+    from baselith.core.services.llm.images import generate_image
 
     kept = get_llm_service()
     _pin("planner", "pinned-model")
@@ -158,7 +167,7 @@ async def test_module_level_image_generation_follows_the_pin():
 
 
 async def test_module_level_batch_follows_the_pin():
-    from core.services.llm.batch import BatchPrompt, generate_batch
+    from baselith.core.services.llm.batch import BatchPrompt, generate_batch
 
     kept = get_llm_service()
     _pin("planner", "pinned-model")
@@ -170,8 +179,8 @@ async def test_module_level_batch_follows_the_pin():
 async def test_module_level_typed_generation_follows_the_pin(monkeypatch):
     from pydantic import BaseModel
 
-    from core.services.llm import structured
-    from core.services.llm.typed import generate_typed
+    from baselith.core.services.llm import structured
+    from baselith.core.services.llm.typed import generate_typed
 
     class Answer(BaseModel):
         ok: bool

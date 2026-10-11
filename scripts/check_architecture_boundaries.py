@@ -2,7 +2,7 @@
 
 This checker is intentionally conservative:
 - it freezes the current set of legacy domain-specific modules that still live in
-  ``core/`` during the migration period;
+  ``baselith/core/`` during the migration period;
 - it blocks new ``core -> plugins`` imports except for explicit compatibility
   shims that are already present and scheduled for removal.
 
@@ -20,115 +20,101 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 FROZEN_CORE_PREFIXES = (
-    "core/agents/",
-    "core/doc_sources/",
-    "core/goals/",
-    "core/routers/",
-    "core/scraper/",
+    "baselith/core/doc_sources/",
+    "baselith/core/routers/",
+    "baselith/core/scraper/",
 )
 
 LEGACY_CORE_FILE_ALLOWLIST = frozenset(
     {
-        "core/agents/__init__.py",
-        "core/agents/browser_agent.py",
-        "core/agents/browser_tools.py",
-        "core/agents/browser_types.py",
-        "core/agents/coding/__init__.py",
-        "core/agents/coding/agent.py",
-        "core/agents/coding/prompts.py",
-        "core/agents/coding/types.py",
-        "core/agents/coding_tools.py",
-        "core/doc_sources/__init__.py",
-        "core/doc_sources/filesystem.py",
-        "core/doc_sources/labels.py",
-        "core/doc_sources/models.py",
-        "core/doc_sources/ocr_backends.py",
-        "core/doc_sources/readers.py",
-        "core/doc_sources/registry.py",
-        "core/doc_sources/utils.py",
-        "core/doc_sources/web.py",
-        "core/doc_sources/web_constants.py",
-        "core/doc_sources/web_parser.py",
-        "core/goals/__init__.py",
-        "core/goals/tracker.py",
-        "core/routers/__init__.py",
-        "core/routers/admin.py",
-        "core/routers/chat.py",
-        "core/routers/console.py",
-        "core/routers/feedback.py",
-        "core/routers/index.py",
-        "core/routers/metrics.py",
-        "core/routers/status.py",
-        "core/routers/tenant.py",
-        "core/scraper/__init__.py",
-        "core/scraper/crawler.py",
-        "core/scraper/extractors/__init__.py",
-        "core/scraper/extractors/base.py",
-        "core/scraper/extractors/css_selector.py",
-        "core/scraper/extractors/images.py",
-        "core/scraper/extractors/links.py",
-        "core/scraper/extractors/metadata.py",
-        "core/scraper/extractors/schema_org.py",
-        "core/scraper/extractors/text.py",
-        "core/scraper/fetchers/__init__.py",
-        "core/scraper/fetchers/base.py",
-        "core/scraper/fetchers/httpx_fetcher.py",
-        "core/scraper/fetchers/playwright_fetcher.py",
-        "core/scraper/middleware/__init__.py",
-        "core/scraper/middleware/base.py",
-        "core/scraper/middleware/cache.py",
-        "core/scraper/middleware/logging.py",
-        "core/scraper/middleware/rate_limiter.py",
-        "core/scraper/middleware/retry.py",
-        "core/scraper/models.py",
-        "core/scraper/protocols.py",
-        "core/scraper/scraper.py",
-        "core/scraper/storage/__init__.py",
-        "core/scraper/storage/base.py",
-        "core/scraper/storage/filesystem.py",
-        "core/scraper/storage/memory.py",
-        "core/scraper/tools.py",
-        "core/scraper/utils.py",
+        "baselith/core/doc_sources/__init__.py",
+        "baselith/core/doc_sources/filesystem.py",
+        "baselith/core/doc_sources/labels.py",
+        "baselith/core/doc_sources/models.py",
+        "baselith/core/doc_sources/ocr_backends.py",
+        "baselith/core/doc_sources/readers.py",
+        "baselith/core/doc_sources/registry.py",
+        "baselith/core/doc_sources/utils.py",
+        "baselith/core/doc_sources/web.py",
+        "baselith/core/doc_sources/web_constants.py",
+        "baselith/core/doc_sources/web_parser.py",
+        "baselith/core/routers/__init__.py",
+        "baselith/core/routers/admin.py",
+        "baselith/core/routers/chat.py",
+        "baselith/core/routers/console.py",
+        "baselith/core/routers/feedback.py",
+        "baselith/core/routers/index.py",
+        "baselith/core/routers/metrics.py",
+        "baselith/core/routers/status.py",
+        "baselith/core/routers/tenant.py",
+        "baselith/core/scraper/__init__.py",
+        "baselith/core/scraper/crawler.py",
+        "baselith/core/scraper/extractors/__init__.py",
+        "baselith/core/scraper/extractors/base.py",
+        "baselith/core/scraper/extractors/css_selector.py",
+        "baselith/core/scraper/extractors/images.py",
+        "baselith/core/scraper/extractors/links.py",
+        "baselith/core/scraper/extractors/metadata.py",
+        "baselith/core/scraper/extractors/schema_org.py",
+        "baselith/core/scraper/extractors/text.py",
+        "baselith/core/scraper/fetchers/__init__.py",
+        "baselith/core/scraper/fetchers/base.py",
+        "baselith/core/scraper/fetchers/httpx_fetcher.py",
+        "baselith/core/scraper/fetchers/playwright_fetcher.py",
+        "baselith/core/scraper/middleware/__init__.py",
+        "baselith/core/scraper/middleware/base.py",
+        "baselith/core/scraper/middleware/cache.py",
+        "baselith/core/scraper/middleware/logging.py",
+        "baselith/core/scraper/middleware/rate_limiter.py",
+        "baselith/core/scraper/middleware/retry.py",
+        "baselith/core/scraper/models.py",
+        "baselith/core/scraper/protocols.py",
+        "baselith/core/scraper/scraper.py",
+        "baselith/core/scraper/storage/__init__.py",
+        "baselith/core/scraper/storage/base.py",
+        "baselith/core/scraper/storage/filesystem.py",
+        "baselith/core/scraper/storage/memory.py",
+        "baselith/core/scraper/tools.py",
+        "baselith/core/scraper/utils.py",
     }
 )
 
 CORE_TO_PLUGIN_IMPORT_ALLOWLIST = {
-    "core/agents/browser_agent.py": {"plugins.browser_agent.agent"},
-    "core/agents/browser_tools.py": {"plugins.browser_agent.tools"},
-    "core/agents/browser_types.py": {"plugins.browser_agent.types"},
-    "core/agents/coding/__init__.py": {"plugins.coding_agent"},
-    "core/agents/coding/agent.py": {
-        "plugins.coding_agent.agent",
-        "plugins.coding_agent.types",
+    "baselith/core/doc_sources/__init__.py": {"baselith.plugins.document_sources"},
+    "baselith/core/doc_sources/filesystem.py": {
+        "baselith.plugins.document_sources.filesystem"
     },
-    "core/agents/coding/prompts.py": {"plugins.coding_agent.prompts"},
-    "core/agents/coding/types.py": {"plugins.coding_agent.types"},
-    "core/agents/coding_tools.py": {"plugins.coding_agent.tools"},
-    "core/doc_sources/__init__.py": {"plugins.document_sources"},
-    "core/doc_sources/filesystem.py": {"plugins.document_sources.filesystem"},
-    "core/doc_sources/labels.py": {"plugins.document_sources.labels"},
-    "core/doc_sources/models.py": {"plugins.document_sources.models"},
-    "core/doc_sources/ocr_backends.py": {"plugins.document_sources.ocr_backends"},
-    "core/doc_sources/readers.py": {"plugins.document_sources.readers"},
-    "core/doc_sources/registry.py": {"plugins.document_sources.registry"},
-    "core/doc_sources/utils.py": {"plugins.document_sources.utils"},
-    "core/doc_sources/web.py": {"plugins.document_sources.web"},
-    "core/doc_sources/web_constants.py": {"plugins.document_sources.web_constants"},
-    "core/doc_sources/web_parser.py": {"plugins.document_sources.web_parser"},
-    "core/goals/__init__.py": {"plugins.goals"},
-    "core/goals/tracker.py": {"plugins.goals.tracker"},
-    "core/routers/admin.py": {"plugins.api_routers.admin"},
-    "core/routers/chat.py": {"plugins.api_routers.chat"},
-    "core/routers/console.py": {"plugins.api_routers.console"},
-    "core/routers/feedback.py": {"plugins.api_routers.feedback"},
-    "core/routers/index.py": {"plugins.api_routers.index"},
-    "core/routers/metrics.py": {"plugins.api_routers.metrics"},
-    "core/routers/status.py": {"plugins.api_routers.status"},
-    "core/routers/tenant.py": {"plugins.api_routers.tenant"},
+    "baselith/core/doc_sources/labels.py": {"baselith.plugins.document_sources.labels"},
+    "baselith/core/doc_sources/models.py": {"baselith.plugins.document_sources.models"},
+    "baselith/core/doc_sources/ocr_backends.py": {
+        "baselith.plugins.document_sources.ocr_backends"
+    },
+    "baselith/core/doc_sources/readers.py": {
+        "baselith.plugins.document_sources.readers"
+    },
+    "baselith/core/doc_sources/registry.py": {
+        "baselith.plugins.document_sources.registry"
+    },
+    "baselith/core/doc_sources/utils.py": {"baselith.plugins.document_sources.utils"},
+    "baselith/core/doc_sources/web.py": {"baselith.plugins.document_sources.web"},
+    "baselith/core/doc_sources/web_constants.py": {
+        "baselith.plugins.document_sources.web_constants"
+    },
+    "baselith/core/doc_sources/web_parser.py": {
+        "baselith.plugins.document_sources.web_parser"
+    },
+    "baselith/core/routers/admin.py": {"baselith.plugins.api_routers.admin"},
+    "baselith/core/routers/chat.py": {"baselith.plugins.api_routers.chat"},
+    "baselith/core/routers/console.py": {"baselith.plugins.api_routers.console"},
+    "baselith/core/routers/feedback.py": {"baselith.plugins.api_routers.feedback"},
+    "baselith/core/routers/index.py": {"baselith.plugins.api_routers.index"},
+    "baselith/core/routers/metrics.py": {"baselith.plugins.api_routers.metrics"},
+    "baselith/core/routers/status.py": {"baselith.plugins.api_routers.status"},
+    "baselith/core/routers/tenant.py": {"baselith.plugins.api_routers.tenant"},
 }
 
 CORE_TO_PLUGIN_IMPORT_PREFIX_ALLOWLIST = {
-    "core/scraper/": {"plugins.web_scraper"},
+    "baselith/core/scraper/": {"baselith.plugins.web_scraper"},
 }
 
 
@@ -197,7 +183,7 @@ def check_boundaries(
     for path in iter_python_files(root):
         relative_path = path.relative_to(root).as_posix()
 
-        if relative_path.startswith("core/"):
+        if relative_path.startswith("baselith/core/"):
             if (
                 relative_path.startswith(frozen_prefixes)
                 and relative_path not in legacy_allowlist
@@ -207,7 +193,7 @@ def check_boundaries(
                 )
 
             for module_name in imported_modules(path):
-                if not module_name.startswith("plugins"):
+                if not module_name.startswith("baselith.plugins"):
                     continue
                 if module_allowed(relative_path, module_name, core_to_plugin_allowlist):
                     continue

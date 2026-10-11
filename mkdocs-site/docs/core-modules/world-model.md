@@ -3,7 +3,7 @@ title: World Model
 description: Internal representation and prediction of world state
 ---
 
-**Module**: `core/world_model/`
+**Module**: `baselith/core/world_model/`
 
 The World Model gives agents predictive planning: a `State` captures the current
 context as variables, an `Action` declares effects/preconditions/cost/risk, and
@@ -23,10 +23,10 @@ data types plus four service classes.
 
 ## Public API
 
-`core.world_model` exports:
+`baselith.core.world_model` exports:
 
 ```python
-from core.world_model import (
+from baselith.core.world_model import (
     State, Action, Transition, SimulationResult, RiskLevel,  # types
     StatePredictor,    # predict next state from (state, action)
     MCTSSimulator,     # Monte Carlo Tree Search over action paths
@@ -48,10 +48,10 @@ from core.world_model import (
 ## Usage
 
 ```python
-from core.world_model import (
+from baselith.core.world_model import (
     State, Action, StatePredictor, RiskAssessor, RollbackPlanner,
 )
-from core.world_model.types import ActionType
+from baselith.core.world_model.types import ActionType
 
 # 1. Describe the current context as a State
 state = State(name="deploy", variables={"version": "1.0", "load": 0.7})
@@ -102,13 +102,13 @@ mis-attributing an outcome to the wrong action.
 
 ## Integration with Reasoning
 
-The World Model is tightly integrated with the Tree-of-Thoughts (`core/reasoning/`) and MCTS (Monte Carlo Tree Search) logic. By predicting internal states, agents can explore different branches of thought and evaluate the "simulated consequences" of actions without executing them in the real world.
+The World Model is tightly integrated with the Tree-of-Thoughts (`baselith/core/reasoning/`) and MCTS (Monte Carlo Tree Search) logic. By predicting internal states, agents can explore different branches of thought and evaluate the "simulated consequences" of actions without executing them in the real world.
 
 ---
 
 ## Mandate Chain for Agent-Initiated Commerce
 
-`core/world_model/mandates.py` implements a signed mandate chain so an
+`baselith/core/world_model/mandates.py` implements a signed mandate chain so an
 agent can never spend more than the user explicitly authorized. Every
 purchase requires:
 
@@ -191,7 +191,7 @@ cannot forge extra log lines downstream.
 
 The user signs `conditions` into the intent envelope, so the verifier must
 either enforce a condition or reject the chain
-(`core/world_model/mandate_conditions.py`). Supported conditions:
+(`baselith/core/world_model/mandate_conditions.py`). Supported conditions:
 
 | Condition | Type | Enforcement |
 |-----------|------|-------------|
@@ -232,7 +232,7 @@ nothing stops the same authorized purchase from being submitted twice.
 `replay_guard`, **on by default**:
 
 ```python
-from core.world_model.mandates import MandateReplayError, verify_chain
+from baselith.core.world_model.mandates import MandateReplayError, verify_chain
 
 verify_chain(
     signed_intent,
@@ -255,7 +255,7 @@ verify_chain(
 `InMemoryReplayGuard` is process-local. With `WEB_CONCURRENCY > 1` — the normal
 production shape — every worker keeps its own set, so the same signed chain
 verifies once *per worker*: replay protection quietly becomes "N executions of
-one authorized purchase". `core/world_model/replay_guard.py` supplies the
+one authorized purchase". `baselith/core/world_model/replay_guard.py` supplies the
 shared ledger and resolves the default:
 
 | Symbol | Purpose |
@@ -269,7 +269,7 @@ shared ledger and resolves the default:
 otherwise falls back to `InMemoryReplayGuard` — logging an ERROR in production,
 because a process-local ledger there is the per-worker degradation above.
 `verify_chain` resolves this default **lazily on first use** and memoizes it, so
-importing `core.world_model.mandates` never touches config or Redis; passing an
+importing `baselith.core.world_model.mandates` never touches config or Redis; passing an
 explicit guard, or `None`, bypasses the resolver entirely.
 
 The client is injected, so the caller owns the connection lifecycle. It must be
@@ -278,8 +278,8 @@ a **synchronous** `redis.Redis` — `verify_chain` is a sync function:
 ```python
 from redis import Redis
 
-from core.world_model.mandates import verify_chain
-from core.world_model.replay_guard import RedisReplayGuard
+from baselith.core.world_model.mandates import verify_chain
+from baselith.core.world_model.replay_guard import RedisReplayGuard
 
 guard = RedisReplayGuard(
     Redis.from_url("redis://cache:6379/1"),
@@ -341,7 +341,7 @@ boundary (which a caller would surface as a `500` instead of a rejection).
 
 ```python
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from core.world_model.mandates import (
+from baselith.core.world_model.mandates import (
     CartItem, CartMandate, IntentMandate,
     new_intent_id, new_cart_id,
     sign_intent, sign_cart, verify_chain,
@@ -387,9 +387,9 @@ verify_chain(
 
 ## AP2 Payment Execution (`execute_payment`)
 
-`core/world_model/mandates.py` owns the *protocol* — signatures, the
+`baselith/core/world_model/mandates.py` owns the *protocol* — signatures, the
 cart-vs-intent envelope, replay consumption — and explicitly leaves
-"execution of the purchase" elsewhere. `core/world_model/payments.py` is
+"execution of the purchase" elsewhere. `baselith/core/world_model/payments.py` is
 that elsewhere: `execute_payment` is the **single chokepoint** between a
 verified mandate chain and a payment service provider (PSP). The
 orchestration is strictly ordered:
@@ -415,8 +415,8 @@ the chain verified, so the intent **was consumed** even though the charge
 failed.
 
 ```python
-from core.world_model import InMemoryReceiptStore, execute_payment
-from plugins.payments.mock_psp import MockPSPAdapter
+from baselith.core.world_model import InMemoryReceiptStore, execute_payment
+from baselith.plugins.payments.mock_psp import MockPSPAdapter
 
 store = InMemoryReceiptStore()
 receipt = await execute_payment(
@@ -453,8 +453,8 @@ deployments should persist receipts durably.
 ### The PSP seam lives in a plugin
 
 PSP adapters are external integrations, so per the Sacred Core rule they
-implement the `PaymentExecutor` protocol from **outside** `core/`. The
-reference adapter is `plugins/payments` (signed manifest):
+implement the `PaymentExecutor` protocol from **outside** `baselith/core/`. The
+reference adapter is `baselith/plugins/payments` (signed manifest):
 `MockPSPAdapter` captures every charge at or under an optional
 `decline_over_cents` threshold and declines anything above it — the shape
 a real Stripe/Adyen adapter should follow (credentials in
@@ -463,13 +463,13 @@ infrastructure failures).
 
 ### Delegated purchases (human-not-present)
 
-`core/world_model/delegated.py` adds the autonomous-buyer mode: the user
+`baselith/core/world_model/delegated.py` adds the autonomous-buyer mode: the user
 pre-signs one or more intents while present, and a
 `DelegatedPurchaseAgent` later evaluates incoming merchant offers with
 nobody watching.
 
 ```python
-from core.world_model import DelegatedPurchaseAgent
+from baselith.core.world_model import DelegatedPurchaseAgent
 
 agent = DelegatedPurchaseAgent(
     executor=psp_adapter,
@@ -525,7 +525,7 @@ receipt = await agent.evaluate_offer(
 | `PaymentExecutionError` | Executor infrastructure failure (chain verified, intent consumed, charge failed) |
 | `DelegatedPurchaseAgent`, `DelegationRegistryFullError` | Human-not-present buyer over pre-signed intents; bounded-registry error |
 
-All are exported from `core.world_model`.
+All are exported from `baselith.core.world_model`.
 
 ### See also
 

@@ -14,9 +14,9 @@ from types import SimpleNamespace
 import pytest
 from backstage_test_utils import make_plugin, make_provider
 
-from core.plugins._metadata import PluginMetadata
-from core.plugins.exporters.component_entity import plugin_title
-from core.plugins.manifest_model import validate_manifest_data
+from baselith.core.plugins._metadata import PluginMetadata
+from baselith.core.plugins.exporters.component_entity import plugin_title
+from baselith.core.plugins.manifest_model import validate_manifest_data
 
 
 def test_manifest_accepts_display_name() -> None:

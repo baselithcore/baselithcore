@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from core.api.root_redirect import create_root_redirect_router
-from core.config.app import AppConfig
+from baselith.core.api.root_redirect import create_root_redirect_router
+from baselith.core.config.app import AppConfig
 
 
 def _client(target: str) -> TestClient:

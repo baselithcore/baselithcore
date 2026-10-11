@@ -15,17 +15,17 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.rate_limiter import (
+from baselith.core.middleware.rate_limiter import (
     RateLimiter,
     _sliding_estimate,
     _sliding_retry_after,
 )
 
 _WINDOW = 60
-# ``core.middleware.rate_limiter`` the *module*: the package re-exports a
+# ``baselith.core.middleware.rate_limiter`` the *module*: the package re-exports a
 # ``rate_limiter`` proxy object under the same name, so attribute access
 # (``import a.b as x``) would resolve to the proxy instead.
-rate_limiter_module = importlib.import_module("core.middleware.rate_limiter")
+rate_limiter_module = importlib.import_module("baselith.core.middleware.rate_limiter")
 
 
 def test_estimate_weights_previous_window_by_remaining_overlap():
@@ -125,7 +125,7 @@ async def test_fallback_forgets_windows_older_than_previous(monkeypatch):
 
 
 def _redis_limiter(script_result: list[int]) -> RateLimiter:
-    with patch("core.middleware.rate_limiter.get_security_config") as cfg:
+    with patch("baselith.core.middleware.rate_limiter.get_security_config") as cfg:
         cfg.return_value.rate_limit_fail_mode = "open"
         limiter = RateLimiter()
     limiter._redis = AsyncMock()

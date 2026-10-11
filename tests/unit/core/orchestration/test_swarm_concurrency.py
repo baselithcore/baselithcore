@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import core.orchestration.handlers.swarm_handler as sh
-from core.config.swarm import SwarmConfig
-from core.orchestration.handlers.swarm_handler import SwarmHandler
+import baselith.core.orchestration.handlers.swarm_handler as sh
+from baselith.core.config.swarm import SwarmConfig
+from baselith.core.orchestration.handlers.swarm_handler import SwarmHandler
 
 
 @pytest.mark.asyncio

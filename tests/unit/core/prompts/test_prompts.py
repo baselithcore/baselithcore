@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.prompts import (
+from baselith.core.prompts import (
     InMemoryPromptStore,
     PromptNotFoundError,
     PromptRegistry,
@@ -16,7 +16,7 @@ from core.prompts import (
     parse_prompt_file,
     render_template,
 )
-from core.prompts.loader import PromptLoadError
+from baselith.core.prompts.loader import PromptLoadError
 
 
 # === Rendering ===

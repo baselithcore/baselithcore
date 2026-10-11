@@ -186,10 +186,10 @@ elided):
 │          │                     │                                │ postgres                       │
 │ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
 │ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
-│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 012_webhook_retention_idx │
-│          │                     │                                │ . For predictable startup,     │
-│          │                     │                                │ prefer false and run: baselith │
-│          │                     │                                │ db migrate                     │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 015_mcp_tasks. For        │
+│          │                     │                                │ predictable startup, prefer    │
+│          │                     │                                │ false and run: baselith db     │
+│          │                     │                                │ migrate                        │
 │ ✅ PASS  │ Plugins             │ 10 plugin(s) found             │                                │
 │ ❌ FAIL  │ Plugin Dependencies │ 15 missing plugin dependency   │ Run: baselith plugin deps      │
 │          │                     │ declaration(s)                 │ install <plugin>. Missing: …   │
@@ -379,6 +379,15 @@ baselith --format json verify   # Machine-readable JSON for CI
 
 ## Plugin
 
+The commands that act on plugins already present (`list`, `status`, `info`,
+`validate`, `tree`, `deps`, `enable`/`disable`, `export-manifest`,
+`schema-init`, and the subcommands a plugin adds through its own `cli.py`) read
+the same plugin root the application loads: `PLUGIN_PLUGINS_PATH` when set,
+else `./plugins` when the current directory has one, else the installed
+`baselith/plugins` package. A source checkout therefore works from its root
+with no `plugins/` directory of its own. `create` and `add` still write into
+`./plugins` (or `PLUGIN_PLUGINS_PATH`).
+
 ### `plugin list` / `plugin status` - List & Status
 
 Show all available plugins with health, readiness, and config alignment.
@@ -443,7 +452,7 @@ baselith plugin sync --docker
 ```
 
 A plugin counts as enabled by the same rule the runtime applies
-(`core.plugins.config_file.plugin_enabled`), read from the same file
+(`baselith.core.plugins.config_file.plugin_enabled`), read from the same file
 (`configs/plugins.yaml`, or the path in `PLUGIN_CONFIG_PATH`): with no config
 file every plugin is enabled; otherwise a plugin must have an entry — under its
 name or its `-`/`_` variant — that does not say `enabled: false`. An entry
@@ -490,8 +499,8 @@ baselith plugin create --interactive  # Interactive wizard
 
 - The scaffolded `manifest.yaml` sets `min_core_version` to the public core
   release of the framework that ran the command (`CORE_VERSION` in
-  `core/_core_version.py`, the number every compatibility check compares with;
-  a downstream distribution's own `core._version` never applies). It used to be
+  `baselith/core/_core_version.py`, the number every compatibility check compares with;
+  a downstream distribution's own `baselith.core._version` never applies). It used to be
   a hard-coded `0.31.0`, six minor releases behind. That value is the version
   you scaffolded against. Raise it on purpose when you start relying on newer
   APIs. Never lower it without testing against the older release.
@@ -886,7 +895,7 @@ built-in templates, plus every directory under `templates/` that is a project
 starter (a `README.md` and one of `pyproject.toml`, `requirements.txt` (or its `.tmpl` source),
 `main.py`, `agent.py`). The directory starters are looked up in the checkout
 around the current directory first, then in the installed package
-(`core/cli/scaffold_templates/`, where the wheel carries them), then in the
+(`baselith/core/cli/scaffold_templates/`, where the wheel carries them), then in the
 checkout the `core` package was imported from (an editable install used from
 any directory).
 
@@ -1152,7 +1161,7 @@ The command checks that the migration scripts shipped with the installed
 package can be located and that PostgreSQL answers before it starts, so an
 unreachable database fails with the connection error rather than a migration
 traceback. It needs no `alembic.ini` or checkout in the working directory: it
-runs `python -m core.db.migrate` in a child process, which resolves the
+runs `python -m baselith.core.db.migrate` in a child process, which resolves the
 scripts through the package and holds the same advisory lock as the startup
 upgrade, so it cannot race an app worker onto the same DDL. It is the explicit counterpart of
 `DB_MIGRATIONS_ON_STARTUP`: set that to `false` and run this at deploy time for

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, Mock
 
-from core.reasoning.react import (
+from baselith.core.reasoning.react import (
     LLM_ERROR_ANSWER,
     LLM_UNAVAILABLE_ANSWER,
     ReActAgent,
@@ -22,8 +22,8 @@ async def test_unresolvable_llm_is_logged_and_flagged(monkeypatch):
         raise RuntimeError("no provider configured")
 
     logger = Mock()
-    monkeypatch.setattr("core.services.llm.get_llm_service", _boom)
-    monkeypatch.setattr("core.reasoning.react.logger", logger)
+    monkeypatch.setattr("baselith.core.services.llm.get_llm_service", _boom)
+    monkeypatch.setattr("baselith.core.reasoning.react.logger", logger)
     agent = ReActAgent(native_tools=False)
 
     result = await agent.run("q")

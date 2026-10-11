@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.config.task_queue import TaskQueueConfig
-from core.task_queue.dead_letter import (
+from baselith.core.config.task_queue import TaskQueueConfig
+from baselith.core.task_queue.dead_letter import (
     UNAVAILABLE_ARGS,
     DeadLetterError,
     DeadLetterQueue,
@@ -136,7 +136,7 @@ def dlq(redis):
 
 def _config(**kwargs):
     return patch(
-        "core.task_queue.dead_letter.get_task_queue_config",
+        "baselith.core.task_queue.dead_letter.get_task_queue_config",
         return_value=TaskQueueConfig(**kwargs),
     )
 
@@ -233,7 +233,7 @@ class TestRedaction:
 
     def test_redaction_failure_is_marked_unavailable(self, dlq, monkeypatch):
         monkeypatch.setattr(
-            "core.task_queue.dead_letter.redact_sensitive",
+            "baselith.core.task_queue.dead_letter.redact_sensitive",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("redaction down")),
         )
         with _config():
@@ -275,7 +275,9 @@ def _record(**overrides) -> DeadLetterRecord:
 @pytest.fixture(autouse=True)
 def _allow_default_modules():
     """Most replay tests use `pkg.mod.fn`; widen the allowlist for them."""
-    with _config(dlq_replay_allowed_modules=["pkg.", "core.", "plugins."]):
+    with _config(
+        dlq_replay_allowed_modules=["pkg.", "baselith.core.", "baselith.plugins."]
+    ):
         yield
 
 
@@ -290,7 +292,9 @@ class TestReplay:
                 enqueued["kwargs"] = kwargs
                 return types.SimpleNamespace(id="new-job")
 
-        with patch("core.task_queue.dead_letter.get_queue", return_value=_Queue()):
+        with patch(
+            "baselith.core.task_queue.dead_letter.get_queue", return_value=_Queue()
+        ):
             new_id = dlq._replay_from_record(_record())
         assert new_id == "new-job"
         assert enqueued["func"] == "pkg.mod.fn"
@@ -303,7 +307,7 @@ class TestReplay:
         execution; the replay path must not reach for it at all."""
         with patch("rq.job.Job.restore", side_effect=AssertionError("unpickled!")):
             with patch(
-                "core.task_queue.dead_letter.get_queue",
+                "baselith.core.task_queue.dead_letter.get_queue",
                 return_value=types.SimpleNamespace(
                     enqueue=lambda *a, **k: types.SimpleNamespace(id="new-job")
                 ),
@@ -345,7 +349,7 @@ class TestReplay:
         just not ones we stored. Replaying them as ``func()`` is wrong."""
         redis.hashes["baselithcore:dlq:job:legacy"] = {
             "job_id": "legacy",
-            "func_name": "core.jobs.reindex",
+            "func_name": "baselith.core.jobs.reindex",
             "origin_queue": "documents",
             "error": "boom",
             "traceback": "",
@@ -367,7 +371,9 @@ class TestReplay:
                 enqueued["args"] = args
                 return types.SimpleNamespace(id="new-job")
 
-        with patch("core.task_queue.dead_letter.get_queue", return_value=_Queue()):
+        with patch(
+            "baselith.core.task_queue.dead_letter.get_queue", return_value=_Queue()
+        ):
             dlq._replay_from_record(_record(args_json="[]", kwargs_json="{}"))
         assert enqueued["args"] == ()
 
@@ -387,20 +393,22 @@ class TestReplayAllowlist:
     def test_an_allowed_module_replays(self, dlq):
         enqueued: dict = {}
         with (
-            _config(dlq_replay_allowed_modules=["core.", "plugins."]),
+            _config(dlq_replay_allowed_modules=["baselith.core.", "baselith.plugins."]),
             patch(
-                "core.task_queue.dead_letter.get_queue",
+                "baselith.core.task_queue.dead_letter.get_queue",
                 return_value=self._queue(enqueued),
             ),
         ):
-            dlq._replay_from_record(_record(func_name="core.task_queue.jobs.reindex"))
-        assert enqueued["func"] == "core.task_queue.jobs.reindex"
+            dlq._replay_from_record(
+                _record(func_name="baselith.core.task_queue.jobs.reindex")
+            )
+        assert enqueued["func"] == "baselith.core.task_queue.jobs.reindex"
 
     def test_os_system_is_refused_before_any_import(self, dlq):
         with (
-            _config(dlq_replay_allowed_modules=["core.", "plugins."]),
+            _config(dlq_replay_allowed_modules=["baselith.core.", "baselith.plugins."]),
             patch(
-                "core.task_queue.dead_letter.get_queue",
+                "baselith.core.task_queue.dead_letter.get_queue",
                 side_effect=AssertionError("must not reach the queue"),
             ),
         ):
@@ -408,7 +416,7 @@ class TestReplayAllowlist:
                 dlq._replay_from_record(_record(func_name="os.system"))
 
     def test_a_near_miss_prefix_is_refused(self, dlq):
-        with _config(dlq_replay_allowed_modules=["core."]):
+        with _config(dlq_replay_allowed_modules=["baselith.core."]):
             with pytest.raises(DeadLetterError, match="ALLOWED_MODULES"):
                 dlq._replay_from_record(_record(func_name="coreevil.jobs.run"))
 
@@ -417,7 +425,7 @@ class TestReplayAllowlist:
         with (
             _config(dlq_replay_allowed_modules=["myapp.tasks."]),
             patch(
-                "core.task_queue.dead_letter.get_queue",
+                "baselith.core.task_queue.dead_letter.get_queue",
                 return_value=self._queue(enqueued),
             ),
         ):
@@ -428,20 +436,24 @@ class TestReplayAllowlist:
         """Fail-closed: "nothing is allowed" means no replay, not a free pass."""
         with _config(dlq_replay_allowed_modules=[]):
             with pytest.raises(DeadLetterError, match="ALLOWED_MODULES"):
-                dlq._replay_from_record(_record(func_name="core.jobs.run"))
+                dlq._replay_from_record(_record(func_name="baselith.core.jobs.run"))
 
     def test_the_default_allows_this_repository_s_own_task_modules(self, dlq):
         enqueued: dict = {}
         with (
             _config(),
             patch(
-                "core.task_queue.dead_letter.get_queue",
+                "baselith.core.task_queue.dead_letter.get_queue",
                 return_value=self._queue(enqueued),
             ),
         ):
-            dlq._replay_from_record(_record(func_name="core.task_queue.jobs.run"))
-            dlq._replay_from_record(_record(func_name="plugins.baselithbot.jobs.run"))
-        assert enqueued["func"] == "plugins.baselithbot.jobs.run"
+            dlq._replay_from_record(
+                _record(func_name="baselith.core.task_queue.jobs.run")
+            )
+            dlq._replay_from_record(
+                _record(func_name="baselith.plugins.examplebot.jobs.run")
+            )
+        assert enqueued["func"] == "baselith.plugins.examplebot.jobs.run"
 
     def test_round_trip_from_a_recorded_job(self, dlq):
         enqueued = {}
@@ -454,6 +466,8 @@ class TestReplayAllowlist:
         with _config():
             dlq.record(_job(args=("doc-42",), kwargs={"mode": "full"}), "boom")
         record = dlq.get("job-1")
-        with patch("core.task_queue.dead_letter.get_queue", return_value=_Queue()):
+        with patch(
+            "baselith.core.task_queue.dead_letter.get_queue", return_value=_Queue()
+        ):
             dlq._replay_from_record(record)
         assert enqueued["args"] == ("doc-42",)

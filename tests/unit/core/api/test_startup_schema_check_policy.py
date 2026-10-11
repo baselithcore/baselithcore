@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from core.api import _schema_check
-from core.api._schema_check import (
+from baselith.core.api import _schema_check
+from baselith.core.api._schema_check import (
     SchemaRevisionMismatchError,
     check_schema_revision,
     resolve_schema_check_mode,
@@ -129,7 +129,7 @@ async def test_a_check_that_cannot_run_only_warns(
 async def test_startup_health_checks_propagate_the_refusal(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from core.api import startup_checks
+    from baselith.core.api import startup_checks
 
     monkeypatch.setattr(startup_checks, "POSTGRES_ENABLED", True)
     monkeypatch.setattr(startup_checks, "CACHE_REDIS_URL", "")

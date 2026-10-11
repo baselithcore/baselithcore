@@ -7,10 +7,10 @@ Replace all 'MyAgent' references with your agent's name.
 
 from typing import Any, Dict, Optional
 from pathlib import Path
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 
-from core.lifecycle import LifecycleMixin, AgentState
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.lifecycle import LifecycleMixin, AgentState
+from baselith.core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
 
@@ -116,7 +116,7 @@ if __name__ == "__main__":
 
         With no ``llm_service`` the agent answers from its development
         fallback, so this runs without a model; inject the framework's LLM
-        service (``core.services.llm.get_llm_service()``) for real answers.
+        service (``baselith.core.services.llm.get_llm_service()``) for real answers.
         """
         agent = MyAgent(agent_id="my-agent")
         await agent.startup()

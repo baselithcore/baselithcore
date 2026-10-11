@@ -6,9 +6,9 @@ from collections.abc import Sequence
 
 import pytest
 
-from core.observability import audit as audit_module
-from core.observability.audit import AuditEventType
-from core.optimization.evolution import (
+from baselith.core.observability import audit as audit_module
+from baselith.core.observability.audit import AuditEventType
+from baselith.core.optimization.evolution import (
     Candidate,
     CandidateArchive,
     EvolutionBudget,

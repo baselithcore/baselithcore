@@ -1,4 +1,4 @@
-from core.workflows.builder import (
+from baselith.core.workflows.builder import (
     NodePosition,
     NodeType,
     WorkflowBuilder,

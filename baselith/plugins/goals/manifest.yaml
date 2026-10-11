@@ -1,0 +1,19 @@
+name: goals
+description: Goal tracking and monitoring for agent workflows
+version: 0.2.0
+author: Baselith
+tags:
+- goals
+- tracking
+- workflow
+# Declared capabilities. Goal tracking is in-process bookkeeping: nothing
+# outbound, no tool, no credential, no file.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
+integrity_sha256: 6ca90cf346004577423b955df7dbfcc34be92feeeeace48667fffa470a217d9a
+hash_surface_version: 5

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from core.chat.prompt_engine import PromptEngine
-from core.personas import (
+from baselith.core.chat.prompt_engine import PromptEngine
+from baselith.core.personas import (
     DEFAULT_EXAMPLES_PATH,
     FewShotExample,
     FewShotLibrary,

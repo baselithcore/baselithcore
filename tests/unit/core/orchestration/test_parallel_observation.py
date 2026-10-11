@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.hooks import (
+from baselith.core.orchestration.hooks import (
     ToolHookEvent,
     ToolHookRegistry,
     reset_tool_hook_registry,
 )
-from core.orchestration.parallel import ParallelToolExecutor, ToolCall
-from core.orchestration.tool_output import DEFAULT_TOOL_OUTPUT_MAX_CHARS
+from baselith.core.orchestration.parallel import ParallelToolExecutor, ToolCall
+from baselith.core.orchestration.tool_output import DEFAULT_TOOL_OUTPUT_MAX_CHARS
 
 pytestmark = [pytest.mark.unit]
 

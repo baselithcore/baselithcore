@@ -13,17 +13,17 @@ from collections.abc import Iterator
 
 import pytest
 
-from core.context import reset_plugin_context, set_plugin_context
-from core.plugins.access import (
+from baselith.core.context import reset_plugin_context, set_plugin_context
+from baselith.core.plugins.access import (
     SecretNotPermittedError,
     ToolNotPermittedError,
     check_tool_permitted,
     install_secret_guard,
     uninstall_secret_guard,
 )
-from core.plugins.permission_runtime import set_permissions_resolver
-from core.plugins.permissions import parse_permissions
-from core.security.secrets import get_secret
+from baselith.core.plugins.permission_runtime import set_permissions_resolver
+from baselith.core.plugins.permissions import parse_permissions
+from baselith.core.security.secrets import get_secret
 
 
 @pytest.fixture(autouse=True)
@@ -166,7 +166,7 @@ class TestSecretAccess:
                 return None
 
         monkeypatch.setattr(
-            "core.security.secrets.get_secrets_provider", lambda: _Spy()
+            "baselith.core.security.secrets.get_secrets_provider", lambda: _Spy()
         )
         with _AsPlugin(), pytest.raises(SecretNotPermittedError):
             get_secret("ACME_TOKEN")
@@ -199,7 +199,7 @@ class TestSecretAccess:
 class TestEnforcementChokepoint:
     async def test_the_orchestration_gate_consults_the_declaration(self, monkeypatch):
         """The tool guard has to run where tools are actually invoked."""
-        from core.orchestration.enforcement import enforce_tool_invocation
+        from baselith.core.orchestration.enforcement import enforce_tool_invocation
 
         monkeypatch.setenv("BASELITH_PLUGIN_PERMISSIONS", "enforce")
         _declare(tools=["search"])
@@ -207,7 +207,7 @@ class TestEnforcementChokepoint:
             await enforce_tool_invocation({"tenant_id": "t"}, "charge_card")
 
     async def test_a_declared_tool_passes_the_gate(self, monkeypatch):
-        from core.orchestration.enforcement import enforce_tool_invocation
+        from baselith.core.orchestration.enforcement import enforce_tool_invocation
 
         monkeypatch.setenv("BASELITH_PLUGIN_PERMISSIONS", "enforce")
         _declare(tools=["search"])
@@ -217,7 +217,10 @@ class TestEnforcementChokepoint:
 
 class TestGuardInstallation:
     def test_install_wires_the_registry(self, monkeypatch):
-        from core.plugins.guards import install_plugin_guards, uninstall_plugin_guards
+        from baselith.core.plugins.guards import (
+            install_plugin_guards,
+            uninstall_plugin_guards,
+        )
 
         monkeypatch.setenv("BASELITH_PLUGIN_PERMISSIONS", "enforce")
 
@@ -238,7 +241,10 @@ class TestGuardInstallation:
             uninstall_plugin_guards()
 
     def test_uninstall_clears_everything(self, monkeypatch):
-        from core.plugins.guards import install_plugin_guards, uninstall_plugin_guards
+        from baselith.core.plugins.guards import (
+            install_plugin_guards,
+            uninstall_plugin_guards,
+        )
 
         monkeypatch.setenv("BASELITH_PLUGIN_PERMISSIONS", "enforce")
 

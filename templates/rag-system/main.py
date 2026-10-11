@@ -21,9 +21,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from core.config import get_app_config, get_llm_config, get_vectorstore_config
-from core.models.domain import Document
-from core.observability.logging import get_logger
+from baselith.core.config import get_app_config, get_llm_config, get_vectorstore_config
+from baselith.core.models.domain import Document
+from baselith.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -66,7 +66,7 @@ class RAGSystem:
 
     async def ingest(self, request: IngestRequest) -> dict[str, Any]:
         """Embed and index one document."""
-        from core.services.vectorstore import get_vectorstore_service
+        from baselith.core.services.vectorstore import get_vectorstore_service
 
         document = Document(
             id=str(uuid.uuid4()), content=request.content, metadata=request.metadata
@@ -78,9 +78,9 @@ class RAGSystem:
 
     async def query(self, request: QueryRequest) -> QueryResponse:
         """Retrieve the closest passages and answer from them."""
-        from core.nlp.models import get_embedder
-        from core.services.llm import get_llm_service
-        from core.services.vectorstore import get_vectorstore_service
+        from baselith.core.nlp.models import get_embedder
+        from baselith.core.services.llm import get_llm_service
+        from baselith.core.services.vectorstore import get_vectorstore_service
 
         vector = await get_embedder().encode_query(request.query)
         results = await get_vectorstore_service().search(

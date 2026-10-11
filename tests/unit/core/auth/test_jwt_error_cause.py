@@ -16,9 +16,9 @@ from unittest.mock import patch
 import jwt as pyjwt
 import pytest
 
-from core.auth.jwt import JWTHandler
-from core.auth.types import AuthRole
-from core.utils.logsafe import sanitize_log_value
+from baselith.core.auth.jwt import JWTHandler
+from baselith.core.auth.types import AuthRole
+from baselith.core.utils.logsafe import sanitize_log_value
 
 _SECRET = "test-secret-with-at-least-thirty-two-chars"
 _OTHER_SECRET = "another-secret-also-at-least-thirty-two!"
@@ -60,7 +60,7 @@ async def test_message_is_generic_while_the_reason_is_logged() -> None:
     verifier = JWTHandler(secret_key=_OTHER_SECRET)
     token = signer.create_token("u1", roles={AuthRole.USER})
 
-    with patch("core.auth.jwt.logger") as mock_logger:
+    with patch("baselith.core.auth.jwt.logger") as mock_logger:
         with pytest.raises(Exception) as exc_info:
             await verifier.verify_token(token)
 
@@ -94,7 +94,7 @@ async def test_logged_reason_is_sanitized_and_caller_input_stays_out_of_the_body
         headers={"kid": forged_kid},
     )
 
-    with patch("core.auth.jwt.logger") as mock_logger:
+    with patch("baselith.core.auth.jwt.logger") as mock_logger:
         with pytest.raises(Exception) as exc_info:
             await verifier.verify_token(token)
 
@@ -118,7 +118,7 @@ async def test_sanitizer_escapes_a_raw_newline_in_the_reason() -> None:
     raw = pyjwt.InvalidTokenError("line one\nAUDIT | AUTH | ok | user=admin")
 
     with patch.object(verifier._keyring, "decode", side_effect=raw):
-        with patch("core.auth.jwt.logger") as mock_logger:
+        with patch("baselith.core.auth.jwt.logger") as mock_logger:
             with pytest.raises(Exception):
                 await verifier.verify_token("whatever")
 

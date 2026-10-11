@@ -3,14 +3,14 @@ title: Prompt Registry
 description: Versioned prompt templates with labels, A/B selection, and tracing linkage
 ---
 
-The `core/prompts` registry treats prompts as **versioned, content-addressed
+The `baselith/core/prompts` registry treats prompts as **versioned, content-addressed
 artifacts** rather than strings scattered through the code. Register many
 versions of a named prompt, point labels (`production`, `staging`) at a version,
 render with variables, and run deterministic A/B experiments — all while
 carrying the resolved name+version into traces so output can be grouped by the
 exact prompt that produced it.
 
-It complements the [prompt *builder*](chat.md) (`core/chat/prompt_engine.py`):
+It complements the [prompt *builder*](chat.md) (`baselith/core/chat/prompt_engine.py`):
 the builder assembles a prompt from layers and few-shot examples; the registry
 *stores, versions, resolves, and renders* named templates.
 
@@ -26,7 +26,7 @@ the builder assembles a prompt from layers and few-shot examples; the registry
 ## Registering & resolving
 
 ```python
-from core.prompts import get_prompt_registry
+from baselith.core.prompts import get_prompt_registry
 
 reg = get_prompt_registry()
 reg.register("greet", "Hello {{ name }}, welcome to {{ product }}.",
@@ -91,7 +91,7 @@ Hello {{ name }}, welcome to {{ product }}.
 ```
 
 ```python
-from core.prompts import get_prompt_registry, load_prompts_from_dir
+from baselith.core.prompts import get_prompt_registry, load_prompts_from_dir
 
 load_prompts_from_dir(get_prompt_registry(), "prompts/")
 ```
@@ -109,14 +109,14 @@ online prompt evaluation and A/B analysis.
 
 ## Packaged catalog prompts
 
-`core/prompts/catalog.py` generalizes the pattern pioneered by the
-conversation system prompt (`core/chat/prompt.py`): the framework's own
-hot-path prompts ship as Markdown catalog files under `core/prompts/catalog/`
+`baselith/core/prompts/catalog.py` generalizes the pattern pioneered by the
+conversation system prompt (`baselith/core/chat/prompt.py`): the framework's own
+hot-path prompts ship as Markdown catalog files under `baselith/core/prompts/catalog/`
 (packaged in the wheel) and are served through the registry instead of
 hardcoded `.format` strings — versioned, label-resolved, and traced.
 
 ```python
-from core.prompts.catalog import resolve_catalog_prompt
+from baselith.core.prompts.catalog import resolve_catalog_prompt
 
 prompt = resolve_catalog_prompt(
     "react_system",
@@ -146,17 +146,17 @@ Five framework prompts are catalog-served today:
 
 | Prompt name | Call site |
 |-------------|-----------|
-| `react_system` | `core/reasoning/react.py` (text-parsing ReAct loop) |
-| `react_native_system` | `core/reasoning/react_native.py` (native tool-calling loop) |
-| `intent_classification` | `core/orchestration/intent_classifier.py` (`build_classification_prompt`) |
-| `swarm_decomposition` | `core/orchestration/handlers/swarm_agents.py` (`build_decomposition_prompt`) |
-| `loop_goal_hardening` | `core/loops/goal.py` (`harden_goal`, pre-flight goal questionnaire) |
+| `react_system` | `baselith/core/reasoning/react.py` (text-parsing ReAct loop) |
+| `react_native_system` | `baselith/core/reasoning/react_native.py` (native tool-calling loop) |
+| `intent_classification` | `baselith/core/orchestration/intent_classifier.py` (`build_classification_prompt`) |
+| `swarm_decomposition` | `baselith/core/orchestration/handlers/swarm_agents.py` (`build_decomposition_prompt`) |
+| `loop_goal_hardening` | `baselith/core/loops/goal.py` (`harden_goal`, pre-flight goal questionnaire) |
 
 `react_system` and `react_native_system` both close with the same
 untrusted-tool-output handling sentence as
 [`UNTRUSTED_OUTPUT_SYSTEM_RULE`](orchestration.md#untrusted-output-envelope),
 kept byte-comparable with the embedded fallback template in
-`core/reasoning/react.py` / `react_native.py` so the packaged catalog prompt
+`baselith/core/reasoning/react.py` / `react_native.py` so the packaged catalog prompt
 and its code fallback never drift out of sync.
 
 !!! note "Literal braces survive"
@@ -180,7 +180,7 @@ BASELITH_PROMPT_VARIANTS_REACT_SYSTEM=1:50,2:50
 ```
 
 The bucketing `subject` defaults to the ambient tenant
-(`core.context.get_tenant_or_default()`) — each tenant sees one stable
+(`baselith.core.context.get_tenant_or_default()`) — each tenant sees one stable
 variant — or pass `subject=` explicitly for user/session-level bucketing:
 
 ```python
@@ -216,7 +216,7 @@ by swapping the store out.
 The in-memory store makes runtime label promotion **replica-local**: a
 `promote()` on one replica never reaches the others, so behind a 2+-replica
 deployment "the production prompt" could differ per replica.
-`PromptSynchronizer` (`core/prompts/sync.py`) closes that gap without
+`PromptSynchronizer` (`baselith/core/prompts/sync.py`) closes that gap without
 changing the registry's synchronous contract:
 
 - **Writes** (`push_version` / `push_label`) go through a durable backend
@@ -237,9 +237,9 @@ changing the registry's synchronous contract:
 catalog does not hold.
 
 ```python
-from core.prompts.store_postgres import PostgresPromptBackend
-from core.prompts.sync import PromptSynchronizer
-from core.prompts.types import PromptVersion
+from baselith.core.prompts.store_postgres import PostgresPromptBackend
+from baselith.core.prompts.sync import PromptSynchronizer
+from baselith.core.prompts.types import PromptVersion
 
 backend = PostgresPromptBackend()
 await backend.initialize()          # idempotent DDL
@@ -260,7 +260,7 @@ await sync.push_label("greet", "production", "3")   # durable promote
     schema and the runtime role holds no DDL rights. The call stays safe
     either way: with the gate off the table is expected to exist already.
 
-`PostgresPromptBackend` (`core/prompts/store_postgres.py`) implements the
+`PostgresPromptBackend` (`baselith/core/prompts/store_postgres.py`) implements the
 `PromptBackend` Protocol on two tables — `prompt_versions` (primary key
 `(name, version)`) and `prompt_labels` (primary key `(name, label)`) — created
 idempotently (`CREATE TABLE IF NOT EXISTS`) on `initialize()`, mirroring the
@@ -287,7 +287,7 @@ in a plugin.
 ### Enabling it (env)
 
 Prompt sync is **opt-in** and wired by the app lifespan
-(`core.api._runtime_services` → `start_prompt_sync_from_env`), fail-open at
+(`baselith.core.api._runtime_services` → `start_prompt_sync_from_env`), fail-open at
 startup — a backend that cannot start logs a warning and the app boots with a
 replica-local catalog:
 
@@ -297,13 +297,13 @@ BASELITH_PROMPT_SYNC_INTERVAL=30   # refresh interval, seconds (default 30.0)
 ```
 
 When enabled, the process-wide instance is reachable via
-`core.prompts.sync.get_prompt_synchronizer()` (returns `None` when sync is
+`baselith.core.prompts.sync.get_prompt_synchronizer()` (returns `None` when sync is
 off) — which is how the admin API below decides whether writes are safe.
 
 ### Admin API (`/prompts`)
 
 The `api_routers` plugin mounts an operator surface for the catalog
-(`plugins/api_routers/prompts.py`), protected by the same **admin HTTP Basic
+(`baselith/plugins/api_routers/prompts.py`), protected by the same **admin HTTP Basic
 Auth** as the admin dashboard. Reads always serve the local registry; the
 write endpoints refuse with **503** when no synchronizer is configured,
 because a promotion that silently stays replica-local is a footgun.

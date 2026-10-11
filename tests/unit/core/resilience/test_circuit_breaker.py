@@ -1,5 +1,5 @@
 """
-Tests for core.resilience.circuit_breaker module.
+Tests for baselith.core.resilience.circuit_breaker module.
 """
 
 import time
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.resilience.circuit_breaker import (
+from baselith.core.resilience.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerError,
     CircuitState,

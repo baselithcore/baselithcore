@@ -20,9 +20,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.memory.manager import AgentMemory
-from core.memory.providers import InMemoryProvider
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.providers import InMemoryProvider
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 
 def _old_item(content: str) -> MemoryItem:
@@ -198,7 +198,7 @@ async def test_vector_provider_preserves_the_stored_id() -> None:
     """A recalled item must be addressable, or a delete keyed on it is a no-op."""
     from unittest.mock import patch
 
-    from core.models.domain import Document, SearchResult
+    from baselith.core.models.domain import Document, SearchResult
 
     stored = MemoryItem(content="body", memory_type=MemoryType.LONG_TERM)
     hit = SearchResult(
@@ -208,12 +208,12 @@ async def test_vector_provider_preserves_the_stored_id() -> None:
         score=0.9,
     )
 
-    with patch("core.memory.providers.get_vectorstore_service") as get_service:
+    with patch("baselith.core.memory.providers.get_vectorstore_service") as get_service:
         service = MagicMock()
         service.search = AsyncMock(return_value=[hit])
         get_service.return_value = service
 
-        from core.memory.providers import VectorMemoryProvider
+        from baselith.core.memory.providers import VectorMemoryProvider
 
         provider = VectorMemoryProvider(embedder=MagicMock())
         recalled = await provider.search("body", query_vector=[0.1, 0.2])
@@ -224,7 +224,7 @@ async def test_vector_provider_preserves_the_stored_id() -> None:
 class TestPersistenceIsWiredEverywhere:
     """Both construction sites must agree about whether memories persist.
 
-    The lazy-registry resource and ``core.memory.get_memory()`` were each built
+    The lazy-registry resource and ``baselith.core.memory.get_memory()`` were each built
     bare, so "long-term memory" was a bounded in-process deque that died with
     the worker whatever the configuration said.
     """
@@ -232,14 +232,16 @@ class TestPersistenceIsWiredEverywhere:
     def test_the_singleton_gets_a_provider_and_a_summarizer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import core.memory as memory_module
+        import baselith.core.memory as memory_module
 
         sentinel = InMemoryProvider()
         monkeypatch.setattr(memory_module, "_agent_memory", None)
         monkeypatch.setattr(
-            "core.memory.providers.build_memory_provider", lambda _c: sentinel
+            "baselith.core.memory.providers.build_memory_provider", lambda _c: sentinel
         )
-        monkeypatch.setattr("core.services.llm.get_llm_service", lambda: _summarizer())
+        monkeypatch.setattr(
+            "baselith.core.services.llm.get_llm_service", lambda: _summarizer()
+        )
 
         manager = memory_module.get_memory()
 
@@ -249,11 +251,11 @@ class TestPersistenceIsWiredEverywhere:
     def test_persistence_can_be_switched_off(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.config.memory import MemoryRuntimeConfig
-        from core.memory.providers import build_memory_provider
+        from baselith.core.config.memory import MemoryRuntimeConfig
+        from baselith.core.memory.providers import build_memory_provider
 
         monkeypatch.setattr(
-            "core.config.memory.get_memory_runtime_config",
+            "baselith.core.config.memory.get_memory_runtime_config",
             lambda: MemoryRuntimeConfig(persistence_enabled=False),
         )
 
@@ -265,14 +267,14 @@ class TestPersistenceIsWiredEverywhere:
         """Construction must stay cheap: a sync caller may be on the loop."""
         from unittest.mock import patch
 
-        from core.memory.providers import VectorMemoryProvider
+        from baselith.core.memory.providers import VectorMemoryProvider
 
-        with patch("core.memory.providers.get_vectorstore_service"):
+        with patch("baselith.core.memory.providers.get_vectorstore_service"):
             provider = VectorMemoryProvider()
         assert provider.embedder is None
 
         loaded = MagicMock()
         loaded.encode = AsyncMock(return_value=[[0.1]])
-        with patch("core.nlp.models.get_embedder", return_value=loaded):
+        with patch("baselith.core.nlp.models.get_embedder", return_value=loaded):
             assert await provider._resolve_embedder() is loaded
         assert provider.embedder is loaded

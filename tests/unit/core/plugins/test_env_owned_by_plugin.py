@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from core.config import drift
-from core.plugins._env import apply_plugin_env
+from baselith.core.config import drift
+from baselith.core.plugins._env import apply_plugin_env
 
 NS_KEY = "NSPLUGIN_PROJECT_PLANNER_ENABLE_TEST_CASES"
 FOREIGN_KEY = "PROJECT_PLANER_ENABLE_TEST_CASES"

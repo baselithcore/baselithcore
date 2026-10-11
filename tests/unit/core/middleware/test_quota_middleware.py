@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import core.middleware._auth_memo as auth_memo
-import core.middleware.quota as qm
-from core.auth import AuthRole, AuthUser
-from core.quotas.manager import QuotaExceededError, QuotaWindow
+import baselith.core.middleware._auth_memo as auth_memo
+import baselith.core.middleware.quota as qm
+from baselith.core.auth import AuthRole, AuthUser
+from baselith.core.quotas.manager import QuotaExceededError, QuotaWindow
 
 
 class _FakeApp:
@@ -167,7 +167,7 @@ async def test_anonymous_passes_through(monkeypatch):
 def test_probe_and_docs_paths_skip_quota_auth(monkeypatch):
     """Liveness probes, docs and metrics scrapes must not pay a full JWT
     verification per hit when quotas are on."""
-    from core.middleware.quota import QuotaMiddleware
+    from baselith.core.middleware.quota import QuotaMiddleware
 
     assert "/health" in QuotaMiddleware._EXEMPT_PATHS
     assert "/metrics" in QuotaMiddleware._EXEMPT_PATHS

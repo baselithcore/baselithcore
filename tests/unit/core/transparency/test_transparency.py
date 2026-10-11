@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from core.transparency import (
+from baselith.core.transparency import (
     DEFAULT_DISCLOSURE_TEXT,
     ContentClass,
     DisclosureService,
@@ -16,7 +16,7 @@ from core.transparency import (
     TransparencyService,
     sha256_hex,
 )
-from core.transparency.provenance import PROVENANCE_HEADER
+from baselith.core.transparency.provenance import PROVENANCE_HEADER
 
 # --------------------------------------------------------------------------- #
 # Disclosure (Art 50(1))
@@ -189,7 +189,7 @@ class TestTransparencyService:
     def test_mark_content_emits_audit_log(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import core.transparency.service as service_mod
+        import baselith.core.transparency.service as service_mod
 
         calls: list[str] = []
         monkeypatch.setattr(
@@ -208,7 +208,7 @@ class TestTransparencyService:
 
 class TestTransparencyConfig:
     def test_defaults_are_opt_in(self) -> None:
-        from core.config.transparency import TransparencyConfig
+        from baselith.core.config.transparency import TransparencyConfig
 
         cfg = TransparencyConfig()
         assert cfg.enabled is False
@@ -217,7 +217,7 @@ class TestTransparencyConfig:
         assert cfg.signing_secret is None
 
     def test_secret_is_wrapped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from core.config.transparency import TransparencyConfig
+        from baselith.core.config.transparency import TransparencyConfig
 
         monkeypatch.setenv("TRANSPARENCY_SIGNING_SECRET", "top-secret")
         cfg = TransparencyConfig()
@@ -226,6 +226,6 @@ class TestTransparencyConfig:
         assert cfg.signing_secret.get_secret_value() == "top-secret"
 
     def test_get_service_singleton(self) -> None:
-        from core.transparency.service import get_transparency_service
+        from baselith.core.transparency.service import get_transparency_service
 
         assert get_transparency_service() is get_transparency_service()

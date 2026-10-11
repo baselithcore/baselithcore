@@ -3,15 +3,15 @@
 import threading
 from datetime import UTC, datetime, timedelta
 
-import core.config.incidents as cfg
-import core.incidents.service as svc_mod
-from core.incidents import (
+import baselith.core.config.incidents as cfg
+import baselith.core.incidents.service as svc_mod
+from baselith.core.incidents import (
     IncidentSeverity,
     IncidentStatus,
     InMemoryIncidentStore,
     SecurityIncident,
 )
-from core.incidents.persistence import SQLiteIncidentStore
+from baselith.core.incidents.persistence import SQLiteIncidentStore
 
 T0 = datetime(2026, 6, 29, 12, 0, 0, tzinfo=UTC)
 

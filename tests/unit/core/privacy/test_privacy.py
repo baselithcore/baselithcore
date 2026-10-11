@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from core.privacy import (
+from baselith.core.privacy import (
     DataProviderRegistry,
     DataSubjectService,
     DictDataProvider,

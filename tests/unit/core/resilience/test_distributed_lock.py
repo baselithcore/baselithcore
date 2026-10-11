@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from core.resilience.distributed_lock import DistributedLock, LockNotAcquired
+from baselith.core.resilience.distributed_lock import DistributedLock, LockNotAcquired
 
 
 class FakeRedis:

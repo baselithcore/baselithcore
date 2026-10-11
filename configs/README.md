@@ -20,7 +20,7 @@ This directory contains the **official configuration templates** for the Baselit
 | `.env.development`     | Settings for local development (Ollama, debug enabled).            |
 | `.env.production`      | Settings for production (OpenAI, Redis, strict security).          |
 | `.env.test`            | Settings for automated tests (isolation, caching disabled).        |
-| `plugins.yaml.example` | Granular plugin configuration template.                            |
+| `baselith.plugins.yaml.example` | Granular plugin configuration template.                            |
 | `plugins.yaml`         | Active plugin configuration (ignored by git).                      |
 
 ## Quick Start
@@ -118,14 +118,14 @@ Do not run the privileged sandbox daemon inside the main production application 
 
 ## Pydantic Integration
 
-These files map directly to Pydantic config classes in `core/config/`:
+These files map directly to Pydantic config classes in `baselith/core/config/`:
 
 ```text
-configs/.env.base →  core/config/services.py   (LLMConfig, ChatConfig, etc.)
-                  →  core/config/storage.py    (StorageConfig)
-                  →  core/config/sandbox.py    (SandboxConfig)
-                  →  core/config/reasoning.py  (ReasoningConfig)
-                  →  core/config/resilience.py (ResilienceConfig)
+configs/.env.base →  baselith/core/config/services.py   (LLMConfig, ChatConfig, etc.)
+                  →  baselith/core/config/storage.py    (StorageConfig)
+                  →  baselith/core/config/sandbox.py    (SandboxConfig)
+                  →  baselith/core/config/reasoning.py  (ReasoningConfig)
+                  →  baselith/core/config/resilience.py (ResilienceConfig)
 ```
 
 Any changes here must reflect (or derive from) the Pydantic models.

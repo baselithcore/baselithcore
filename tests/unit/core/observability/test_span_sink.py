@@ -12,15 +12,15 @@ from typing import Any
 
 import pytest
 
-from core.observability import span_sink as span_sink_module
-from core.observability.span_sink import (
+from baselith.core.observability import span_sink as span_sink_module
+from baselith.core.observability.span_sink import (
     SpanRecord,
     emit_span,
     has_span_sinks,
     register_span_sink,
     unregister_span_sink,
 )
-from core.observability.tracing import Tracer
+from baselith.core.observability.tracing import Tracer
 
 
 @pytest.fixture(autouse=True)
@@ -118,7 +118,9 @@ def test_no_homegrown_emit_while_otel_sdk_is_active(
     collected: list[SpanRecord], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With the SDK active the bridge processor is the producer — not the Tracer."""
-    monkeypatch.setattr("core.observability.tracing._otel_active", lambda: True)
+    monkeypatch.setattr(
+        "baselith.core.observability.tracing._otel_active", lambda: True
+    )
     tracer = Tracer("test-service")
     with tracer.start_span("work"):
         pass

@@ -3,7 +3,7 @@
 A declarative plugin set: `plugins.config` is rendered into this ConfigMap and
 mounted read-only over /app/configs/plugins.yaml in the api and worker pods,
 shadowing the copy baked into the image. The app reads that path by default
-(core/api/lifespan.py), so no PLUGIN_CONFIG_PATH is needed — and every CLI
+(baselith/core/api/lifespan.py), so no PLUGIN_CONFIG_PATH is needed — and every CLI
 and console surface that rewrites configs/plugins.yaml now fails with
 "Read-only file system", which is the point: the set of plugins a release runs
 is decided by whoever renders the values, not by a toggle in a pod.

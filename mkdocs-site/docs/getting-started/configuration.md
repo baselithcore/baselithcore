@@ -56,7 +56,7 @@ silently ignored; `baselith config env` reports those.
 
 ## General Application Configuration
 
-Declared in `core.config.app`.
+Declared in `baselith.core.config.app`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -69,9 +69,9 @@ Declared in `core.config.app`.
 | `ANALYSIS_CACHE_TTL` | `float` | `86400.0` | Deprecated, no effect: nothing reads it |
 | `APP_TIMEZONE` | `str` | `Europe/Rome` |  |
 | `BASELITH_ROOT_REDIRECT` | `str` | *empty* | Site-relative path `GET /` redirects to. The framework serves nothing at the root: a deployment's homepage is one of the plugin SPAs it installed (`/&lt;plugin>/`), which core cannot guess, so `/` answers 404 until this names the landing. Empty (the default) keeps that 404 — no deployment gains a redirect it did not ask for. |
-| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`core.config._collections`. |
+| `CHAT_GUARDRAILS_BLOCK_KEYWORDS` | `Annotated[list[str], NoDecode]` | *computed* | List of prohibited keywords (Regex supported). NoDecode + csv_list so a comma-separated (or blank) value parses instead of raising a SettingsError out of the entire AppConfig — see :mod:`baselith.core.config._collections`. |
 | `CHAT_GUARDRAILS_BLOCK_MESSAGE` | `str` | `I cannot assist you with this request.` |  |
-| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in core/chat RAG pipeline only |
+| `CHAT_GUARDRAILS_ENABLED` | `bool` | `True` | Keyword guard of the opt-in baselith/core/chat RAG pipeline only |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_MESSAGE` | `str` | `I can only answer questions related to indexed documents.` |  |
 | `CHAT_GUARDRAILS_OUT_OF_SCOPE_PATTERNS` | `Annotated[list[str], NoDecode]` | *computed* | Patterns to detect off-topic queries. |
 | `CHAT_MEMORY_ENABLED` | `bool` | `True` |  |
@@ -128,7 +128,7 @@ Declared in `core.config.app`.
 
 ## Audit-trail configuration
 
-Declared in `core.config.audit`.
+Declared in `baselith.core.config.audit`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -144,7 +144,7 @@ Declared in `core.config.audit`.
 
 ## Core configuration settings
 
-Declared in `core.config.base`.
+Declared in `baselith.core.config.base`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -162,7 +162,7 @@ Declared in `core.config.base`.
 
 ## Cache configuration settings
 
-Declared in `core.config.cache`.
+Declared in `baselith.core.config.cache`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -185,7 +185,7 @@ Declared in `core.config.cache`.
 
 ## Chat configuration (`CHAT_`)
 
-Declared in `core.config.chat`.
+Declared in `baselith.core.config.chat`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -203,7 +203,7 @@ Declared in `core.config.chat`.
 
 ## AI-governance configuration (EU AI Act, GDPR accountability artefacts)
 
-Declared in `core.config.compliance`.
+Declared in `baselith.core.config.compliance`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -224,7 +224,7 @@ Declared in `core.config.compliance`.
 
 ## Evaluation configuration (`EVAL_`)
 
-Declared in `core.config.evaluation`.
+Declared in `baselith.core.config.evaluation`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -232,11 +232,32 @@ Declared in `core.config.evaluation`.
 | `EVAL_JUDGE_MAX_PARALLEL` | `int` | `4` | Maximum judge calls in flight at once across the suite. |
 | `EVAL_JUDGE_SAMPLES` | `int` | `3` | Judge evaluations per case; the median score gates. |
 | `EVAL_MODEL` | `str` | `gpt-4-turbo-preview` |  |
+| `EVAL_ONLINE_DEGRADATION_THRESHOLD` | `float` | `0.15` | Drop of the windowed mean below the reference mean that marks an intent degraded. |
+| `EVAL_ONLINE_ENABLED` | `bool` | `False` | Start online evaluation of production flows at boot (also needs EVAL_ENABLED). |
+| `EVAL_ONLINE_FLEET` | `bool` | `True` | Monitor quality across all workers through Redis when CACHE_BACKEND=redis (one elected worker announces); off, or without Redis, each worker monitors its own traffic. |
+| `EVAL_ONLINE_FLEET_INTERVAL_SECONDS` | `float` | `15.0` | Seconds between two fleet monitor ticks; the elected worker's lease expires after three missed ticks. |
+| `EVAL_ONLINE_INTENT_SAMPLE_RATES` | `dict[str, float]` | *computed* | Per-intent sample-rate overrides, as JSON (e.g. {"qa_docs": 0.2}). |
+| `EVAL_ONLINE_JUDGE_RATE` | `float` | `0.0` | Fraction of all flows also scored by the LLM judge, capped at the sample rate. 0 keeps the judge off. |
+| `EVAL_ONLINE_MAX_INTENTS` | `int` | `50` | Distinct intent label values on the online metrics; further intents are reported as 'other'. |
+| `EVAL_ONLINE_MIN_ANSWER_CHARS` | `int` | `20` | Answers shorter than this fail the too-short check. |
+| `EVAL_ONLINE_MIN_SAMPLES` | `int` | `20` | Scores a window needs before the monitor judges it, and between two state changes. |
+| `EVAL_ONLINE_QUALITY_FLOOR` | `float \| None` | *empty* | Absolute floor for the windowed mean score; unset compares against the reference window only. |
+| `EVAL_ONLINE_QUEUE_SIZE` | `int` | `256` | Sampled flows waiting for evaluation; beyond it new samples are dropped and counted, never awaited. |
+| `EVAL_ONLINE_RECOVERY_MARGIN` | `float` | `0.05` | Hysteresis: a degraded intent recovers only this far inside the degradation boundary. |
+| `EVAL_ONLINE_REFERENCE_WINDOW` | `int` | `500` | Scores per intent in the trailing reference window (must exceed EVAL_ONLINE_WINDOW to be used). |
+| `EVAL_ONLINE_RETENTION_DAYS` | `int` | `30` | Stored online results older than this are swept; 0 keeps them forever. |
+| `EVAL_ONLINE_SAMPLE_RATE` | `float` | `0.05` | Fraction of successful flows sampled for the deterministic online checks; the decision is a stable hash of the run id. |
+| `EVAL_ONLINE_STORE` | `Literal['none', 'memory', 'postgres']` | `none` | Where online evaluation results are persisted. |
+| `EVAL_ONLINE_STORE_MAX_RECORDS` | `int` | `10000` | Records kept by the in-memory store (oldest evicted). |
+| `EVAL_ONLINE_STORE_RAW_TEXT` | `bool` | `False` | Also store the redacted query and response text. |
+| `EVAL_ONLINE_WEBHOOK_TENANT` | `str` | `default` | Tenant whose webhook endpoints receive evaluation.degraded and evaluation.recovered (the operators' tenant). |
+| `EVAL_ONLINE_WINDOW` | `int` | `50` | Recent scores per intent in the quality monitor's window. |
+| `EVAL_ONLINE_WORKERS` | `int` | `2` | Concurrent online evaluations (and judge calls) in flight. |
 | `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
 
 ## Events configuration
 
-Declared in `core.config.events`.
+Declared in `baselith.core.config.events`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -249,7 +270,7 @@ Declared in `core.config.events`.
 
 ## Guardrails configuration (`GUARDRAILS_`)
 
-Declared in `core.config.guardrails`.
+Declared in `baselith.core.config.guardrails`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -268,13 +289,13 @@ Declared in `core.config.guardrails`.
 
 ## Security-incident reporting configuration
 
-Declared in `core.config.incidents`.
+Declared in `baselith.core.config.incidents`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `AI_ACT_COMPLETE_REPORT_DAYS` | `int` | `30` |  |
 | `AI_ACT_INCIDENT_DB_PATH` | `str \| None` | *empty* |  |
-| `AI_ACT_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting. The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so they are derived in core.incidents.ai_act and deliberately NOT settings — there is no legitimate deployment-level override. Only the complete-report follow-up is configurable: Art. 73(5) allows an initial incomplete report followed by a complete one but fixes no outer limit for the latter, so this is an internal SLA, not a regulatory deadline. |
+| `AI_ACT_INCIDENT_REPORTING_ENABLED` | `bool` | `False` | EU AI Act (Regulation (EU) 2024/1689) Art. 73 serious-incident reporting. The 2 / 10 / 15-day horizons are statutory *and category-dependent*, so they are derived in baselith.core.incidents.ai_act and deliberately NOT settings — there is no legitimate deployment-level override. Only the complete-report follow-up is configurable: Art. 73(5) allows an initial incomplete report followed by a complete one but fixes no outer limit for the latter, so this is an internal SLA, not a regulatory deadline. |
 | `DORA_AWARENESS_CAP_HOURS` | `int` | `24` |  |
 | `DORA_DB_PATH` | `str \| None` | *empty* |  |
 | `DORA_FINAL_REPORT_DAYS` | `int` | `30` |  |
@@ -293,7 +314,7 @@ Declared in `core.config.incidents`.
 
 ## The shared inference services (embedding, rerank, Qdrant)
 
-Declared in `core.config.inference`.
+Declared in `baselith.core.config.inference`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -344,16 +365,22 @@ Declared in `core.config.inference`.
 
 ## MCP Configuration
 
-Declared in `core.config.mcp`.
+Declared in `baselith.core.config.mcp`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `MCP_ALLOWED_COMMANDS` | `str` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Comma-separated allowlist of executable basenames that MCPClient may spawn for stdio servers. A custom `command` whose argv[0] basename is not in this list is rejected — manifests/config cannot make the client exec arbitrary binaries. |
+| `MCP_ALLOWED_COMMANDS` | `str` | `python,python3,node,npx,uvx,uv,deno,bun,bunx` | Comma-separated allowlist of executable NAMES that MCPClient may spawn for stdio servers, matched exactly (case-sensitive on POSIX, no version suffix folding: list `python3.12` to allow `python3.12`). An entry with a path separator is ignored, and shells / exec-wrappers (sh, bash, env, xargs, ssh, cmd, powershell, ...) are refused whatever this says. A name is looked up in MCP_STDIO_TRUSTED_BIN_DIRS only, never on PATH. Naming an interpreter does NOT allow what it can be told to run: see MCP_STDIO_ALLOWED_DIRS. Package runners in the list (npx, uvx, bunx) additionally need MCP_ALLOW_PACKAGE_RUNNERS=true. |
 | `MCP_ALLOW_INTERNAL_ENDPOINTS` | `bool` | `False` | Fail-closed by default: the SSRF guard rejects private/loopback/ link-local MCP server hosts. Enable only for trusted local development against an MCP server on localhost/the internal network. |
+| `MCP_ALLOW_PACKAGE_RUNNERS` | `bool` | `False` | Package runners (npx, uvx, bunx, pnpx, `uv tool run`, `bun x`, `deno run npm:`) download and execute code from a registry at spawn time. They are refused even when listed in MCP_ALLOWED_COMMANDS unless this is true, because config reaching the client may be untrusted. |
 | `MCP_AUTONOMY_LEVEL` | `str` | `supervised` | Autonomy level applied when no explicit policy is passed to MCPServer: supervised \| semi_autonomous \| fully_autonomous. MCP transports have no human-approval channel, so gated categories are rejected outright (fail-closed). Set fully_autonomous only when the MCP client itself enforces human approval (e.g. Claude Desktop tool prompts). |
 | `MCP_CACHE_SCOPE` | `Literal['public', 'private']` | `private` | "private" is the safe default: listings and reads may be filtered by the authenticated identity, and a shared cache would leak them across authorization contexts. Set "public" only when every caller sees the same primitives. |
 | `MCP_CACHE_TTL_MS` | `int` | `60000` | Freshness hint on list/read results, in milliseconds. 0 means "always stale": correct for a server whose tools or resources change per request. |
+| `MCP_CLIENT_MAX_ITEMS` | `int` | `1000` |  |
+| `MCP_CLIENT_MAX_LINE_BYTES` | `int` | `4194304` | Hard cap on one newline-delimited stdio frame. Also bounds what the asyncio StreamReader buffers while a server dribbles a line forever. |
+| `MCP_CLIENT_MAX_PAGES` | `int` | `20` | Pagination guard for tools/list and resources/list: the client follows nextCursor at most this many pages / collects at most this many items, then fails closed. A repeated cursor is always an error. |
+| `MCP_CLIENT_MAX_RESPONSE_BYTES` | `int` | `4194304` | Hard cap on one HTTP response body, JSON or the accumulated SSE stream. A hostile server cannot stream gigabytes into the agent's memory; past the cap the request fails with MCPTransportError. |
 | `MCP_CLIENT_REQUEST_TIMEOUT` | `float` | `30.0` | Upper bound (seconds) on waiting for a response from an external MCP server. Guards against a hung or unresponsive server blocking the agent loop indefinitely. |
+| `MCP_CLIENT_TOTAL_DEADLINE_SECONDS` | `float` | `60.0` | Total wall-clock deadline for one HTTP request, covering the whole SSE stream. mcp_client_request_timeout only bounds each network phase, so a server trickling keep-alive events would otherwise hold the call open forever. |
 | `MCP_EXECUTE_CODE_TIMEOUT` | `int` | `30` |  |
 | `MCP_HTTP_ALLOWED_ORIGINS` | `str` | *empty* | Comma-separated allowlist of browser Origins (DNS-rebinding defense). Requests without an Origin header (non-browser clients) always pass. |
 | `MCP_HTTP_AUTHORIZATION_SERVERS` | `str` | *empty* | Comma-separated issuer URLs advertised as `authorization_servers` in the RFC 9728 protected-resource metadata. Defaults to the configured OIDC issuer when empty. |
@@ -366,6 +393,10 @@ Declared in `core.config.mcp`.
 | `MCP_HTTP_TRANSPORT_ENABLED` | `bool` | `False` | Off by default: enabling exposes the MCP server on the API surface. |
 | `MCP_LIST_PAGE_SIZE` | `int` | `100` | Maximum entries returned by one tools/list, resources/list or resources/templates/list page; the client pages on with `nextCursor`. |
 | `MCP_MAX_TOOL_RESULT_BYTES` | `int` | `1048576` | Upper bound on the serialized size of one `tools/call` result. A larger result is truncated with an explicit notice rather than refused: the call succeeded, and the model is told what it is missing. 0 disables the cap; any other value must clear MIN_TOOL_RESULT_BYTES, the cost of the truncation envelope itself. |
+| `MCP_OAUTH_MAX_RESPONSE_BYTES` | `int` | `262144` |  |
+| `MCP_OAUTH_TIMEOUT_SECONDS` | `float` | `15.0` | OAuth client (baselith.core.mcp.oauth_client): per-call deadline and response cap for discovery, registration and token requests. |
+| `MCP_POOL_IDLE_SECONDS` | `float` | `300.0` |  |
+| `MCP_POOL_MAX_CLIENTS` | `int` | `64` | Per-key client pool (baselith.core.mcp.keyed_pool): live clients kept at once, and how long an unused one survives before it is closed. |
 | `MCP_RAG_DEFAULT_TOP_K` | `int` | `5` |  |
 | `MCP_REQUEST_STATE_SECRET` :material-key: | `SecretStr \| None` | *empty* | HMAC key sealing `requestState`, which travels through the client and is therefore attacker-controlled. Unset means a random per-process key: fine for one instance, but a multi-replica deployment MUST set a shared secret or a retry landing on another replica will be rejected. |
 | `MCP_REQUEST_STATE_TTL_SECONDS` | `int` | `300` |  |
@@ -376,14 +407,20 @@ Declared in `core.config.mcp`.
 | `MCP_SERVER_NAME` | `str` | `baselith-core` |  |
 | `MCP_SERVER_VERSION` | `str` | `2.0.0` |  |
 | `MCP_SSE_TRANSPORT_ENABLED` | `bool` | `False` | Deprecated, no effect: nothing reads it; the served transport is Streamable HTTP (MCP_HTTP_TRANSPORT_ENABLED) |
+| `MCP_STDIO_ALLOWED_DIRS` | `str` | *empty* | Comma-separated ABSOLUTE directories whose scripts a stdio server may run. The first positional argument of python/node/deno/bun/uv must be a file whose symlink-resolved path is inside one of them (no `..`, not world-writable, not in a world-writable directory). Empty (default): no script is allowed, so stdio stays unusable until the operator opts in. |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | `str` | *empty* | Comma-separated environment variable names a server spec's `env` may set even though they can inject code (PATH, LD_*, DYLD_*, PYTHON*, NODE_*, proxy and CA-bundle variables, ...). Exact names; empty (default): none. |
+| `MCP_STDIO_ALLOWED_MODULES` | `str` | *empty* | Comma-separated importable module names `python -m` may run (exact match). Empty (default): `-m` is refused. |
+| `MCP_STDIO_ENV_PASSTHROUGH` | `str` | *empty* | Extra environment variable names a stdio server may inherit, on top of the built-in allowlist (PATH, HOME, USER, LOGNAME, LANG, LANGUAGE, LC_*, TMPDIR/TEMP/TMP, TZ, TERM and the Windows system variables). The parent environment is otherwise NEVER passed down: it carries API keys. Comma-separated; a trailing `*` matches a prefix. |
 | `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` | Deprecated, no effect: nothing reads it; stdio runs when the server is launched as a process |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | `str` | *empty* | Comma-separated absolute directories a command name is resolved in. Empty (default): /usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin, the active venv/conda bin. The running interpreter's own directory is always trusted. A non-empty value replaces the system list. |
 | `MCP_TASK_POLL_INTERVAL_MS` | `int` | `1000` |  |
+| `MCP_TASK_STORE_BACKEND` | `Literal['auto', 'memory', 'postgres']` | `auto` | Where task handles are persisted. 'memory' keeps them in the process (a restart answers "Unknown task"); 'postgres' writes every status transition to the mcp_tasks table (migration 015), so tasks/get after a restart — or on another replica — returns the stored status and result, and a task whose process died is failed as orphaned. 'auto' = postgres when POSTGRES_ENABLED, else memory. |
 | `MCP_TASK_TTL_MS` | `int` | `3600000` | How long a task handle stays resolvable, and how often the client should poll it. Both are hints carried in the CreateTaskResult. |
 | `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `float` | `60.0` | Server-side deadline on one `tools/call` handler. Without it a hung tool holds the request (and, on HTTP, the connection) indefinitely. 0 disables the deadline. |
 
 ## Memory configuration
 
-Declared in `core.config.memory`.
+Declared in `baselith.core.config.memory`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -401,7 +438,7 @@ Declared in `core.config.memory`.
 
 ## Schemas for the multimodal and adaptation services
 
-Declared in `core.config.multimodal`.
+Declared in `baselith.core.config.multimodal`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -417,19 +454,36 @@ Declared in `core.config.multimodal`.
 | `VISION_OPENAI_AUDIO_MODEL` | `str` | `gpt-4o-audio-preview` | OpenAI audio-capable chat model for native audio analysis (env VISION_OPENAI_AUDIO_MODEL). |
 | `VISION_OPENAI_MODEL` | `str` | `gpt-4o` | OpenAI vision model identifier. |
 | `VISION_PROVIDER` | `Literal['openai', 'anthropic', 'google', 'ollama']` | `openai` | Default vision capabilities provider |
+| `VOICE_ALLOW_INTERNAL_ENDPOINTS` | `bool` | `False` | Allow the compatible endpoints to sit on private, loopback or link-local addresses (a sidecar on the same host or network). Off by default: the SSRF guard refuses them. |
+| `VOICE_COMPAT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer key for the OpenAI-compatible servers (most sidecars are keyless). |
 | `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
-| `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_multilingual_v2` | ElevenLabs model ID for TTS |
+| `VOICE_ELEVENLABS_BASE_URL` | `str` | `https://api.elevenlabs.io` | ElevenLabs API root (VOICE_ELEVENLABS_BASE_URL). https only; the egress guard allows exactly this host and follows no redirect. Change it for a data-residency or enterprise endpoint (e.g. `https://api.eu.residency.elevenlabs.io`). |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `Literal['mp3_22050_32', 'mp3_24000_48', 'mp3_44100_32', 'mp3_44100_64', 'mp3_44100_96', 'mp3_44100_128', 'mp3_44100_192']` | `mp3_44100_128` | ElevenLabs output_format (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is what browsers play; mp3_44100_192 needs a paid tier. |
+| `VOICE_ELEVENLABS_RETRIES` | `int` | `2` | Retries after an HTTP 429 (bounded by the request deadline). |
 | `VOICE_ELEVENLABS_SIMILARITY_BOOST` | `float` | `0.75` | ElevenLabs similarity boost |
 | `VOICE_ELEVENLABS_STABILITY` | `float` | `0.5` | ElevenLabs voice stability |
+| `VOICE_ELEVENLABS_STT_MODEL` | `str` | `scribe_v1` | ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL). |
+| `VOICE_ELEVENLABS_STYLE` | `float` | `0.0` | ElevenLabs style exaggeration |
+| `VOICE_ELEVENLABS_TTS_MODEL`<br>also accepts `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_flash_v2_5` | ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency and half the credit cost, multilingual (Italian included), which suits a voice assistant that speaks sentence by sentence. eleven_multilingual_v2 trades latency for richer prosody; eleven_v3 is the most expressive. |
+| `VOICE_ELEVENLABS_VOICE_ID` | `str` | `21m00Tcm4TlvDq8ikWAM` | Default ElevenLabs voice id (VOICE_ELEVENLABS_VOICE_ID); the premade 'Rachel', which every account can use. |
 | `VOICE_EMBEDDING_MODEL` | `str` | `all-MiniLM-L6-v2` | Sentence-transformer model for semantic voice cache |
 | `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `VOICE_GOOGLE_APPLICATION_CREDENTIALS`<br>also accepts `GOOGLE_APPLICATION_CREDENTIALS` | `str \| None` | *empty* |  |
+| `VOICE_MAX_AUDIO_BYTES` | `int` | `10 * 1024 * 1024` | Largest audio upload sent to STT. |
+| `VOICE_MAX_RESPONSE_BYTES` | `int` | `20 * 1024 * 1024` | Largest response body read from a server. |
+| `VOICE_MAX_TTS_CHARS` | `int` | `4096` | Longest text accepted for synthesis. |
 | `VOICE_OPENAI_API_KEY` :material-key:<br>also accepts `OPENAI_API_KEY` | `SecretStr \| None` | *empty* |  |
-| `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google']` | `openai` | Default voice synthesis provider |
+| `VOICE_PROVIDER` | `Literal['openai', 'elevenlabs', 'google', 'openai_compatible']` | `openai` | Default voice provider. 'openai_compatible' talks to any server that speaks the OpenAI audio API (faster-whisper-server, Piper/Kokoro wrappers) at VOICE_STT_BASE_URL / VOICE_TTS_BASE_URL, with no external provider key. |
+| `VOICE_STT_BASE_URL` | `str \| None` | *empty* | OpenAI-compatible STT root, e.g. `http://whisper:8000/v1` (VOICE_STT_BASE_URL). |
+| `VOICE_STT_MODEL` | `str` | `whisper-1` | STT model name sent to the server. |
+| `VOICE_TIMEOUT_SECONDS` | `float` | `30.0` | Deadline of one voice request. |
+| `VOICE_TTS_BASE_URL` | `str \| None` | *empty* | OpenAI-compatible TTS root, e.g. `http://tts:8000/v1` (VOICE_TTS_BASE_URL). |
+| `VOICE_TTS_MODEL` | `str` | `tts-1` | TTS model name sent to the server. |
+| `VOICE_TTS_VOICE` | `str` | `alloy` | Default TTS voice for compatible servers. |
 
 ## Observability configuration (metric cardinality and trace exemplars)
 
-Declared in `core.config.observability`.
+Declared in `baselith.core.config.observability`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -438,7 +492,7 @@ Declared in `core.config.observability`.
 
 ## Orchestration and routing configuration (`ORCHESTRATOR_`, `ROUTER_`)
 
-Declared in `core.config.orchestration`.
+Declared in `baselith.core.config.orchestration`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -446,8 +500,9 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_CHECKPOINT_ENABLED` | `bool` | `True` | Wire a checkpoint store into the chat orchestrator: runs persist resumable checkpoints, approval gates pause durably and the /approvals API is mounted. |
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED` | `bool` | `False` | Also append an immutable snapshot of the checkpoint at every version (time-travel / state history; requires checkpoint_enabled). |
 | `ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT` | `int` | `200` | Per-run cap on retained history snapshots (newest kept); 0 means unlimited. |
+| `ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS` | `float` | `60.0` | Length of the per-run execution lease. The attempt executing a run renews it on every tool step and from a heartbeat every third of this interval; the recovery sweep resumes a run only once its lease has expired, so a crashed worker's run is picked up roughly this long after the crash. Replica clocks must agree to well within it. |
 | `ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES` | `int` | `1000` | Retained-run cap for the in-memory checkpoint backend (oldest finished runs evicted first). Irrelevant for the Postgres backend. |
-| `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool` | `False` | Start the background recovery sweeps: runs left in the 'running' state by a crash/restart are re-entered, and runs that stopped making progress are marked failed. Sweeps repeat every recovery_sweep_interval_seconds (not just at startup); a run is only re-entered once it has been silent for recovery_resume_after_seconds, so one still executing is left alone. Requires checkpoint_enabled; runs awaiting approval are never auto-resumed. |
+| `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` | `bool \| None` | *empty* | Start the background recovery sweeps: runs left in the 'running' state by a crash/restart are re-entered, and runs that stopped making progress are marked failed. Sweeps repeat every recovery_sweep_interval_seconds (not just at startup); a run is only re-entered once its lease (checkpoint_lease_seconds) has expired, so one still executing is left alone. Unset (the default) turns it on when the checkpoint backend is durable (postgres or sqlite) and off for memory; true/false force it. Requires checkpoint_enabled; runs awaiting approval are never auto-resumed. |
 | `ORCHESTRATOR_CHECKPOINT_SQLITE_PATH` | `str` | `data/checkpoints.db` | Database file for the 'sqlite' checkpoint backend (durable runs without a Postgres instance; parent directories are created on first use). |
 | `ORCHESTRATOR_COMPACTION_SUMMARIZE` | `bool` | `False` | When the native agent loop's message history exceeds BASELITH_REACT_HISTORY_MAX_TOKENS, condense the older complete turns into one labelled, untrusted summary message with a single LLM call instead of only truncating block contents. Off by default: it adds a call per compaction. Any summariser failure falls back to the deterministic truncation. |
 | `ORCHESTRATOR_COMPACTION_SUMMARY_MAX_TOKENS` | `int` | `1024` | Output token cap for one compaction summary. |
@@ -461,10 +516,10 @@ Declared in `core.config.orchestration`.
 | `ORCHESTRATOR_HITL_CALLBACK_THREADS` | `int` | `8` | Worker threads for blocking human-in-the-loop callbacks. They run on a dedicated pool, never the interpreter default one: a callback waits on a person, and a timed-out one never returns its thread, so sharing would starve short latency-critical tasks. |
 | `ORCHESTRATOR_LOOP_MAX_SECONDS` | `float` | `600.0` | Wall-clock deadline in seconds for one orchestrated request; also shrinks per-tool/LLM timeouts so a single slow call cannot outlive it. 0 disables the deadline. |
 | `ORCHESTRATOR_LOOP_MAX_TOKENS` | `int` | `400000` | Cumulative token cap (input + output, every LLM call) for one orchestrated request. 0 disables the cap. |
-| `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` | `float` | `300.0` | Minimum progress silence before a 'running' checkpoint is re-entered by the recovery sweep. Recent progress means some worker still owns the run, and resuming it anyway would execute the same agent loop twice. Keep it at or above the sweep interval. |
+| `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` | `float` | `300.0` | Minimum progress silence before the recovery sweep re-enters a 'running' checkpoint that carries no lease (written by a store without lease support, or before the upgrade). A leased run is re-entered only once its lease has expired, whatever its silence. |
 | `ORCHESTRATOR_RECOVERY_STALE_AFTER_SECONDS` | `float` | `1800.0` | Progress-silence threshold after which a 'running' checkpoint is marked failed by the stale-run sweep. |
 | `ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED` | `bool` | `True` | With checkpoint_resume_on_startup off, still sweep every recovery_sweep_interval_seconds and mark 'running' checkpoints silent for recovery_stale_after_seconds as failed, so runs orphaned by a crash are visible instead of 'running' forever. Nothing is resumed. With resume on, the recovery cycle already includes this sweep. |
-| `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` | `float` | `300.0` | Interval between background crash-recovery sweeps (resume interrupted runs + fail wedged ones) when checkpoint_resume_on_startup is enabled. |
+| `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` | `float` | `300.0` | Interval between background crash-recovery sweeps (resume interrupted runs + fail wedged ones) when auto resume is on (see checkpoint_resume_on_startup). |
 | `ORCHESTRATOR_TOOL_LEDGER` | `Literal['auto', 'postgres', 'memory', 'off']` | `auto` | Backing store for the tool idempotency ledger, which keeps a redelivered or resumed run from repeating an effectful call. 'auto' uses Postgres when POSTGRES_ENABLED, else the in-process ledger with a warning; 'postgres' requires it and fails loudly instead of silently deduplicating within one worker only; 'memory' always uses the in-process ledger (single-worker deployments and tests); 'off' records nothing, so every retry re-executes every effectful call. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED` | `bool` | `False` | Enforce a sliding-window burst limit on side-effecting tool invocations (categories destructive/external_side_effect), keyed (tenant, tool). In-process; off by default. |
 | `ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS` | `int` | `30` | Invocations allowed per (tenant, tool) inside one window. |
@@ -475,7 +530,7 @@ Declared in `core.config.orchestration`.
 
 ## One-click plugin update (host installs): the updater's and the console's settings
 
-Declared in `core.config.plugin_update_apply`.
+Declared in `baselith.core.config.plugin_update_apply`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -495,13 +550,13 @@ Declared in `core.config.plugin_update_apply`.
 
 ## Plugin updates (release polling, trust mode and overlay)
 
-Declared in `core.config.plugin_updates`.
+Declared in `baselith.core.config.plugin_updates`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
+| `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (baselith/core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
 | `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
-| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
+| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks; workers share one check per interval (each check costs about one GitHub call per mirror plus a few for the core), so go below the default only with a github_token |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
 | `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
 | `PLUGIN_UPDATE_INSTANCE_ID` | `str` | *empty* | Identity of this deployment for update announcements; deployments sharing one Redis or cache directory use distinct values so they do not suppress each other's notices (falls back to the APP_BASE_URL host; with neither set the Redis key is shared and a warning is logged) |
@@ -514,7 +569,7 @@ Declared in `core.config.plugin_updates`.
 
 ## Plugin-specific configuration settings
 
-Declared in `core.config.plugins`.
+Declared in `baselith.core.config.plugins`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -531,7 +586,7 @@ Declared in `core.config.plugins`.
 
 ## Prioritization Configuration
 
-Declared in `core.config.prioritization`.
+Declared in `baselith.core.config.prioritization`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -543,7 +598,7 @@ Declared in `core.config.prioritization`.
 
 ## Privacy / data-subject-request configuration
 
-Declared in `core.config.privacy`.
+Declared in `baselith.core.config.privacy`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -554,7 +609,7 @@ Declared in `core.config.privacy`.
 
 ## Processing configuration
 
-Declared in `core.config.processing`.
+Declared in `baselith.core.config.processing`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -588,7 +643,7 @@ Declared in `core.config.processing`.
 
 ## Per-key usage quota configuration
 
-Declared in `core.config.quotas`.
+Declared in `baselith.core.config.quotas`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -605,7 +660,7 @@ Declared in `core.config.quotas`.
 
 ## Reasoning configuration (`TOT_`)
 
-Declared in `core.config.reasoning`.
+Declared in `baselith.core.config.reasoning`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -619,7 +674,7 @@ Declared in `core.config.reasoning`.
 
 ## Reflection Pattern Configuration
 
-Declared in `core.config.reflection`.
+Declared in `baselith.core.config.reflection`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -628,7 +683,7 @@ Declared in `core.config.reflection`.
 
 ## Resilience configuration
 
-Declared in `core.config.resilience`.
+Declared in `baselith.core.config.resilience`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -651,11 +706,11 @@ Declared in `core.config.resilience`.
 
 ## Sandbox configuration (`SANDBOX_`)
 
-Declared in `core.config.sandbox`.
+Declared in `baselith.core.config.sandbox`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
-| `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
+| `SANDBOX_ALLOW_UNHARDENED_BASE` | `bool` | `False` | Permit falling back to an external base image when the bundled baselith/core/services/sandbox/Dockerfile.sandbox is missing. Requires unhardened_base_image. |
 | `SANDBOX_COST_PER_COMPUTE_SECOND` | `float` | `0.0` | USD charged per wall-clock compute second of sandbox execution. 0 (default) keeps cost_usd at 0 while compute_seconds is still recorded. |
 | `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker daemon socket for the sandbox client. Used only when set explicitly and DOCKER_HOST is unset; otherwise Docker's own client environment decides. |
 | `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Give Docker sandbox containers the default bridge network (egress for untrusted code). Off: network_mode none. |
@@ -671,7 +726,7 @@ Declared in `core.config.sandbox`.
 
 ## Scraper configuration
 
-Declared in `core.config.scraper`.
+Declared in `baselith.core.config.scraper`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -702,7 +757,7 @@ Declared in `core.config.scraper`.
 
 ## Security configuration
 
-Declared in `core.config.security`.
+Declared in `baselith.core.config.security`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -712,7 +767,7 @@ Declared in `core.config.security`.
 | `ALLOW_ORIGINS` | `Annotated[list[str], NoDecode]` | *computed* | Comma-separated list of browser origins allowed to make cross-origin requests, each written scheme-and-host (no trailing path). Empty — the default — blocks every cross-origin request, which is the safe posture for an API with no browser front end. |
 | `API_KEYS_ADMIN` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
 | `API_KEYS_JOB` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* |  |
-| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
+| `API_KEYS_SCOPED` :material-key: | `Annotated[dict[SecretStr, set[str]], NoDecode]` | *computed* | Least-privilege scoped API keys: map of key -> set of capability scopes (see baselith.core.auth.scopes). Supplied as "key1=chat:read\|chat:write,key2=webhooks:write" — entries comma-separated, key and scope-list split on the first '=', and scopes within a list pipe-separated (scopes themselves contain ':'). Keys are SecretStr like every other credential field: a repr()/Sentry capture of the config prints '**********', never the key material. NoDecode: keep pydantic-settings from JSON-decoding the raw env string so the validator below receives it verbatim. |
 | `API_KEYS_USER` :material-key: | `Annotated[set[SecretStr], NoDecode]` | *computed* | API Keys (wrapped in SecretStr to prevent accidental leakage via repr/logs/Sentry) |
 | `API_KEY_ENABLED`<br>also accepts `SECURITY_API_KEY_ENABLED` | `bool` | `True` | Master switch for API-key authentication. When false, API keys are rejected entirely. |
 | `API_KEY_REVOCATION_FAIL_MODE` | `Literal['closed', 'open']` | `closed` | What to do when the shared API-key revocation denylist is unreadable: 'closed' (default) rejects the key, 'open' accepts it on process-local state. |
@@ -750,13 +805,13 @@ Declared in `core.config.security`.
 | `OIDC_SCOPES_CLAIM` | `str` | `scope` |  |
 | `OIDC_TENANT_CLAIM` | `str \| None` | *empty* |  |
 | `OIDC_USERNAME_CLAIM` | `str` | `sub` | Claim names to read identity/authorization from (IdP-specific). |
-| `PERMISSIONS_POLICY` | `str \| None` | `geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` | Restrictive default: deny access to powerful browser features the API/ console never needs, so a compromised/embedded page cannot request them. Override with a policy string, or "" to omit the header entirely. |
+| `PERMISSIONS_POLICY` | `str \| None` | `geolocation=(), camera=(), microphone=(self), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()` | Restrictive default: deny access to powerful browser features the API/ console never needs, so a compromised/embedded page cannot request them. Override with a policy string, or "" to omit the header entirely. `microphone=(self)`: the console's own pages may capture audio (push-to-talk voice input); getUserMedia is blocked outright by `microphone=()`. Embedded third-party frames still cannot request it, and every other feature stays denied. |
 | `RATE_LIMIT_ADMIN_PER_MINUTE` | `int \| None` | `120` | Non-null default so admin endpoints are never silently unlimited: a value of None makes the rate limiter no-op for that scope (unthrottled brute force / resource abuse). 120/min is generous for console use while still bounding abuse. Set explicitly (or to a high number) to widen it. |
 | `RATE_LIMIT_FAIL_MODE` | `str \| None` | *empty* | Behavior when the Redis limiter backend is unreachable: open   — degrade to a per-process in-memory window (N replicas silently allow up to N x the limit until Redis recovers) closed — reject rate-limited requests with 503 (availability traded for a hard limit; the limit is treated as a security control) Unset (the default) resolves at limiter construction: `closed` in production when a Redis cache backend is declared (CACHE_BACKEND=redis), where the per-role limits, the auth-failure throttle and the admin lockout are brute-force/cost controls that must not silently widen when the shared counter blips; `open` outside production and in deployments that never configured Redis (the per-process window is the design there, not a degraded state). Set explicitly to pin either behaviour. |
 | `RATE_LIMIT_JOB_PER_MINUTE` | `int \| None` | *empty* |  |
 | `RATE_LIMIT_USER_PER_MINUTE` | `int \| None` | `60` |  |
 | `RATE_LIMIT_WINDOW_SECONDS` | `int` | `60` |  |
-| `SECRETS_BACKEND` | `str` | `env` | 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets), plus any backend registered via core.security.secrets.register_secrets_provider. |
+| `SECRETS_BACKEND` | `str` | `env` | 'env' (default, current behaviour) or 'file' (Docker/K8s mounted secrets), plus any backend an installed package declares under the baselith.secrets_providers entry-point group (or registered in-process). |
 | `SECRETS_DIR` | `str \| None` | *empty* |  |
 | `SECRET_KEY` :material-key: | `SecretStr \| None` | *empty* |  |
 | `SECURITY_HEADERS_ENABLED` | `bool` | `True` |  |
@@ -765,7 +820,7 @@ Declared in `core.config.security`.
 
 ## Service-level configuration internal engines
 
-Declared in `core.config.services`.
+Declared in `baselith.core.config.services`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -800,17 +855,19 @@ Declared in `core.config.services`.
 | `LLM_ROUTING_ENABLED` | `bool` | `False` | Enable cost-aware model routing by task category. |
 | `LLM_ROUTING_MAX_COST_PER_1K_USD` | `float \| None` | *empty* | Budget cap for routed calls: when the routed model's approximate cost per 1K tokens exceeds it, the priciest model in the policy pool that fits is used instead (cheapest if none fits). Empty disables the cap. |
 | `LLM_ROUTING_POLICY` | `str` | *empty* | JSON object mapping task category to model id (e.g. '{"planning": "gpt-4o", "classification": "gpt-4o-mini"}'). Empty uses the built-in default policy. |
+| `LLM_STREAM_AGENT_TEXT` | `bool` | `True` | Stream an agent turn's text chunk by chunk when the serving provider supports streamed tool calls (`supports_streaming_tools`); false restores one TextDelta per model turn. Env: LLM_STREAM_AGENT_TEXT via the LLM_ prefix. |
 | `LLM_TEMPERATURE` | `float` | `0.7` | Temperature for generation |
 | `LLM_THINKING_ENABLED` | `bool` | `False` | Derive an extended-thinking effort tier from task_category for providers that support it (off keeps previous behaviour). |
 | `LLM_VLLM_API_BASE` | `str \| None` | *empty* | vLLM OpenAI-compatible endpoint (`http://gpu-host:8000/v1`; /v1 is appended when missing). Falls back to LLM_API_BASE only when LLM_PROVIDER=vllm. Required for vLLM: there is no default. |
 | `LLM_VLLM_API_KEY` :material-key:<br>also accepts `VLLM_API_KEY` | `SecretStr \| None` | *empty* | The key the vLLM server was started with (--api-key / VLLM_API_KEY). Leave empty for a keyless server. |
 | `LLM_VLLM_ENDPOINTS` | `str \| None` | *empty* | Several vLLM servers, one per model: comma-separated OpenAI roots, one per server (e.g. `http://gpu:8002/v1`). Calls name a model and go to the server whose /v1/models serves it; LLM_VLLM_API_BASE is the one-server form of the same setting. |
+| `LLM_VLLM_LIVE_STREAM_MODELS` | `str` | *empty* | Regex of vLLM served-model names known not to reason inline, whose agent text may stream from the first chunk. Other models hold their answer until a closing think tag so reasoning never leaks. Env: LLM_VLLM_LIVE_STREAM_MODELS via the LLM_ prefix. |
 | `LLM_VLLM_NATIVE_TOOLS` | `bool` | `True` | Whether the vLLM server supports native tool calling (started with --enable-auto-tool-choice --tool-call-parser &lt;parser>). Set false to use prompt-coerced tool calls instead. |
 | `OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Dedicated OpenAI API key (for policy-routed calls) |
 
 ## Storage configuration
 
-Declared in `core.config.storage`.
+Declared in `baselith.core.config.storage`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -833,7 +890,7 @@ Declared in `core.config.storage`.
 | `DB_REPLICA_URL` | `str \| None` | *empty* | Optional read replica. When set, callers using the read-only connection API are routed here; unset means reads use the primary (no behaviour change). |
 | `DB_RLS_ENABLED` | `bool` | `False` | Row-Level-Security defense-in-depth. When True, every pooled connection has the `app.tenant_id` GUC set to the request's tenant on checkout, so tables with RLS policies (USING tenant_id = current_setting('app.tenant_id')) are isolated at the database. OFF by default: enabling it has no effect until RLS policies exist AND the app connects as a non-owner (or FORCE RLS) role — so toggling the flag alone is a no-op and never a regression. |
 | `DB_RLS_TENANT_SCOPE` | `Literal['session', 'transaction']` | `session` | How DB_RLS_ENABLED binds app.tenant_id: 'session' (set_config per session, memoized per pooled connection) or 'transaction' (each checkout is one transaction, set_config is transaction-local). Use 'transaction' behind a transaction-mode pooler such as PgBouncer pool_mode=transaction. |
-| `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `core.db.ddl.runtime_ddl_allowed`. |
+| `DB_RUNTIME_DDL` | `bool \| None` | *empty* | Whether a store may run its own `CREATE TABLE IF NOT EXISTS` on the shared pool at first use. `None` (the default) means "decide from the environment": allowed outside production, refused in production, where the migrations Job owns the schema and the runtime role should hold no DDL rights. Set explicitly to override in either direction. See `baselith.core.db.ddl.runtime_ddl_allowed`. |
 | `DB_SCHEMA_CHECK` | `Literal['strict', 'warn', 'off'] \| None` | *empty* | Startup schema-revision check: 'strict' refuses to start when the database is behind the packaged migration head, 'warn' logs it, 'off' skips it. Unset means strict in production, off elsewhere. |
 | `DB_SSL_MODE` | `str \| None` | *empty* |  |
 | `DB_STATEMENT_TIMEOUT_MS` | `int` | `30000` | Server-side budgets baked into every pooled connection's startup options, in milliseconds (0 disables the Postgres guard). A statement that outlives `statement_timeout` is cancelled by the server, so a runaway query cannot hold a pooled connection indefinitely. The idle-in-transaction cap kills a session that opened a transaction and went quiet (leaked connection, crashed handler mid-transaction) before the locks it holds block everyone else. |
@@ -858,7 +915,7 @@ Declared in `core.config.storage`.
 
 ## Swarm configuration (`SWARM_`)
 
-Declared in `core.config.swarm`.
+Declared in `baselith.core.config.swarm`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -872,7 +929,7 @@ Declared in `core.config.swarm`.
 
 ## Task-queue configuration (`TASK_QUEUE_`)
 
-Declared in `core.config.task_queue`.
+Declared in `baselith.core.config.task_queue`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -880,7 +937,7 @@ Declared in `core.config.task_queue`.
 | `TASK_QUEUE_DEFAULT_QUEUE` | `str` | `default` |  |
 | `TASK_QUEUE_DEFAULT_RETRY_COUNT` | `int` | `3` | Retry settings |
 | `TASK_QUEUE_DEFAULT_RETRY_DELAY` | `int` | `60` |  |
-| `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `Annotated[list[str], NoDecode]` | `['core.', 'plugins.']` | Comma-separated module prefixes a dead-lettered job may be replayed from. A stored function reference outside them is refused before any import happens. |
+| `TASK_QUEUE_DLQ_REPLAY_ALLOWED_MODULES` | `Annotated[list[str], NoDecode]` | `['baselith.core.', 'baselith.plugins.']` | Comma-separated module prefixes a dead-lettered job may be replayed from. A stored function reference outside them is refused before any import happens. |
 | `TASK_QUEUE_DLQ_RETENTION_SECONDS` | `int` | `604800` | Dead-letter retention. The DLQ is a diagnosis and replay aid, not an archive: without a horizon every terminally-failed job stays in Redis forever, so one bad deploy's failures sit in memory indefinitely. Matches `failure_ttl` so the two views of a failed job expire together. 0 disables expiry (keep forever) — only for a deployment that prunes the DLQ by hand. |
 | `TASK_QUEUE_FAILURE_TTL` | `int` | `604800` |  |
 | `TASK_QUEUE_HEALTH_CHECK_INTERVAL` | `float` | `30.0` |  |
@@ -894,7 +951,7 @@ Declared in `core.config.task_queue`.
 
 ## DORA Register of Information persistence configuration
 
-Declared in `core.config.thirdparty`.
+Declared in `baselith.core.config.thirdparty`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -902,7 +959,7 @@ Declared in `core.config.thirdparty`.
 
 ## AI-transparency configuration (EU AI Act Article 50)
 
-Declared in `core.config.transparency`.
+Declared in `baselith.core.config.transparency`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -914,7 +971,7 @@ Declared in `core.config.transparency`.
 
 ## Vector store configuration (Qdrant / pgvector)
 
-Declared in `core.config.vectorstore`.
+Declared in `baselith.core.config.vectorstore`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -946,7 +1003,7 @@ Declared in `core.config.vectorstore`.
 
 ## Webhook subsystem configuration
 
-Declared in `core.config.webhooks`.
+Declared in `baselith.core.config.webhooks`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -962,7 +1019,7 @@ Declared in `core.config.webhooks`.
 
 ## World-model configuration (`WORLD_MODEL_`)
 
-Declared in `core.config.world_model`.
+Declared in `baselith.core.config.world_model`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -977,7 +1034,7 @@ Declared in `core.config.world_model`.
 
 ## Ambient tenant cost-budget seam for the LLM generation path
 
-Declared in `core.quotas.cost_enforcement`.
+Declared in `baselith.core.quotas.cost_enforcement`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -985,23 +1042,11 @@ Declared in `core.quotas.cost_enforcement`.
 
 ## Token Estimation Utilities
 
-Declared in `core.utils.tokens`.
+Declared in `baselith.core.utils.tokens`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `BASELITH_EXACT_TOKEN_COUNTING` | `bool` | `False` | Use anthropic.Anthropic().messages.count_tokens (via estimate_tokens_async) for claude* models instead of the tiktoken/heuristic estimate. Off by default: ANTHROPIC_API_KEY alone is not enough to enable it, since a key is present in most production deployments already and this call is a blocking network request. The sync estimate_tokens() never makes this call regardless of this setting. |
-
-## OpenAI Realtime WebSocket adapter for the core duplex voice protocol
-
-Declared in `plugins.baselithbot.voice.openai_realtime`.
-
-| Variable | Type | Default | Description |
-| --- | --- | --- | --- |
-| `BASELITHBOT_VOICE_REALTIME_ENABLED` | `bool` | `False` | Select the realtime duplex loop over the sequential wake/STT/LLM/TTS pipeline. |
-| `BASELITHBOT_VOICE_REALTIME_LATENCY_BUDGET_MS` | `float` | `500.0` | Warn when speech-stop to first assistant audio exceeds this budget. |
-| `BASELITHBOT_VOICE_REALTIME_MODEL` | `str` | `gpt-4o-realtime-preview` | OpenAI Realtime model identifier. |
-| `BASELITHBOT_VOICE_REALTIME_SILENCE_DURATION_MS` | `int` | `500` | Server-VAD silence window marking end of user speech. |
-| `BASELITHBOT_VOICE_REALTIME_VOICE` | `str` | `alloy` | Assistant voice preset. |
 
 ## Auditing your environment
 
@@ -1010,4 +1055,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-662 settings documented.
+714 settings documented.

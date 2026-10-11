@@ -11,15 +11,15 @@ from unittest.mock import patch
 
 import pytest
 
-from core.cli.__main__ import main
+from baselith.core.cli.__main__ import main
 
 
 @pytest.mark.parametrize(
     ("command", "target"),
     [
-        ("info", "core.cli.commands.info.run_info"),
-        ("verify", "core.cli.commands.verify.run_verify"),
-        ("doctor", "core.cli.commands.doctor.run_doctor"),
+        ("info", "baselith.core.cli.commands.info.run_info"),
+        ("verify", "baselith.core.cli.commands.verify.run_verify"),
+        ("doctor", "baselith.core.cli.commands.doctor.run_doctor"),
     ],
 )
 @pytest.mark.parametrize("flag", [["--format", "json"], ["--json"]])
@@ -45,7 +45,7 @@ class TestSyncEnableRuleMatchesRuntime:
             (tmp_path / "configs" / "plugins.yaml").write_text(text)
 
     def test_block_without_enabled_key_is_enabled(self, tmp_path, monkeypatch):
-        from core.cli.commands.plugin.add_docker import _plugin_enabled
+        from baselith.core.cli.commands.plugin.add_docker import _plugin_enabled
 
         self._write(tmp_path, monkeypatch, "api_routers: {}\noff:\n  enabled: false\n")
         assert _plugin_enabled("api_routers")
@@ -54,7 +54,7 @@ class TestSyncEnableRuleMatchesRuntime:
         assert not _plugin_enabled("absent")
 
     def test_no_config_file_enables_everything(self, tmp_path, monkeypatch):
-        from core.cli.commands.plugin.add_docker import _plugin_enabled
+        from baselith.core.cli.commands.plugin.add_docker import _plugin_enabled
 
         self._write(tmp_path, monkeypatch, None)
         assert _plugin_enabled("anything")

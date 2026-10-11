@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.models.domain import Document, SearchResult
-from core.services.retrieval.reranker import Reranker, get_reranker
+from baselith.core.models.domain import Document, SearchResult
+from baselith.core.services.retrieval.reranker import Reranker, get_reranker
 
 
 @pytest.fixture
 def mock_cross_encoder():
-    with patch("core.services.retrieval.reranker.CrossEncoder") as m:
+    with patch("baselith.core.services.retrieval.reranker.CrossEncoder") as m:
         yield m
 
 
@@ -25,7 +25,7 @@ def test_reranker_initialization(mock_cross_encoder):
 
 def test_reranker_initialization_disabled():
     """Test reranker initialization when CrossEncoder is missing."""
-    with patch("core.services.retrieval.reranker.CrossEncoder", None):
+    with patch("baselith.core.services.retrieval.reranker.CrossEncoder", None):
         r = Reranker()
         assert r._enabled is False
 
@@ -116,7 +116,7 @@ async def test_rerank_exception_fallback(mock_cross_encoder):
 
 def test_get_reranker_global():
     """Test global instance retrieval."""
-    with patch("core.services.retrieval.reranker._reranker", None):
+    with patch("baselith.core.services.retrieval.reranker._reranker", None):
         inst = get_reranker()
         assert isinstance(inst, Reranker)
         inst2 = get_reranker()

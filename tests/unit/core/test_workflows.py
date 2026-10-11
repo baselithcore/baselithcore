@@ -12,7 +12,7 @@ class TestWorkflowNode:
 
     def test_create_node(self):
         """Test creating a workflow node."""
-        from core.workflows.builder import NodeType, WorkflowNode
+        from baselith.core.workflows.builder import NodeType, WorkflowNode
 
         node = WorkflowNode(
             id="test-node",
@@ -27,7 +27,7 @@ class TestWorkflowNode:
 
     def test_node_serialization(self):
         """Test node to/from dict."""
-        from core.workflows.builder import NodePosition, NodeType, WorkflowNode
+        from baselith.core.workflows.builder import NodePosition, NodeType, WorkflowNode
 
         node = WorkflowNode(
             id="ser-node",
@@ -49,7 +49,7 @@ class TestWorkflowEdge:
 
     def test_create_edge(self):
         """Test creating an edge."""
-        from core.workflows.builder import WorkflowEdge
+        from baselith.core.workflows.builder import WorkflowEdge
 
         edge = WorkflowEdge(
             id="edge-1",
@@ -66,7 +66,7 @@ class TestWorkflowDefinition:
 
     def test_create_empty_workflow(self):
         """Test creating empty workflow."""
-        from core.workflows.builder import WorkflowDefinition
+        from baselith.core.workflows.builder import WorkflowDefinition
 
         workflow = WorkflowDefinition(name="Empty Workflow")
 
@@ -76,7 +76,7 @@ class TestWorkflowDefinition:
 
     def test_add_nodes_and_edges(self):
         """Test adding nodes and edges."""
-        from core.workflows.builder import (
+        from baselith.core.workflows.builder import (
             NodeType,
             WorkflowDefinition,
             WorkflowEdge,
@@ -97,7 +97,7 @@ class TestWorkflowDefinition:
 
     def test_validate_valid_workflow(self):
         """Test validation passes for valid workflow."""
-        from core.workflows.builder import (
+        from baselith.core.workflows.builder import (
             NodeType,
             WorkflowDefinition,
             WorkflowEdge,
@@ -114,7 +114,7 @@ class TestWorkflowDefinition:
 
     def test_validate_missing_start(self):
         """Test validation fails without start node."""
-        from core.workflows.builder import (
+        from baselith.core.workflows.builder import (
             NodeType,
             WorkflowDefinition,
             WorkflowNode,
@@ -128,7 +128,7 @@ class TestWorkflowDefinition:
 
     def test_json_serialization(self):
         """Test JSON export/import."""
-        from core.workflows.builder import (
+        from baselith.core.workflows.builder import (
             NodeType,
             WorkflowDefinition,
             WorkflowEdge,
@@ -152,7 +152,7 @@ class TestWorkflowBuilder:
 
     def test_simple_workflow(self):
         """Test building a simple workflow."""
-        from core.workflows.builder import WorkflowBuilder
+        from baselith.core.workflows.builder import WorkflowBuilder
 
         workflow = (
             WorkflowBuilder("Simple")
@@ -168,7 +168,7 @@ class TestWorkflowBuilder:
 
     def test_workflow_with_tool(self):
         """Test building workflow with tool node."""
-        from core.workflows.builder import NodeType, WorkflowBuilder
+        from baselith.core.workflows.builder import NodeType, WorkflowBuilder
 
         workflow = (
             WorkflowBuilder("With Tool")
@@ -189,8 +189,8 @@ class TestWorkflowExecutor:
     @pytest.mark.asyncio
     async def test_execute_simple_workflow(self):
         """Test executing a simple workflow."""
-        from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+        from baselith.core.workflows.builder import WorkflowBuilder
+        from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         workflow = WorkflowBuilder("Execute Test").start().end().build()
 
@@ -202,8 +202,8 @@ class TestWorkflowExecutor:
     @pytest.mark.asyncio
     async def test_execute_invalid_workflow(self):
         """Test executing invalid workflow fails."""
-        from core.workflows.builder import WorkflowDefinition
-        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+        from baselith.core.workflows.builder import WorkflowDefinition
+        from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         workflow = WorkflowDefinition(name="Invalid")
         # No nodes at all
@@ -217,7 +217,7 @@ class TestWorkflowExecutor:
     @pytest.mark.asyncio
     async def test_execution_context(self):
         """Test execution context variable passing."""
-        from core.workflows.executor import ExecutionContext
+        from baselith.core.workflows.executor import ExecutionContext
 
         context = ExecutionContext(workflow_id="test")
 
@@ -230,8 +230,8 @@ class TestWorkflowExecutor:
         """Test execution timeout."""
         import asyncio
 
-        from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+        from baselith.core.workflows.builder import WorkflowBuilder
+        from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         async def slow_handler(node, context):
             await asyncio.sleep(0.5)
@@ -256,8 +256,8 @@ class TestWorkflowExecutor:
     @pytest.mark.asyncio
     async def test_safe_condition_eval(self):
         """Test safe condition evaluation."""
-        from core.workflows.builder import WorkflowBuilder
-        from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+        from baselith.core.workflows.builder import WorkflowBuilder
+        from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
         # Test valid condition
         workflow = (

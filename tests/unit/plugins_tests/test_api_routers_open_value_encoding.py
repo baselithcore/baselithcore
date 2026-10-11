@@ -23,14 +23,14 @@ from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 
-import core.chat as chat_package
-import plugins.api_routers.approvals as approvals_module
-import plugins.api_routers.privacy as privacy_module
-import plugins.api_routers.runs as runs_module
-from core.middleware import require_admin_or_job, require_user
-from core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
-from core.privacy.types import SubjectExport
-from plugins.api_routers.admin import verify_credentials
+import baselith.core.chat as chat_package
+import baselith.plugins.api_routers.approvals as approvals_module
+import baselith.plugins.api_routers.privacy as privacy_module
+import baselith.plugins.api_routers.runs as runs_module
+from baselith.core.middleware import require_admin_or_job, require_user
+from baselith.core.orchestration.checkpoint import Checkpoint, InMemoryCheckpointStore
+from baselith.core.privacy.types import SubjectExport
+from baselith.plugins.api_routers.admin import verify_credentials
 
 pytestmark = [pytest.mark.unit]
 

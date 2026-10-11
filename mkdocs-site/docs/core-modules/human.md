@@ -4,7 +4,7 @@ description: Human intervention for critical decisions and approvals
 ---
 <!-- markdownlint-disable MD046 -->
 
-**Module**: `core/human/`
+**Module**: `baselith/core/human/`
 
 The Human-in-the-Loop (HITL) module lets an agent pause autonomous execution to
 ask a human for approval, input, a selection, or to send a notification. This is
@@ -26,7 +26,7 @@ financial transactions, production deployments).
 ## Module Structure
 
 ```text
-core/human/
+baselith/core/human/
 ├── __init__.py       # Public exports
 └── interaction.py    # HumanIntervention + request/enums
 ```
@@ -34,7 +34,7 @@ core/human/
 Public exports:
 
 ```python
-from core.human import (
+from baselith.core.human import (
     HumanIntervention,
     HumanRequest,
     InteractionType,
@@ -55,7 +55,7 @@ way. When **no callback** is registered, every request is auto-rejected
 
 !!! info "A synchronous callback runs on a dedicated pool"
     A blocking prompt (`input()`, a modal dialog, a queue `get`) is run through
-    `core.human.executor.run_hitl_callback` rather than on the loop, and on a
+    `baselith.core.human.executor.run_hitl_callback` rather than on the loop, and on a
     pool of its own rather than the interpreter default one — which is only
     `cpu_count + 4` wide and shared with SSRF DNS resolution, audit appends and
     tokenization. A handful of pending approvals would otherwise leave those
@@ -69,7 +69,7 @@ way. When **no callback** is registered, every request is auto-rejected
     wrapping a coroutine function) is awaited too.
 
 ```python
-from core.human import HumanIntervention, HumanRequest
+from baselith.core.human import HumanIntervention, HumanRequest
 
 async def ui_callback(request: HumanRequest):
     # Forward `request` to your UI/chat, await the operator, return the answer.

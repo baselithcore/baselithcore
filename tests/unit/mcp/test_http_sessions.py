@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.mcp.http_sessions import (
+from baselith.core.mcp.http_sessions import (
     RedisSessionStore,
     SessionStore,
     build_session_store,
@@ -235,7 +235,7 @@ class TestSelection:
     def test_redis_backend_is_selected_when_the_cache_declares_it(
         self, monkeypatch
     ) -> None:
-        import core.mcp.http_sessions as sessions_module
+        import baselith.core.mcp.http_sessions as sessions_module
 
         sentinel = object()
         monkeypatch.setattr(
@@ -261,7 +261,7 @@ class TestSelection:
     def test_memory_backend_when_no_redis_cache_is_configured(
         self, monkeypatch
     ) -> None:
-        import core.mcp.http_sessions as sessions_module
+        import baselith.core.mcp.http_sessions as sessions_module
 
         monkeypatch.setattr(
             sessions_module,
@@ -278,7 +278,7 @@ class TestSelection:
         assert type(store) is SessionStore
 
     def test_unbuildable_redis_client_falls_back_to_memory(self, monkeypatch) -> None:
-        import core.mcp.http_sessions as sessions_module
+        import baselith.core.mcp.http_sessions as sessions_module
 
         def _boom(url, **kw):
             raise RuntimeError("redis package is not installed.")
@@ -304,7 +304,7 @@ class TestSelection:
 
 def test_session_store_is_still_importable_from_http_transport() -> None:
     """Existing importers keep their import path."""
-    from core.mcp.http_transport import SessionStore as Reexported
+    from baselith.core.mcp.http_transport import SessionStore as Reexported
 
     assert Reexported is SessionStore
 

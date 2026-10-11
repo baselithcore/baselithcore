@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PLUGINS_ROOT = REPO_ROOT / "plugins"
+PLUGINS_ROOT = REPO_ROOT / "baselith" / "plugins"
 
 
 def _manifest_paths() -> list[Path]:

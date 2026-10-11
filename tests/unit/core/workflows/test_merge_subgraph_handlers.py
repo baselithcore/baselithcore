@@ -2,14 +2,14 @@
 
 import pytest
 
-from core.workflows.builder import (
+from baselith.core.workflows.builder import (
     NodeType,
     WorkflowBuilder,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
 )
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
 
 pytestmark = [pytest.mark.unit]
 

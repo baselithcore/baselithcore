@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, patch
 import jwt
 import pytest
 
-from core.auth.jwt import JWTHandler
-from core.auth.types import AuthRole
+from baselith.core.auth.jwt import JWTHandler
+from baselith.core.auth.types import AuthRole
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def mock_redis():
 
 @pytest.fixture
 def handler(mock_redis):
-    with patch("core.auth.jwt.create_redis_client", return_value=mock_redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=mock_redis):
         yield JWTHandler(
             secret_key="test-secret-with-at-least-thirty-two-chars",
             algorithm="HS256",
@@ -75,14 +75,14 @@ def test_exp_in_extra_claims_is_ignored_but_lifetime_wins(handler):
 
 @pytest.mark.asyncio
 async def test_auth_manager_passes_lifetime_through(mock_redis):
-    from core.auth.manager import AuthManager
-    from core.config.security import SecurityConfig
+    from baselith.core.auth.manager import AuthManager
+    from baselith.core.config.security import SecurityConfig
 
     cfg = SecurityConfig(
         SECRET_KEY="test-secret-with-at-least-thirty-two-chars",
         AUTH_ACCESS_TOKEN_LIFETIME=900,
     )
-    with patch("core.auth.jwt.create_redis_client", return_value=mock_redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=mock_redis):
         mgr = AuthManager(config=cfg)
         # Default comes from config (900), not the old hard-coded 3600.
         default_token = await mgr.create_token("u1", {AuthRole.USER})

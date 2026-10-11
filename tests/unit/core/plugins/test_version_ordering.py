@@ -1,4 +1,4 @@
-"""Prerelease ordering for :class:`core.plugins.version.SemanticVersion`.
+"""Prerelease ordering for :class:`baselith.core.plugins.version.SemanticVersion`.
 
 Ordering used to be a plain string compare on the prerelease segment, which
 puts ``beta.10`` *before* ``beta.2`` and therefore let a dependency constraint
@@ -11,7 +11,7 @@ from itertools import pairwise
 
 import pytest
 
-from core.plugins.version import SemanticVersion, VersionConstraint
+from baselith.core.plugins.version import SemanticVersion, VersionConstraint
 
 
 def _v(raw: str) -> SemanticVersion:

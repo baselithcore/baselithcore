@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.modality_router import annotate_context, detect_modality
+from baselith.core.orchestration.modality_router import (
+    annotate_context,
+    detect_modality,
+)
 
 # Minimal-but-real magic-byte heads per format.
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
@@ -115,35 +118,45 @@ class TestContextAssemblyWiring:
     """annotate_modality — the orchestrator-side seam over attachment keys."""
 
     def test_image_paths_annotate_image(self):
-        from core.orchestration.mixins._context_assembly import annotate_modality
+        from baselith.core.orchestration.mixins._context_assembly import (
+            annotate_modality,
+        )
 
         context = {"image_paths": ["/tmp/diagram.png"]}
         annotate_modality(context)
         assert context["modality"] == "image"
 
     def test_image_data_annotates_image(self):
-        from core.orchestration.mixins._context_assembly import annotate_modality
+        from baselith.core.orchestration.mixins._context_assembly import (
+            annotate_modality,
+        )
 
         context = {"image_data": ["aGVsbG8="]}
         annotate_modality(context)
         assert context["modality"] == "image"
 
     def test_plain_query_context_stays_unannotated(self):
-        from core.orchestration.mixins._context_assembly import annotate_modality
+        from baselith.core.orchestration.mixins._context_assembly import (
+            annotate_modality,
+        )
 
         context: dict = {"intent": "qa_docs"}
         annotate_modality(context)
         assert "modality" not in context
 
     def test_existing_modality_not_overwritten(self):
-        from core.orchestration.mixins._context_assembly import annotate_modality
+        from baselith.core.orchestration.mixins._context_assembly import (
+            annotate_modality,
+        )
 
         context = {"modality": "audio", "image_paths": ["/tmp/x.png"]}
         annotate_modality(context)
         assert context["modality"] == "audio"
 
     def test_attachment_bytes_annotate(self):
-        from core.orchestration.mixins._context_assembly import annotate_modality
+        from baselith.core.orchestration.mixins._context_assembly import (
+            annotate_modality,
+        )
 
         context = {"attachment_data": _PDF}
         annotate_modality(context)

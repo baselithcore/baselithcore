@@ -22,7 +22,7 @@ class TestPluginLogs:
         """Test logs command when no logs/ directory exists."""
         monkeypatch.chdir(tmp_path)
 
-        from core.cli.commands.plugin.logs import plugin_logs
+        from baselith.core.cli.commands.plugin.logs import plugin_logs
 
         result = plugin_logs("test-plugin")
         assert result == 0
@@ -35,14 +35,14 @@ class TestPluginLogs:
 
         log_content = "\n".join(
             [
-                "2025-12-25 10:00:00 [INFO] plugins.test_plugin.agent: Agent starting",
-                "2025-12-25 10:00:01 [ERROR] plugins.test_plugin.agent: Connection failed",
+                "2025-12-25 10:00:00 [INFO] baselith.plugins.test_plugin.agent: Agent starting",
+                "2025-12-25 10:00:01 [ERROR] baselith.plugins.test_plugin.agent: Connection failed",
                 "2025-12-25 10:00:02 [INFO] core.server: Request handled",
             ]
         )
         (logs_dir / "app.log").write_text(log_content)
 
-        from core.cli.commands.plugin.logs import plugin_logs
+        from baselith.core.cli.commands.plugin.logs import plugin_logs
 
         result = plugin_logs("test-plugin")
         assert result == 0
@@ -55,13 +55,13 @@ class TestPluginLogs:
 
         log_content = "\n".join(
             [
-                "2025-12-25 10:00:00 [INFO] plugins.test_plugin: Info message",
-                "2025-12-25 10:00:01 [ERROR] plugins.test_plugin: Error message",
+                "2025-12-25 10:00:00 [INFO] baselith.plugins.test_plugin: Info message",
+                "2025-12-25 10:00:01 [ERROR] baselith.plugins.test_plugin: Error message",
             ]
         )
         (logs_dir / "app.log").write_text(log_content)
 
-        from core.cli.commands.plugin.logs import plugin_logs
+        from baselith.core.cli.commands.plugin.logs import plugin_logs
 
         result = plugin_logs("test-plugin", level="ERROR")
         assert result == 0
@@ -76,13 +76,13 @@ class TestPluginLogs:
             {
                 "timestamp": "2025-12-25T10:00:00",
                 "level": "INFO",
-                "module": "plugins.test_plugin",
+                "module": "baselith.plugins.test_plugin",
                 "message": "Agent ready",
             }
         )
         (logs_dir / "app.log").write_text(log_line + "\n")
 
-        from core.cli.commands.plugin.logs import plugin_logs
+        from baselith.core.cli.commands.plugin.logs import plugin_logs
 
         result = plugin_logs("test-plugin", json_output=True)
         assert result == 0
@@ -94,7 +94,7 @@ class TestPluginLogs:
         """Test logs command with invalid level."""
         monkeypatch.chdir(tmp_path)
 
-        from core.cli.commands.plugin.logs import plugin_logs
+        from baselith.core.cli.commands.plugin.logs import plugin_logs
 
         result = plugin_logs("test-plugin", level="INVALID")
         assert result == 1
@@ -112,7 +112,7 @@ class TestPluginTree:
         """Test tree with no plugins directory."""
         monkeypatch.chdir(tmp_path)
 
-        from core.cli.commands.plugin.tree import plugin_tree
+        from baselith.core.cli.commands.plugin.tree import plugin_tree
 
         result = plugin_tree()
         assert result == 0
@@ -140,7 +140,7 @@ class TestPluginTree:
             },
         )
 
-        from core.cli.commands.plugin.tree import plugin_tree
+        from baselith.core.cli.commands.plugin.tree import plugin_tree
 
         result = plugin_tree()
         assert result == 0
@@ -158,7 +158,7 @@ class TestPluginTree:
             },
         )
 
-        from core.cli.commands.plugin.tree import plugin_tree
+        from baselith.core.cli.commands.plugin.tree import plugin_tree
 
         result = plugin_tree("plugin-a")
         assert result == 0
@@ -177,7 +177,7 @@ class TestPluginTree:
             },
         )
 
-        from core.cli.commands.plugin.tree import plugin_tree
+        from baselith.core.cli.commands.plugin.tree import plugin_tree
 
         result = plugin_tree("nonexistent")
         assert result == 1
@@ -196,7 +196,7 @@ class TestPluginTree:
             },
         )
 
-        from core.cli.commands.plugin.tree import plugin_tree
+        from baselith.core.cli.commands.plugin.tree import plugin_tree
 
         result = plugin_tree(json_output=True)
         assert result == 0
@@ -226,7 +226,7 @@ class TestPluginValidateEnhanced:
             },
         )
 
-        from core.cli.commands.plugin.local import validate_local_plugin
+        from baselith.core.cli.commands.plugin.local import validate_local_plugin
 
         result = validate_local_plugin("good-plugin")
         assert result == 0
@@ -243,7 +243,7 @@ class TestPluginValidateEnhanced:
             },
         )
 
-        from core.cli.commands.plugin.local import validate_local_plugin
+        from baselith.core.cli.commands.plugin.local import validate_local_plugin
 
         result = validate_local_plugin("bad-plugin")
         assert result == 1
@@ -254,12 +254,12 @@ class TestPluginValidateEnhanced:
         plugin_dir = tmp_path / "plugins" / "no-manifest"
         plugin_dir.mkdir(parents=True)
         (plugin_dir / "plugin.py").write_text(
-            "from core.plugins.interface import Plugin\n"
+            "from baselith.core.plugins.interface import Plugin\n"
             "class NoManifestPlugin(Plugin):\n"
             "    async def initialize(self, config): pass\n"
         )
 
-        from core.cli.commands.plugin.local import validate_local_plugin
+        from baselith.core.cli.commands.plugin.local import validate_local_plugin
 
         result = validate_local_plugin("no-manifest")
         assert result == 1
@@ -277,8 +277,8 @@ class TestPluginValidateEnhanced:
             },
         )
 
-        from core.cli.commands.plugin import local as local_mod
-        from core.cli.commands.plugin import local_validate as validate_mod
+        from baselith.core.cli.commands.plugin import local as local_mod
+        from baselith.core.cli.commands.plugin import local_validate as validate_mod
 
         # Suppress Rich console output to avoid contaminating capsys
         with patch.object(validate_mod, "console", MagicMock()):
@@ -312,8 +312,8 @@ class TestPluginStatusEnhanced:
         )
         _make_config(tmp_path, {"aligned-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import local as local_mod
-        from core.cli.commands.plugin import local_shared
+        from baselith.core.cli.commands.plugin import local as local_mod
+        from baselith.core.cli.commands.plugin import local_shared
 
         with patch.object(
             local_shared, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"
@@ -336,8 +336,8 @@ class TestPluginStatusEnhanced:
         )
         _make_config(tmp_path, {"test-plugin": {"enabled": True}})
 
-        from core.cli.commands.plugin import local as local_mod
-        from core.cli.commands.plugin import local_shared
+        from baselith.core.cli.commands.plugin import local as local_mod
+        from baselith.core.cli.commands.plugin import local_shared
 
         with patch.object(
             local_shared, "PLUGINS_CONFIG_PATH", tmp_path / "configs" / "plugins.yaml"

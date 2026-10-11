@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.handlers.swarm_agents import (
+from baselith.core.orchestration.handlers.swarm_agents import (
     VirtualAgentSpec,
     contract_for_spec,
     detect_scope_conflicts,
@@ -36,7 +36,7 @@ class TestContractForSpec:
         assert contract_for_spec(_spec("a")) is None
 
     def test_validator_enforces_allowed_tools(self):
-        from core.orchestration.contract import ContractViolationError
+        from baselith.core.orchestration.contract import ContractViolationError
 
         validator = contract_for_spec(_spec("a", allowed_tools=["search", "summarize"]))
         assert validator is not None

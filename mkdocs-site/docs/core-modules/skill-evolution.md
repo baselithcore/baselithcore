@@ -1,6 +1,6 @@
 # Skill Evolution
 
-`core/skill_evolution/` closes the experience→knowledge→skill loop:
+`baselith/core/skill_evolution/` closes the experience→knowledge→skill loop:
 run outcomes are distilled into a **persistent, deduplicated pattern
 store** (the *wiki* layer), recurring patterns are **compiled into
 declarative skills** ([Declarative Skills](skills.md)), and every new
@@ -65,8 +65,8 @@ free-form strings.
 ## Wiring
 
 ```python
-from core.plugins.skills_service import SkillService
-from core.skill_evolution import build_skill_evolution_service, make_activation_guard
+from baselith.core.plugins.skills_service import SkillService
+from baselith.core.skill_evolution import build_skill_evolution_service, make_activation_guard
 
 evolution = build_skill_evolution_service(generate=my_llm_callable)
 evolution.start()  # evaluations now feed the wiki + impact tracker
@@ -91,15 +91,15 @@ never injected into prompts.
 ## Distillation into retrieval
 
 The pattern store accumulates *what worked*, but that knowledge only pays
-off when it reaches a prompt. `core/skill_evolution/distillation.py`
-(exported from `core.skill_evolution`) closes that loop on the few-shot
+off when it reaches a prompt. `baselith/core/skill_evolution/distillation.py`
+(exported from `baselith.core.skill_evolution`) closes that loop on the few-shot
 side: `STRATEGY` patterns become
 [`FewShotExample`](personas.md) entries the persona manager splices into
 system prompts like any curated example.
 
 ```python
-from core.personas.few_shot import FewShotLibrary
-from core.skill_evolution import sync_strategies_to_library
+from baselith.core.personas.few_shot import FewShotLibrary
+from baselith.core.skill_evolution import sync_strategies_to_library
 
 library = FewShotLibrary()
 added = await sync_strategies_to_library(
@@ -122,7 +122,7 @@ added = await sync_strategies_to_library(
   the pure in-memory form when you already hold the pattern list.
 
 The second retrieval seam is loop **priming**: `prime_lessons`
-(`core.loops.priming`) ranks the pattern store against a campaign goal
+(`baselith.core.loops.priming`) ranks the pattern store against a campaign goal
 with BM25 and renders a bounded "Lessons from past campaigns" block —
 see [Loop Engineering › Priming](loops.md#priming-the-first-attempt-primingpy).
 
@@ -154,7 +154,7 @@ propose→gate cycle is governed like any high-stakes action:
   on the very next cycle.
 
 ```python
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
 decision = await evolution.evolve(
     validate=my_regression_validator,
@@ -167,11 +167,11 @@ decision = await evolution.evolve(
 
 A single accuracy-ish scalar lets evolution trade unbounded latency and
 cost for marginal quality. A validator may instead return a
-`FitnessVector` (`core/skill_evolution/types.py`), making the trade
+`FitnessVector` (`baselith/core/skill_evolution/types.py`), making the trade
 explicit:
 
 ```python
-from core.skill_evolution.types import FitnessVector
+from baselith.core.skill_evolution.types import FitnessVector
 
 async def validate(skill_name: str) -> FitnessVector:
     report = await replay_suite(skill_name)
