@@ -110,15 +110,34 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
 
 
 def _posted_run_ids(client, mock_chat_service, requests, user_ids):
-    """POST each (headers) in ``requests`` as the matching user; return run ids."""
-    from unittest.mock import patch
+    """POST each (headers) in ``requests`` as the matching identity.
+
+    ``None`` is a request the auth layer attached no identity to (the
+    auth-disabled anonymous bypass), ``"anonymous"`` an anonymous AuthUser,
+    anything else an authenticated user of that id. Returns the run ids.
+    """
+    from fastapi import Request
+
+    from baselith.core.auth.types import AuthRole, AuthUser
 
     mock_chat_service.handle_chat_async = AsyncMock(
         return_value=ChatResponse(answer="ok", sources=[])
     )
+    # The client fixture overrides exactly one dependency: require_user.
+    (require_user,) = list(client.app.dependency_overrides)
     for headers, user_id in zip(requests, user_ids, strict=True):
-        with patch("baselith.core.context.get_current_user_id", return_value=user_id):
-            client.post("/chat", json={"query": "Hello"}, headers=headers)
+
+        async def as_identity(request: Request, user_id=user_id) -> str:
+            if user_id == "anonymous":
+                request.state.user = AuthUser(
+                    user_id="anonymous", roles={AuthRole.ANONYMOUS}
+                )
+            elif user_id is not None:
+                request.state.user = AuthUser(user_id=user_id, tenant_id="t1")
+            return user_id or "anonymous"
+
+        client.app.dependency_overrides[require_user] = as_identity
+        client.post("/chat", json={"query": "Hello"}, headers=headers)
     return [
         c.kwargs["run_id"] for c in mock_chat_service.handle_chat_async.call_args_list
     ]

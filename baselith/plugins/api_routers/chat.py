@@ -134,35 +134,34 @@ def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[st
     return headers
 
 
-#: Principal ids that name nobody in particular. Every unauthenticated caller
-#: shares them, so they can never scope a replayable run.
-_SHARED_PRINCIPALS = frozenset({"", "anonymous"})
-
-
 def chat_run_id(request: Request) -> str:
     """The run id of this chat request (see ``derive_run_id``).
 
-    Only an explicit ``Idempotency-Key`` from an authenticated, non-anonymous
-    principal names a stable run, scoped to the tenant and that principal: a
-    retry with the same key resumes the same durable run, or gets back its
-    recorded answer. Anything else gets a fresh random id and never replays.
-    The ``X-Request-ID`` is not a replay key: the client chooses it, and it is
-    echoed in responses, logs and error reports, so treating it as one would
-    hand a recorded answer to whoever learns it. Anonymous callers all share
-    one principal id, so a key from them would let one read another's answer.
+    Only an explicit ``Idempotency-Key`` from a caller the auth layer actually
+    authenticated names a stable run, scoped to that caller's tenant and user
+    id: a retry with the same key resumes the same durable run, or gets back
+    its recorded answer. Anything else gets a fresh random id and never
+    replays. The decision rests on the authenticated identity the auth
+    dependency attached to the request, never on a user-id string, so an
+    auth-disabled deployment (every caller anonymous) or any identity that is
+    not authenticated cannot share a run. The ``X-Request-ID`` is not a replay
+    key either: the client chooses it, and responses, logs and error reports
+    echo it. A credential shared by several end users (one API key behind a
+    service) is one principal: its holders share its keys, as with any
+    idempotency scheme keyed per credential.
     """
-    from baselith.core.context import get_current_tenant_id, get_current_user_id
+    from baselith.core.auth.types import AuthUser
     from baselith.core.orchestration.run_ids import derive_run_id
 
     key = request.headers.get("idempotency-key")
-    principal = get_current_user_id()
-    if not key or principal is None or principal in _SHARED_PRINCIPALS:
+    user = getattr(request.state, "user", None)
+    if not key or not isinstance(user, AuthUser) or not user.is_authenticated:
         return f"chat-{uuid.uuid4().hex}"
     return derive_run_id(
         "chat",
         f"idempotency:{key}",
-        tenant_id=get_current_tenant_id(),
-        principal=principal,
+        tenant_id=user.tenant_id,
+        principal=user.user_id,
     )
 
 
