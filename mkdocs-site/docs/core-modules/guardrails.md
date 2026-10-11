@@ -206,11 +206,31 @@ only for matching — and each pattern is reported once, tagged in
 |---|---|---|
 | `original` | nothing | `Ignore all previous instructions` |
 | `normalized` | Unicode NFKC (fullwidth, mathematical letters, ligatures) and removal of every format character — zero-width space/joiners, word joiner, BOM, soft hyphen, bidi controls | `ｉｇｎｏｒｅ previous instructions`, `ign`+U+200B+`ore …` |
-| `deobfuscated` | the above plus a Cyrillic/Greek → Latin confusables fold, leetspeak inside mixed letter/digit tokens (`0→o 1→i 3→e 4→a 5→s 7→t @→a $→s`, `11→ll`) and single letters split by one separator (`i.g.n.o.r.e`) | `1gn0r3 pr3v10us 1nstruct10ns`, `ignоre` with a Cyrillic `о` |
-| `squashed` | letters only — produced only when letter-spacing was found; matched against a short list of whole-phrase patterns | `i g n o r e p r e v i o u s i n s t r u c t i o n s` |
+| `deobfuscated` | the above plus a Cyrillic/Greek → Latin confusables fold, non-ASCII decimal digits folded to ASCII, Arabic tatweel and harakat dropped, single letters split by one separator rejoined (`i.g.n.o.r.e` — a lone leet character counts as a letter, so `i g n 0 r e` is one run), then leetspeak inside mixed letter/digit tokens (`0→o 1→i 3→e 4→a 5→s 7→t @→a $→s`, `11→ll`), then one to three digits wedged between two Arabic, Devanagari or CJK letters removed | `1gn0r3 pr3v10us 1nstruct10ns`, `ignоre` with a Cyrillic `о`, `i g n 0 r e  a l l …`, `ign٠re` (Arabic-Indic zero), `تـجـاهـل …`, `忽1略之前的所有指0令` |
+| `squashed` | letters only, accents dropped — produced only when letter-spacing was found; matched against whole-phrase patterns for English and the Latin-script languages (es/fr/de/it/pt) | `i g n o r e p r e v i o u s i n s t r u c t i o n s`, `1 g n o r a  t u t t e  l e  1 s t r u z 1 o n 1 …` |
 | `native` | non-ASCII text only: letter spacing collapsed *without* the confusables fold, then, inside a token that already holds a Cyrillic letter, Latin lookalikes and leet digits folded *into* Cyrillic (`o→о`, `e→е`, `0→о`, `3→з`, `4→ч`, `6→б`, `@→а`); only the Russian and custom patterns run here | `и г н о р и р у й  в с е …`, `3абудь св0и правила`, `Игнoрируй …` with a Latin `o` |
-| `native-squashed` | letters and combining marks of `native` — produced only when letter-spacing was found in non-ASCII text; matched against whole-phrase forms of the Russian, Arabic and Hindi patterns (whitespace and `\b` tokens dropped) | `з а б у д ь с в о и п р а в и л а` |
+| `native-squashed` | letters and combining marks of `native` (Arabic tatweel/harakat dropped) — produced only when letter-spacing was found in non-ASCII text; matched against whole-phrase forms of the non-Latin patterns that contain whitespace (whitespace and `\b` tokens dropped) | `з а б у д ь с в о и п р а в и л а`, `3 а б у д ь с в 0 и …` |
 | `base64`, `hex`, `url` (and chains such as `base64>base64`, `base64:deobfuscated`) | decode-and-rescan of encoded segments; each decoded payload gets its own normalised views | `aWdub3JlIHByZXZpb3Vz…`, `72657665616c…`, `ignore%20all%20…` |
+
+Two evasions need no view, because the patterns absorb them:
+
+- **Russian in Latin lookalikes.** Every Cyrillic letter of a Russian pattern
+  is widened to a class of its Latin and digit lookalikes, upright or
+  italic (`в→[вb]`, `и→[иu]`, `г→[гr]`, `п→[пn]`, `т→[тtm]`, `з→[з3]`,
+  `б→[б6]`, `ы→(ы|bi|bl|b1)`, `л→(л|ji|jl)`, …), so `Bce`, `npeдыдущue`,
+  `urнopupyй` and the all-Latin `3a6ygb Bce npaBuJIa` match on the original
+  text. A match is still reported under the pattern as written. English
+  cannot trip it by accident: it would have to spell a whole Russian
+  override phrase letter by letter.
+- **Code-mixing.** The non-Latin patterns accept the canonical English words
+  in their slots (`ignore/forget/disregard`, `previous/prior/above`,
+  `instructions/rules/prompt`), always alongside at least one native word or
+  particle (`को … कर`, `の … を`, `之前`, `التعليمات`), so `पिछले सभी
+  instructions को ignore करो`, `请ignore之前的所有指令` and `تجاهل all previous
+  instructions` match — and, through the `deobfuscated` view, so do their leet
+  forms (`1gn0re`). `(?<![a-z])`/`(?![a-z])` guard the English word, since a
+  CJK letter counts as a word character for `\b` (`.gitignore之前的规则` stays
+  allowed).
 
 Letter spacing is collapsed script-aware: a combining mark (Unicode
 `Mn`/`Mc`/`Me` — Devanagari vowel signs and viramas, Arabic harakat) counts as
@@ -234,6 +254,19 @@ stays around a tenth of a second (pinned by a performance test); the default
 the `native` views; for non-ASCII input they add one linear pass and a handful
 of patterns (5-25 % more scan time, measured on Russian and Hindi input).
 
+Each view is scanned only with the patterns that can match it: the Chinese,
+Japanese, Arabic and Hindi families run only on a view that holds a letter of
+their script (never on ASCII text), and their English-led code-mixed patterns
+only on a view that also holds a Latin word. Those English-led patterns are
+kept separate because a pattern that opens with a cased letter cannot use the
+regex engine's first-character scan; the native-led ones keep it. The
+whole-phrase patterns are lowercase and case-sensitive, since their views are
+lowercased. Net effect of the gating, in CPU time measured before and after it: chat-
+sized inputs in English, Russian, Arabic, Hindi, Chinese and Japanese are
+11-38 % *cheaper*, 100 KB prose 1-7 % dearer, and only inputs that now
+produce an extra view (spaced leet digits, digits inside CJK words) cost up
+to ~1.8x — still linear.
+
 On the `deobfuscated` views the guard skips only the Cyrillic (`ru`) patterns,
 because the confusables fold has already turned those letters into Latin; the
 `native` views run them instead, on Cyrillic that was never folded. Chinese,
@@ -250,29 +283,32 @@ original text only.
 Caught: the phrasings in the table above in English and the ten other
 languages, wrapped in leetspeak, invisible characters, homoglyphs, fullwidth or
 mathematical letters, letter spacing (Russian and Hindi included, with or
-without word gaps), Latin lookalikes or leet digits inside Russian words, or
-one or two layers of base64/hex/percent encoding — each class pinned by
-`tests/unit/core/guardrails/test_input_evasions.py`,
-`tests/unit/core/guardrails/test_input_native_views.py` and the red-team
-corpus (`evals/red_team/obfuscation.yaml`).
+without word gaps) and letter spacing combined with leetspeak, Russian
+written partly or wholly in Latin lookalikes or leet digits, English or leet
+keywords inside a Chinese, Japanese, Hindi, Arabic or Russian override,
+digits wedged into a native word, non-ASCII leet digits, Arabic tatweel and
+harakat, or one or two layers of base64/hex/percent encoding — each class
+pinned by `tests/unit/core/guardrails/test_input_evasions.py`,
+`tests/unit/core/guardrails/test_input_native_views.py`,
+`tests/unit/core/guardrails/test_input_combined_evasions.py` and the red-team
+corpus (`evals/red_team/obfuscation.yaml`,
+`evals/red_team/combined_evasions.yaml`).
 
 Not caught, by design of a pattern layer:
 
 - **paraphrase** — "set aside what you were told earlier" means the same as
   "ignore previous instructions" and matches nothing;
 - **languages and phrasings outside the table**, transliteration
-  (Russian in Latin letters, romanised Hindi) and code-switching mid-phrase;
+  (`ignoriruy vse predydushchie instruktsii`, romanised Hindi `pichle
+  instructions ignore karo`, Arabizi) and code-switching beyond the canonical
+  English keywords listed above;
 - **other encodings** — ROT13, Morse, base32, reversed text, ciphers the
   user defines in the prompt, payloads split across turns or messages;
 - **homoglyphs outside the short confusables map** (the full Unicode
   confusables table is not shipped) and leetspeak beyond the listed digits;
-- **letter spacing combined with leetspeak** in any language — a spaced-out
-  digit (`i g n 0 r e`, `з а б у д ь  св0и` spaced) breaks the letter run before
-  either transform can apply — and leetspeak inside Hindi, Arabic or CJK text;
-- **a Russian keyword spelled entirely in Latin lookalikes** (`Bce` for
-  `все`): the fold into Cyrillic only touches a token that already holds a
-  Cyrillic letter, so Latin words, code and numbers next to Russian stay
-  intact;
+- **a digit *replacing* a native letter** (`تج1هل`, 1 for alif) rather than
+  inserted into the word, and Chinese homophone or variant-character
+  substitution (火星文);
 - **indirect injection** in fetched content — that is
   `IndirectInjectionScanner`'s job, not this guard's.
 

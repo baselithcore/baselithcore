@@ -370,7 +370,10 @@ async def process_user_input(user_input: str) -> str:
   in English plus es/fr/de/it/pt/ru/zh/ja/ar/hi (`block_injection_patterns`),
   matched against the original text and its normalised views (NFKC,
   invisible characters stripped, homoglyphs folded, leetspeak and
-  letter-spacing undone) and decoded base64/hex/percent-encoded payloads
+  letter-spacing undone, alone or combined) and decoded
+  base64/hex/percent-encoded payloads; the Russian patterns also accept
+  Latin lookalike spellings, and the non-Latin ones English or leet
+  keywords inside a native-script sentence
 - **Code execution attempts**: shell/eval-style payloads
   (`block_code_execution`)
 - **Custom patterns**: operator-supplied regexes

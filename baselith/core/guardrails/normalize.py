@@ -17,20 +17,28 @@ The views, cheapest first:
   hyphen, bidi embeddings/overrides/isolates). Non-Latin scripts survive, so
   the multilingual patterns run here.
 * ``deobfuscated`` — ``normalized`` plus a confusables fold (Cyrillic/Greek
-  lookalikes to Latin), leetspeak de-substitution inside alphanumeric tokens
-  (``0→o 1→i 3→e 4→a 5→s 7→t @→a $→s``, with ``11→ll`` first so ``a11``
-  reads as ``all``) and collapsing of single-letter runs
-  split by one separator (``i.g.n.o.r.e``, ``i g n o r e``).
-* ``squashed`` — letters only, produced only when letter-spacing was found:
-  ``i g n o r e p r e v i o u s`` has no word boundaries left, so it is
-  matched against a short list of whole-phrase patterns.
+  lookalikes to Latin), non-ASCII decimal digits folded to ASCII
+  (``ign٠re``), Arabic tatweel and harakat dropped (``تـجـاهـل``),
+  collapsing of single-letter runs split by one separator (``i.g.n.o.r.e``,
+  ``i g n o r e``) — a lone leet character counts as a letter there, so
+  ``i g n 0 r e`` is one run — then leetspeak de-substitution inside
+  alphanumeric tokens (``0→o 1→i 3→e 4→a 5→s 7→t @→a $→s``, with ``11→ll``
+  first so ``a11`` reads as ``all``), and finally removal of one to three
+  digits wedged between two Arabic, Devanagari or CJK letters
+  (``تجا1هل``, ``忽1略``).
+* ``squashed`` — letters only (accents dropped), produced only when
+  letter-spacing was found: ``i g n o r e p r e v i o u s`` has no word
+  boundaries left, so it is matched against whole-phrase patterns (English
+  and the Latin-script languages).
 * ``native`` — ``normalized`` with letter spacing collapsed but *without* the
   confusables fold, for non-ASCII text, produced only when it differs from
   ``normalized``. Inside a token that already holds a Cyrillic letter,
   Latin lookalikes and leet digits are folded the other way, *into*
   Cyrillic (``игнoрируй`` with a Latin ``o``, ``3абудь``). The ``deobfuscated``
   view turns Russian into Latin lookalikes, so this is where the Russian
-  patterns see spaced-out or character-swapped Russian.
+  patterns see spaced-out Russian. (Lookalike *spellings* need no view: the
+  Russian patterns themselves accept Latin lookalikes — see
+  :func:`baselith.core.guardrails.multilingual.expand_cyrillic_lookalikes`.)
 * ``native-squashed`` — letters and combining marks of ``native`` (any
   script, unfolded), produced only when letter-spacing was found in
   non-ASCII text; matched against whole-phrase forms of the non-Latin
@@ -129,14 +137,18 @@ def _mark_class() -> str:
 def _spaced_run_re() -> re.Pattern[str]:
     """Three or more single letters each split by exactly one separator.
 
-    A unit is a letter with its trailing combining marks (``पि``). Letters,
-    marks and separators are disjoint classes, so the match is linear.
+    A unit is a letter with its trailing combining marks (``पि``) or a lone
+    leet character (``i g n 0 r e``: the ``0`` is a letter in disguise, and
+    a run broken there would leave both halves too short to mean anything).
+    A run must still hold a real letter to be joined — :func:`_collapse_spaced`
+    leaves ``1, 3, 5`` alone. Letters, marks, leet characters and separators
+    are disjoint classes, so the match is linear.
     """
     marks = _mark_class()
-    unit = rf"[^\W\d_][{marks}]*"
+    unit = rf"(?:[^\W\d_][{marks}]*|[013457@$])"
     return re.compile(
-        rf"(?<![\w{marks}]){unit}{_SEPARATORS}"
-        rf"(?:{unit}{_SEPARATORS})+{unit}(?![\w{marks}])"
+        rf"(?<![\w{marks}@$]){unit}{_SEPARATORS}"
+        rf"(?:{unit}{_SEPARATORS})+{unit}(?![\w{marks}@$])"
     )
 
 
@@ -156,6 +168,53 @@ def _spaced_mark_re() -> re.Pattern[str]:
 def _non_letter_or_mark_re() -> re.Pattern[str]:
     """Everything but letters and combining marks (for ``native-squashed``)."""
     return re.compile(rf"(?:[^\w{_mark_class()}]|[\d_])+")
+
+
+# Arabic tatweel (kashida, U+0640) stretches a word without changing it, and
+# harakat (U+064B-U+065F, U+0670) are optional vowel marks: either, sprinkled
+# into ``تجاهل``, hides it from a pattern written without them.
+_ARABIC_NOISE = (0x0640, *range(0x064B, 0x0660), 0x0670)
+
+# Letters of the scripts a digit never sits inside: Arabic, Devanagari, kana
+# and CJK ideographs. ``تجا1هل`` / ``忽1略`` / ``指0令`` are noise inserted to
+# split a keyword, not words. (Cyrillic is excluded: there a digit is a leet
+# letter, which the ``native`` view folds into Cyrillic instead.)
+_NATIVE_LETTERS = "\u0600-\u06ff\u0900-\u097f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
+
+
+@cache
+def _native_noise() -> tuple[re.Pattern[str], dict[int, int | None]]:
+    """Finder and translate table for non-ASCII digits and Arabic noise.
+
+    ``ign٠re`` (Arabic-Indic zero) and ``ign०re`` (Devanagari zero) are leet
+    with a digit NFKC leaves alone; folding every BMP decimal digit (Unicode
+    ``Nd``) to its ASCII value lets the leet pass read them. The finder
+    keeps text without either from paying for a per-character translate.
+    """
+    table: dict[int, int | None] = {
+        cp: ord("0") + unicodedata.decimal(chr(cp))
+        for cp in range(0x80, 0x10000)
+        if unicodedata.category(chr(cp)) == "Nd"
+    }
+    table.update(dict.fromkeys(_ARABIC_NOISE))
+    finder = re.compile("[" + "".join(re.escape(chr(cp)) for cp in table) + "]")
+    return finder, table
+
+
+def _fold_native_noise(text: str) -> str:
+    """Fold non-ASCII digits to ASCII and drop Arabic tatweel and harakat."""
+    finder, table = _native_noise()
+    return text.translate(table) if finder.search(text) else text
+
+
+@cache
+def _inserted_digits_re() -> re.Pattern[str]:
+    """A native-script letter, then one to three ASCII digits, then another.
+
+    Led by the letter (captured, put back by the substitution) rather than a
+    lookbehind, so the regex engine can skip ahead to candidate letters.
+    """
+    return re.compile(rf"([{_NATIVE_LETTERS}])[0-9]{{1,3}}(?=[{_NATIVE_LETTERS}])")
 
 
 @dataclass(frozen=True)
@@ -242,8 +301,11 @@ def _collapse_spaced(text: str) -> tuple[str, bool]:
 
     def join(match: re.Match[str]) -> str:
         nonlocal found
+        run = match.group(0)
+        if not any(ch.isalpha() for ch in run):
+            return run  # "1 . 3 . 5" — numbers, not spaced-out letters
         found = True
-        return _SEPARATOR_RE.sub("", match.group(0))
+        return _SEPARATOR_RE.sub("", run)
 
     return _spaced_run_re().sub(join, text), found
 
@@ -291,10 +353,20 @@ def matching_views(text: str) -> list[MatchingView]:
     add("normalized", normalized)
 
     folded = normalized.translate(_CONFUSABLES_TABLE)
-    collapsed, spaced = _collapse_spaced(_deleet(folded, _LEET_I))
-    add("deobfuscated", collapsed)
+    if not folded.isascii():
+        folded = _fold_native_noise(folded)
+    # Collapse before de-substituting: a spaced-out leet digit (``i g n 0 r e``)
+    # is only part of a word once the run is joined.
+    collapsed, spaced = _collapse_spaced(folded)
+    deobfuscated = _deleet(collapsed, _LEET_I)
+    if not deobfuscated.isascii():
+        deobfuscated = _inserted_digits_re().sub(r"\1", deobfuscated)
+    add("deobfuscated", deobfuscated)
     if spaced:
-        add("squashed", _NON_LETTER_RE.sub("", collapsed.lower()), squashed=True)
+        letters = deobfuscated.lower()
+        if not letters.isascii():  # "précédentes" keeps its letters: "precedentes"
+            letters = unicodedata.normalize("NFD", letters)
+        add("squashed", _NON_LETTER_RE.sub("", letters), squashed=True)
 
     if normalized.isascii():
         return views
@@ -305,10 +377,11 @@ def matching_views(text: str) -> list[MatchingView]:
     # when identical to a view already scanned with those patterns.
     native, native_spaced = _collapse_spaced(normalized)
     native = _unfold_to_cyrillic(native)
-    if native not in (normalized, collapsed):
+    if native not in (normalized, deobfuscated):
         add("native", native, native=True)
     if native_spaced and not native.isascii():
-        squashed_native = _non_letter_or_mark_re().sub("", native).lower()
+        letters = _fold_native_noise(native)
+        squashed_native = _non_letter_or_mark_re().sub("", letters).lower()
         add("native-squashed", squashed_native, squashed=True, native=True)
     return views
 

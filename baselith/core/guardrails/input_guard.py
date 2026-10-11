@@ -30,19 +30,45 @@ from .config import (
 from .decode import scan_views
 from .multilingual import (
     COMPILED_MULTILINGUAL_PATTERNS,
+    COMPILED_SQUASHED_LATIN_MULTILINGUAL_PATTERNS,
     COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
     FOLDED_SCRIPT_LANGUAGES,
+    LATIN_LED_PATTERNS,
+    NON_LATIN_LANGUAGES,
+    pattern_source,
 )
 from .normalize import COMPILED_SQUASHED_PATTERNS, MatchingView
 
 logger = get_logger(__name__)
 
+#: Labelled patterns per view kind (see :meth:`InputGuard._view_kind`).
+_PatternTable = dict[str, list[tuple[str, re.Pattern[str]]]]
+
+#: Families whose every pattern needs a letter of the language's own script
+#: (CJK, Arabic, Devanagari): skipped on a view without one. Russian is not
+#: among them — its patterns also match Latin lookalike spellings.
+_SCRIPT_GATES: dict[str, re.Pattern[str]] = {
+    "injection:zh": re.compile("[\u3400-\u4dbf\u4e00-\u9fff]"),
+    "injection:ja": re.compile("[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]"),
+    "injection:ar": re.compile("[\u0600-\u06ff]"),
+    "injection:hi": re.compile("[\u0900-\u097f]"),
+}
+assert {f"injection:{lang}" for lang in NON_LATIN_LANGUAGES} - set(_SCRIPT_GATES) == {
+    f"injection:{lang}" for lang in FOLDED_SCRIPT_LANGUAGES
+}
+#: A Latin word: without one, :data:`LATIN_LED_PATTERNS` cannot match.
+_LATIN_WORD = re.compile("[A-Za-z]{3}")
+
 #: Valid taxonomy labels; anything else from the LLM fails open.
 _TAXONOMY_INTENTS = frozenset({"in_scope", "out_of_scope", "jailbreak", "harmful"})
 
-#: Whole-phrase patterns for letter-only (``squashed``) views.
+#: Whole-phrase patterns for letter-only (``squashed``) views: English plus
+#: the Latin-script languages.
 _SQUASHED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("injection:squashed", p) for p in COMPILED_SQUASHED_PATTERNS
+] + [
+    (f"injection:{lang}", p)
+    for lang, p in COMPILED_SQUASHED_LATIN_MULTILINGUAL_PATTERNS
 ]
 #: Whole-phrase forms of the non-Latin patterns, for ``native-squashed`` views.
 _NATIVE_SQUASHED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -109,6 +135,7 @@ class InputGuard:
         """
         self.config = config or GuardrailsConfig()
         self._custom_patterns = compile_patterns(self.config.custom_block_patterns)
+        self._tables: dict[tuple[bool, bool, frozenset[str], bool], _PatternTable] = {}
 
     def validate(self, text: str) -> InputValidationResult:
         """
@@ -139,19 +166,9 @@ class InputGuard:
         # Original text first, then the normalised and decoded views: a
         # pattern is reported once, tagged with the first view it matched.
         matched: dict[str, str] = {}
-        word_patterns = self._word_patterns(latin_only=False)
-        self._scan(text, "original", word_patterns, matched)
-        by_kind = {
-            "word": word_patterns,
-            "latin": self._word_patterns(latin_only=True),
-            "native": self._native_patterns(),
-            "squashed": _SQUASHED_PATTERNS,
-            "native-squashed": _NATIVE_SQUASHED_PATTERNS,
-        }
-        if not self.config.block_injection_patterns:
-            by_kind["squashed"] = by_kind["native-squashed"] = []
+        self._scan(text, "original", self._pattern_table(text)["word"], matched)
         for view in scan_views(text):
-            patterns = by_kind[self._view_kind(view)]
+            patterns = self._pattern_table(view.text)[self._view_kind(view)]
             self._scan(view.text, view.label, patterns, matched)
         detected.extend(matched)
 
@@ -171,6 +188,43 @@ class InputGuard:
             is_valid=True,
             sanitized_input=text,
         )
+
+    def _pattern_table(self, text: str) -> _PatternTable:
+        """Pattern sets per view kind, for a view with ``text``'s scripts.
+
+        A script-bound family runs only when its script occurs in the view
+        (on ASCII text none does, so English traffic never pays for them),
+        and its English-led code-mixed patterns only when a Latin word does.
+        Tables are memoised per configuration (the toggles can change after
+        construction) and per set of absent scripts.
+        """
+        if text.isascii():
+            absent, latin = frozenset(_SCRIPT_GATES), True
+        else:
+            absent = frozenset(
+                f for f, gate in _SCRIPT_GATES.items() if not gate.search(text)
+            )
+            latin = _LATIN_WORD.search(text) is not None
+        inject = self.config.block_injection_patterns
+        key = (inject, self.config.block_code_execution, absent, latin)
+        if key not in self._tables:
+            by_kind: _PatternTable = {
+                "word": self._word_patterns(latin_only=False),
+                "latin": self._word_patterns(latin_only=True),
+                "native": self._native_patterns(),
+                "squashed": _SQUASHED_PATTERNS if inject else [],
+                "native-squashed": _NATIVE_SQUASHED_PATTERNS if inject else [],
+            }
+            self._tables[key] = {
+                kind: [
+                    (family, pattern)
+                    for family, pattern in patterns
+                    if family not in absent
+                    and (latin or pattern not in LATIN_LED_PATTERNS)
+                ]
+                for kind, patterns in by_kind.items()
+            }
+        return self._tables[key]
 
     def _word_patterns(self, *, latin_only: bool) -> list[tuple[str, re.Pattern[str]]]:
         """Labelled patterns for word-preserving views, per the config.
@@ -237,9 +291,10 @@ class InputGuard:
     ) -> None:
         """Record every not-yet-matched pattern that hits ``text``."""
         for family, pattern in patterns:
-            label = f"{family}:{pattern.pattern}"
-            if label not in matched and pattern.search(text):
-                matched[label] = view
+            # Search first: the label is only worth building on a hit, and
+            # benign traffic has none.
+            if pattern.search(text):
+                matched.setdefault(f"{family}:{pattern_source(pattern)}", view)
 
     def _build_classify_prompt(self, text: str) -> str:
         """Render the strict-JSON taxonomy prompt (reasoning first)."""
