@@ -121,3 +121,7 @@ deploy/systemd/
 .github/workflows/eval-nightly.yml
 .github/workflows/dependency-audit.yml
 .vscode/settings.json
+
+# Merge backups (git mergetool, patch)
+*.orig
+*.rej
