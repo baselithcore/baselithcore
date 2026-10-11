@@ -556,7 +556,7 @@ Declared in `baselith.core.config.plugin_updates`.
 | --- | --- | --- | --- |
 | `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (baselith/core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
 | `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
-| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks |
+| `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks; workers share one check per interval (each check costs about one GitHub call per mirror plus a few for the core), so go below the default only with a github_token |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
 | `PLUGIN_UPDATE_GITHUB_TOKEN` :material-key: | `SecretStr \| None` | *empty* | GitHub token with read access to the mirror repos' releases |
 | `PLUGIN_UPDATE_INSTANCE_ID` | `str` | *empty* | Identity of this deployment for update announcements; deployments sharing one Redis or cache directory use distinct values so they do not suppress each other's notices (falls back to the APP_BASE_URL host; with neither set the Redis key is shared and a warning is logged) |

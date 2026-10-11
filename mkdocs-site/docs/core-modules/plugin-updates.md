@@ -11,9 +11,12 @@ update notice, on by default) and of your plugins (only once a sources file is
 configured).
 
 What it contacts: `api.github.com` (or `PLUGIN_UPDATE_GITHUB_API_URL`), for the
-releases and published security advisories of `CORE_UPDATE_REPO`, about 60
+releases and published security advisories of `CORE_UPDATE_REPO`, 60 to 90
 seconds after boot and then every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS`. Each
-API worker process runs its own check. The requests are plain reads of release
+API worker process runs the loop, but the workers share one check per
+interval: a worker whose turn comes within half an interval of a sibling's
+check reuses the saved report instead of contacting GitHub (a *Check now* is
+never deferred this way). The requests are plain reads of release
 data: nothing about the deployment (its version, plugins, hosts or users) is
 sent beyond what any HTTPS request carries (the source address, the HTTP
 client's user agent and, when configured, the token). Set `CORE_UPDATE_REPO=""`
@@ -41,7 +44,8 @@ contacts GitHub.
 
 ## What it does
 
-Every six hours (and on demand) the service reads the sources file, asks each
+Every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` (six hours by default) and on
+demand, the service reads the sources file, asks each
 plugin repository for its latest release and judges it under the configured
 [trust mode](#trust-modes): by default its provenance (who created the
 release, and what the manifest says at the tagged commit), or, when

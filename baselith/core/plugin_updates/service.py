@@ -22,6 +22,7 @@ from baselith.core.config.plugins import get_plugin_config
 from baselith.core.events import get_event_bus
 from baselith.core.plugins.signing import load_trust_roots
 
+from ._schedule import run_periodic
 from .announce import AnnouncementGate, build_announcement_gate
 from .apply.eligibility import already_reached, apply_status
 from .apply.models import UpdaterHeartbeat
@@ -438,15 +439,13 @@ class PluginUpdateService:
             await self._announce_system(report.system)
 
     async def _loop(self) -> None:
-        await asyncio.sleep(FIRST_RUN_DELAY_SECONDS)
-        while True:
-            try:
-                await self.check_now()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("plugin_update_loop_error: %s", type(exc).__name__)
-            await asyncio.sleep(self._interval)
+        await run_periodic(
+            self.check_now,
+            self._cache,
+            self._interval,
+            first_delay=FIRST_RUN_DELAY_SECONDS,
+            on_reuse=lambda: publish_update_metrics(self.report()),
+        )
 
     async def start(self) -> None:
         """Start the periodic check (idempotent)."""

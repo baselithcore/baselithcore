@@ -116,7 +116,10 @@ class PluginUpdateConfig(BaseSettings):
     check_interval_seconds: int = Field(
         default=21600,
         ge=300,
-        description="Seconds between automatic update checks",
+        description="Seconds between automatic update checks; workers share "
+        "one check per interval (each check costs about one GitHub call per "
+        "mirror plus a few for the core), so go below the default only with a "
+        "github_token",
     )
     max_artifact_mb: int = Field(
         default=200,
