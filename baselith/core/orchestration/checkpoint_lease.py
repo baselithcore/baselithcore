@@ -48,6 +48,11 @@ logger = get_logger(__name__)
 #: Fallback lease length when the orchestration settings cannot be read.
 DEFAULT_LEASE_SECONDS = 60.0
 
+#: ``plugin_data`` marker of a run its executor handed back on a drain/SIGTERM
+#: shutdown: ``running``, unowned, and resumable by the next sweep at once
+#: (no silence wait). Cleared when the run is resumed.
+YIELDED_KEY = "yielded_for_shutdown"
+
 #: Store methods that make up the lease contract.
 _LEASE_METHODS = ("claim", "renew_lease", "release_lease")
 
@@ -75,6 +80,12 @@ def configured_lease_seconds() -> float:
     except Exception:  # pragma: no cover - config must not break a run
         logger.debug("checkpoint_lease_seconds_unavailable", exc_info=True)
         return DEFAULT_LEASE_SECONDS
+
+
+def was_yielded(checkpoint: Any) -> bool:
+    """True for a run handed back by a shutdown (see :data:`YIELDED_KEY`)."""
+    plugin_data = getattr(checkpoint, "plugin_data", None) or {}
+    return bool(plugin_data.get(YIELDED_KEY))
 
 
 def lease_is_live(checkpoint: Any, now: float | None = None) -> bool:
@@ -221,10 +232,12 @@ async def end_checkpoint_attempt(manager: Any) -> None:
 
 __all__ = [
     "DEFAULT_LEASE_SECONDS",
+    "YIELDED_KEY",
     "LeaseHolder",
     "configured_lease_seconds",
     "end_checkpoint_attempt",
     "lease_is_live",
     "new_owner_id",
     "supports_leases",
+    "was_yielded",
 ]

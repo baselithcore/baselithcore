@@ -579,6 +579,24 @@ server.register_tool(
 Cancellation is cooperative: the ack is an intent, not a guarantee. Handles are
 process-local and expire after `MCP_TASK_TTL_MS`.
 
+**Abandoned and runaway tasks.** A `working` task never stays `working` for
+good. When a task is read (`tasks/get`, `tasks/update`, `tasks/cancel`, or the
+pruning pass every new task triggers):
+
+- its driver ended without recording an outcome → `failed`, error
+  `Task orphaned: its worker ended without a result.`;
+- it has been `working` longer than `TaskStore(max_working_seconds=...)`
+  (default `3600.0`; `None` disables the bound) → `failed`, error
+  `Task exceeded the …s working limit.`, and its driver is cancelled. The
+  bound restarts when an `input_required` task resumes.
+
+`input_required` tasks wait on the client and are never swept, and a client
+`tasks/cancel` still ends in `cancelled`. There is no durable MCP task store:
+after a restart the handle is gone and `tasks/get` answers `Unknown task`
+(`-32602`) — a terminal error, so a client stops polling instead of waiting
+forever. Work that must survive a restart belongs in a durable runner (a
+checkpointed orchestrator run or a queued job) that the tool starts and polls.
+
 ### Change notifications: `subscriptions/listen`
 
 The revision removed the GET stream and `resources/subscribe`. Everything

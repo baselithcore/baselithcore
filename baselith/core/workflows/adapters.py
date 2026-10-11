@@ -45,9 +45,19 @@ class CrewNodeAdapter:
         self._crew = crew
         self._input_key = input_key
 
-    async def run(self, prompt: str) -> _AdapterResult:
-        """Execute the crew with ``prompt`` bound to the configured input key."""
-        result = await self._crew.run(inputs={self._input_key: prompt})
+    async def run(self, prompt: str, *, checkpoint: Any = None) -> _AdapterResult:
+        """Execute the crew with ``prompt`` bound to the configured input key.
+
+        ``checkpoint`` — the workflow node visit's scope in durable mode — is
+        passed to ``Crew.run``, so completed tasks of an interrupted crew node
+        replay instead of re-running.
+        """
+        if checkpoint is None:
+            result = await self._crew.run(inputs={self._input_key: prompt})
+        else:
+            result = await self._crew.run(
+                inputs={self._input_key: prompt}, checkpoint=checkpoint
+            )
         return _AdapterResult(output=getattr(result, "final", result))
 
 
@@ -79,15 +89,24 @@ class ColonyNodeAdapter:
         self._execute_fn = execute_fn
         self._required_capabilities = list(required_capabilities or [])
 
-    async def run(self, prompt: str) -> _AdapterResult:
-        """Auction and execute one swarm task built from ``prompt``."""
+    async def run(self, prompt: str, *, checkpoint: Any = None) -> _AdapterResult:
+        """Auction and execute one swarm task built from ``prompt``.
+
+        ``checkpoint`` (the node visit's scope in durable mode) is bound as the
+        ambient checkpoint while ``execute_fn`` runs, so the work it does
+        through a durable runner (an agent, a crew) records under this node.
+        The auction itself is recomputed on resume; only the node's output is
+        replayed as a whole.
+        """
+        from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
         from baselith.core.swarm.types import Task
 
         task = Task(
             description=prompt,
             required_capabilities=list(self._required_capabilities),
         )
-        batch = await self._colony.execute_batch([task], self._execute_fn)
+        with bind_checkpoint(checkpoint):
+            batch = await self._colony.execute_batch([task], self._execute_fn)
         if task.id in batch.completed:
             return _AdapterResult(output=batch.completed[task.id])
         if task.id in batch.failed:

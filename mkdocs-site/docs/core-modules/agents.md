@@ -92,6 +92,32 @@ async with BrowserAgent(headless=True) as agent:
 | `extract`  | Extract text  | `{"action": "extract", "selector": ".result"}`             |
 | `done`     | Goal complete | `{"action": "done", "reasoning": "task done"}`             |
 
+### Durability in a checkpointed run
+
+A browser task **cannot be resumed mid-way**. Its state lives in the browser
+(the current page, cookies, half-filled forms) and a resumed run starts with a
+fresh browser: replaying the recorded decisions of the first steps would leave
+the page where it started while the model believes it moved on, and
+re-executing them would repeat whatever a click or a submit did. So when the
+run has a checkpoint (the orchestrator binds it as ambient while a handler
+runs), `execute_task` is durable at **whole-task** granularity
+(`baselith/plugins/browser_agent/durable.py`):
+
+- the task's outcome is one checkpoint step: a resumed run whose task had
+  finished replays its result and never relaunches the browser. The replayed
+  `BrowserAgentResult` has `screenshots=[]` — screenshots are not persisted;
+- an attempt marker is recorded when the task starts, and a write-ahead
+  *effect marker* before every `click` and `type`;
+- a resumed run that finds the task started but unfinished re-runs it from
+  scratch **only when no effect marker was recorded** (navigating, scrolling
+  and reading are safe to repeat). Otherwise it returns a failed result
+  ("interrupted after it acted on a page") instead of acting twice:
+  side-effecting actions are at-most-once, never retried automatically.
+
+The individual MCP browser tools (`browser_navigate`, `browser_click`, …) are
+not recorded: each is one call the caller's own tool step already covers.
+Without a checkpoint nothing changes.
+
 ### MCP Tools Integration
 
 ```python
@@ -332,6 +358,29 @@ Every tool accepts a `language` argument, and the payloads carry the proof:
 whether the tests reproduce the bug. `fix_code`, `generate_code`,
 `generate_tests` and `refactor_code` are `destructive` (they execute
 model-written code in the sandbox); `explain_code` is `read_only`.
+
+### Durability in a checkpointed run
+
+When the run has a checkpoint (the orchestrator binds it as ambient while a
+flow handler runs, and composite runners re-bind their own scope), every
+verified task — `fix_code`, `generate_code`, `generate_tests`,
+`refactor_code`, `fix_in_workspace` — records its expensive steps under a
+`coding_agent` child scope (`baselith/plugins/coding_agent/durable.py`):
+
+- **each typed model answer**, keyed by a digest of the prompt and the answer
+  schema;
+- **each sandbox test run** (the workspace import probe and the reproduction
+  run on the original code included), keyed by a digest of the code and the
+  tests, with its full `TestReport`.
+
+The loop is deterministic given those results — the lessons and evidence each
+prompt carries come from the recorded reports — so a run resumed after a crash
+replays the answers and runs it already paid for and continues from the first
+step that never finished: a crash during attempt 3 costs attempt 3, not
+attempts 1–3. A prompt that differs for any reason simply misses and runs for
+real. A lost lease (`CheckpointConflictError`) stops the task instead of
+being reported as a failed attempt. `explain_code` (one call, nothing
+executed) is not recorded. Without a checkpoint nothing changes.
 
 ---
 

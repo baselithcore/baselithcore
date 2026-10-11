@@ -116,6 +116,16 @@ per request; the orchestrator still runs its own `guard_input_async` (regex,
 then the opt-in moderation and taxonomy layers), which is the only input
 guard on the streaming path.
 
+`handle_chat_async` also takes two keyword-only arguments. `run_id` names the
+durable run the request is an attempt at: the orchestrator is called through
+`process_with_stable_run_id`, so a retry under the same id resumes the run's
+checkpoint, or returns the recorded answer of a run that already completed
+(see [stable run ids](orchestration.md#stable-run-ids-for-chat-requests-and-queued-jobs)).
+`POST /chat` derives it from the `Idempotency-Key` header (else the request
+id), and the RQ agent-run job from its job id. `extra_context` adds entries to
+the orchestration context — the queued job uses it to register its completion
+notifier. Both default to `None`: no stable id, nothing added.
+
 `handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
 through `baselith.core.utils.concurrency.drain_async_iterator`, so the guardrails, the
 metrics, the streaming-disabled fallback and the error stream have one

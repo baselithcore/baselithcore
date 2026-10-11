@@ -22,10 +22,11 @@ that lost the connection re-sends the request.
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Any, AsyncIterator
 
 import orjson
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from baselith.core.chat import chat_service
@@ -133,17 +134,58 @@ def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[st
     return headers
 
 
+def chat_run_id(request: Request) -> str:
+    """The stable run id of this chat request (see ``derive_run_id``).
+
+    Built from the ``Idempotency-Key`` header when the client sent one, else
+    from the request id (a client-supplied ``X-Request-ID``, or the one the
+    request-id middleware generated), scoped to the tenant and the user: a
+    client retrying with the same key resumes the same durable run instead of
+    starting over, and two principals reusing a value never share a run.
+    """
+    from baselith.core.context import get_current_tenant_id, get_current_user_id
+    from baselith.core.orchestration.run_ids import derive_run_id
+
+    key = request.headers.get("idempotency-key")
+    if key:
+        source = f"idempotency:{key}"
+    else:
+        request_id = request_id_ctx.get("-")
+        source = f"request:{request_id if request_id != '-' else uuid.uuid4().hex}"
+    return derive_run_id(
+        "chat",
+        source,
+        tenant_id=get_current_tenant_id(),
+        principal=get_current_user_id(),
+    )
+
+
 @router.post(
     "/chat",
     response_model=ChatResponse,
-    responses=problem_responses(401, 403, 422, 429, 503),
+    responses=problem_responses(401, 403, 409, 422, 429, 503),
 )
-async def chat(req: ChatRequest, response: Response) -> ChatResponse:
+async def chat(req: ChatRequest, request: Request, response: Response) -> ChatResponse:
     """
     Main endpoint for querying the agent.
     Delegated to ChatService which handles retrieval, reranking, caching, and response generation.
+
+    The run is named by the request's ``Idempotency-Key`` (else its request
+    id): a retry with the same key resumes the durable run, or returns its
+    answer when it already finished. A retry while the first attempt still
+    executes elsewhere answers **409**.
     """
-    result = await chat_service.handle_chat_async(req)
+    from baselith.core.orchestration.checkpoint_errors import (
+        CheckpointLeaseHeldError,
+    )
+
+    try:
+        result = await chat_service.handle_chat_async(req, run_id=chat_run_id(request))
+    except CheckpointLeaseHeldError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This request is still being processed; retry later.",
+        ) from exc
     for key, value in _apply_transparency(result, get_transparency_service()).items():
         response.headers[key] = value
     return result

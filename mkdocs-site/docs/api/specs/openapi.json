@@ -5560,7 +5560,7 @@
     "/chat": {
       "post": {
         "deprecated": true,
-        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nThe run is named by the request's ``Idempotency-Key`` (else its request\nid): a retry with the same key resumes the durable run, or returns its\nanswer when it already finished. A retry while the first attempt still\nexecutes elsewhere answers **409**.",
         "operationId": "chat_chat_post",
         "requestBody": {
           "content": {
@@ -5612,6 +5612,21 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -10402,7 +10417,7 @@
     },
     "/v1/chat": {
       "post": {
-        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.",
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nThe run is named by the request's ``Idempotency-Key`` (else its request\nid): a retry with the same key resumes the durable run, or returns its\nanswer when it already finished. A retry while the first attempt still\nexecutes elsewhere answers **409**.",
         "operationId": "chat_v1_chat_post",
         "requestBody": {
           "content": {
@@ -10454,6 +10469,21 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

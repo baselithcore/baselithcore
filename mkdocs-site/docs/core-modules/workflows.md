@@ -13,6 +13,7 @@ baselith/core/workflows/
 ├── adapters.py       # CrewNodeAdapter / ColonyNodeAdapter — multi-agent primitives behind the AGENT-node contract
 ├── schedule.py       # WorkflowScheduler — in-process cron scheduling
 ├── versioning.py     # Pins a definition to a durable run
+├── durable.py        # Durable node visits: one step per visit + the visit's child scope
 └── flow_handler.py   # WorkflowFlowHandler — orchestrator bridge
 ```
 
@@ -211,10 +212,12 @@ dialect — `async run(inputs)` returning a `CrewResult` — so
 `baselith.core.workflows`) bridges it onto the contract: the node's prompt is bound
 under `input_key` (default `"input"`, referenced by task descriptions as
 `{input}`), and `CrewResult.final` becomes the node output. A whole crew then
-composes into a graph as one node. Durable execution applies at **node
-granularity**: a completed crew node replays its recorded output on resume,
-but a crash *inside* the crew re-runs the whole crew node — the crew's own
-tasks are not checkpointed one by one:
+composes into a graph as one node. In
+[durable mode](#durable-execution-checkpoint-replay) a completed crew node
+replays its recorded output on resume, and a crash *inside* the crew resumes
+the crew where it stopped: the adapter passes the node visit's checkpoint
+scope to `Crew.run(checkpoint=...)`, so finished tasks replay and only the
+interrupted task runs again (its tool calls replay too):
 
 ```python
 from baselith.core.agent import Agent, Crew, Task
@@ -283,10 +286,12 @@ With `CrewNodeAdapter` and `ColonyNodeAdapter` together, both multi-agent
 primitives compose into graphs: a **crew** node when the collaboration is a
 fixed task pipeline, a **colony** node when the executing agent should be
 chosen by the auction per task. In [durable mode](#durable-execution-checkpoint-replay)
-either is **one recorded step**: once the node completes its output replays on
-resume, but a crash while it is running re-executes the whole node — every
-crew task, or the colony auction and its `execute_fn` — so side effects
-inside it are only as idempotent as the code they call.
+either node's output replays once it completes. Inside a running node, a
+**crew** resumes task by task (above); a **colony** node binds the visit's
+scope as the ambient checkpoint while `execute_fn` runs, so work it does
+through a durable runner (an `Agent`, a `Crew`) is recorded under the node,
+but the auction itself is recomputed and an `execute_fn` that calls effects
+directly is only as idempotent as the code it calls.
 
 ### Execution Features
 
@@ -327,6 +332,17 @@ Semantics to know:
   by node and occurrence (`v2:workflow:<node>:<hash>:<n>`), not by position,
   so a loop that visits a node twice records two steps and a resumed run
   matches them in visit order of that node alone.
+- **Work inside a node is durable too.** Each visit gets its own child scope
+  of the run's checkpoint (`baselith/core/workflows/durable.py`; see
+  [composite runners](orchestration.md#composite-runners-child-scopes-and-what-each-one-records)).
+  An AGENT node passes it to `agent.run(prompt, checkpoint=...)` when the
+  agent accepts one — the typed `Agent`, `CrewNodeAdapter`,
+  `ColonyNodeAdapter` — so a node interrupted half-way replays the tool calls
+  or crew tasks it had finished, and the scope is bound as the ambient
+  checkpoint for custom handlers. Agents whose `run` takes no `checkpoint`
+  re-run whole, as before. SUBGRAPH nodes still run their nested workflow
+  without a checkpoint: the subgraph replays as one recorded step once it
+  completes.
 - **JSON-serializable outputs.** Durable runs require node outputs to be
   JSON-serializable — that is the persistent checkpoint store's contract.
 - **Sequential `PARALLEL` branches.** In durable mode fan-out branches

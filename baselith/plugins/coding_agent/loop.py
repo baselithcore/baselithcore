@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from baselith.core.loops import AttemptContext, EngineeredLoop
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 
 from .harness import TestReport
 
@@ -72,17 +73,24 @@ async def verified_loop(
     best_report: TestReport | None = None
     seconds = 0.0
     problem = ""
+    lost: CheckpointConflictError | None = None
 
     async def act(ctx: AttemptContext) -> None:
-        nonlocal last, problem
+        nonlocal last, problem, lost
         problem = ""
         try:
             last = await propose(ctx, last, last_report)
+        except CheckpointConflictError as exc:
+            # The run's lease moved to another executor: not a failed attempt. Raised from
+            # verify(), which the engineered loop does not turn into a lesson.
+            lost = exc
         except Exception as exc:
             problem = f"the model gave no usable answer ({type(exc).__name__})"
 
     async def verify() -> tuple[bool, str]:
         nonlocal last_report, best, best_report, seconds
+        if lost is not None:
+            raise lost
         if problem or last is None:
             return False, problem or "no candidate yet"
         report = await run_tests(last)

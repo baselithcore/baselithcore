@@ -107,3 +107,34 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
     mock_chat_service.handle_chat_stream_async.assert_called_once()
     call_args = mock_chat_service.handle_chat_stream_async.call_args[0][0]
     assert call_args.query == "Hello Stream"
+
+
+def test_chat_run_id_follows_the_idempotency_key(client, mock_chat_service):
+    """A retry with the same Idempotency-Key is an attempt at the same run."""
+    mock_chat_service.handle_chat_async = AsyncMock(
+        return_value=ChatResponse(answer="ok", sources=[])
+    )
+    payload = {"query": "Hello"}
+    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-1"})
+    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-1"})
+    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-2"})
+
+    ids = [
+        c.kwargs["run_id"] for c in mock_chat_service.handle_chat_async.call_args_list
+    ]
+    assert ids[0] == ids[1] != ids[2]
+    assert all(run_id.startswith("chat-") for run_id in ids)
+
+
+def test_chat_run_lease_held_elsewhere_answers_409(client, mock_chat_service):
+    from baselith.core.orchestration.checkpoint_errors import (
+        CheckpointLeaseHeldError,
+    )
+
+    mock_chat_service.handle_chat_async = AsyncMock(
+        side_effect=CheckpointLeaseHeldError("chat-x", "other-owner")
+    )
+    response = client.post(
+        "/chat", json={"query": "Hello"}, headers={"Idempotency-Key": "k-1"}
+    )
+    assert response.status_code == 409

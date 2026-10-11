@@ -209,6 +209,7 @@ __all__ = [
     "resolve_agent_persona",
     "DEFAULT_MAX_DYNAMIC_SUBTASKS",
     "build_decomposition_prompt",
+    "build_synthesis_prompt",
     "contract_for_spec",
     "DEFAULT_VIRTUAL_AGENTS",
     "detect_scope_conflicts",
@@ -291,11 +292,69 @@ def register_dynamic_agent(colony: Any, spec: VirtualAgentSpec) -> str:
     return profile.id
 
 
+def build_synthesis_prompt(
+    original_query: str, sub_results: list[dict[str, Any]]
+) -> tuple[str, str]:
+    """``(results_text, prompt)`` for the swarm's final synthesis call."""
+    results_text = "\n\n".join(
+        f"### Contribution from {r.get('agent', 'Agent')}:\n{r.get('result', 'N/A')}"
+        for r in sub_results
+        if r.get("success")
+    )
+    prompt = f"""Synthesize the following contributions from different specialized agents into a cohesive and complete response.
+
+## Original Question
+{original_query}
+
+## Agent Contributions
+{results_text}
+
+## Instructions
+Create a final response that:
+1. Integrates all relevant contributions
+2. Is well-structured and readable
+3. Highlights key points
+4. Resolves any contradictions
+"""
+    return results_text, prompt
+
+
+async def _plan_subtasks(llm_service: Any, query: str) -> list[dict]:
+    """One LLM decomposition, capped and validated; raises when unusable."""
+    import json
+
+    from baselith.core.observability.logging import get_logger
+
+    response = await llm_service.generate_response(
+        build_decomposition_prompt(query), json=True
+    )
+    tasks = json.loads(response)
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("decomposition is not a non-empty list")
+    # Hard cap on model-emitted sub-tasks: the "2-4" in the prompt is
+    # advisory only — without a cap a single adversarial or malformed
+    # completion could spawn an unbounded number of dynamic agents and
+    # parallel executions (cost/resource DoS).
+    limit = max_dynamic_subtasks()
+    sane = [t for t in tasks if isinstance(t, dict)][:limit]
+    if len(sane) < len(tasks):
+        get_logger(__name__).warning(
+            "swarm_decomposition_truncated emitted=%d kept=%d cap=%d",
+            len(tasks),
+            len(sane),
+            limit,
+        )
+    if not sane:
+        raise ValueError("decomposition yielded no valid task objects")
+    return sane
+
+
 async def decompose_task(
     llm_service: Any,
     colony: Any,
     query: str,
     dynamic_agent_ids: list[str],
+    checkpoint: Any | None = None,
 ) -> list[dict]:
     """Decompose a complex query into sub-tasks, registering dynamic agents.
 
@@ -309,47 +368,45 @@ async def decompose_task(
             unregister them when the request completes (the colony lives for
             the process; without cleanup each request leaked its agents into
             every later request's auctions).
+        checkpoint: Optional checkpoint (manager or scope). The decomposition
+            is then a recorded step: a resumed run gets the same sub-tasks
+            back — the LLM is not asked again — so every finished sub-task's
+            record still matches. Dynamic agents are re-registered from the
+            record (they live in the per-request colony, not the checkpoint).
     """
-    import json
-
     from baselith.core.observability.logging import get_logger
+    from baselith.core.orchestration.checkpoint_scope import durable_step
 
     logger = get_logger(__name__)
 
     if not llm_service:
         return [{"description": query, "capability": "analysis"}]
 
-    prompt = build_decomposition_prompt(query)
     try:
-        response = await llm_service.generate_response(prompt, json=True)
-        tasks = json.loads(response)
-        if isinstance(tasks, list) and len(tasks) > 0:
-            # Hard cap on model-emitted sub-tasks: the "2-4" in the prompt is
-            # advisory only — without a cap a single adversarial or malformed
-            # completion could spawn an unbounded number of dynamic agents and
-            # parallel executions (cost/resource DoS).
-            limit = max_dynamic_subtasks()
-            sane = [t for t in tasks if isinstance(t, dict)][:limit]
-            if len(sane) < len(tasks):
-                logger.warning(
-                    "swarm_decomposition_truncated emitted=%d kept=%d cap=%d",
-                    len(tasks),
-                    len(sane),
-                    limit,
+        sane: list[dict] = await durable_step(
+            checkpoint,
+            "swarm_decompose",
+            {"query": query},
+            lambda: _plan_subtasks(llm_service, query),
+            category="swarm",
+        )
+        for t in sane:
+            if "agent_name" in t:
+                spec = VirtualAgentSpec(
+                    name=str(t["agent_name"]),
+                    role=str(t.get("agent_role", "worker")),
+                    capabilities=[str(t.get("capability", "analysis"))],
+                    system_prompt=str(t.get("agent_prompt", "")),
                 )
-            if not sane:
-                raise ValueError("decomposition yielded no valid task objects")
-            for t in sane:
-                if "agent_name" in t:
-                    spec = VirtualAgentSpec(
-                        name=str(t["agent_name"]),
-                        role=str(t.get("agent_role", "worker")),
-                        capabilities=[str(t.get("capability", "analysis"))],
-                        system_prompt=str(t.get("agent_prompt", "")),
-                    )
-                    dynamic_agent_ids.append(register_dynamic_agent(colony, spec))
-            return sane
+                dynamic_agent_ids.append(register_dynamic_agent(colony, spec))
+        return sane
     except Exception as e:
+        from baselith.core.orchestration.checkpoint_errors import (
+            CheckpointConflictError,
+        )
+
+        if isinstance(e, CheckpointConflictError):
+            raise
         logger.warning(f"Dynamic decomposition failed: {e}")
 
     # Fallback to defaults

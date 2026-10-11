@@ -624,6 +624,7 @@ baselith/core/reasoning/
     ├── tree.py         # Tree structure (ThoughtNode, export helpers)
     ├── mcts.py         # MCTS search (uct_select, backpropagate, mcts_search[_async])
     ├── engine.py       # TreeOfThoughts / TreeOfThoughtsAsync solve loop
+    ├── durable.py      # Checkpoint recording of generation / evaluation calls
     └── cache.py        # ThoughtCache (LRU + TTL)
 ```
 
@@ -676,6 +677,30 @@ result = await tot.solve("...", k=3, max_steps=4, strategy="bfs")
 `solve()` is tuned **only** through these arguments. `ReasoningConfig` (env
 prefix `TOT_`) supplies the defaults the orchestrator's reasoning handler
 passes in — see [Configuration](#configuration).
+
+#### Durable search (`solve(..., checkpoint=...)`)
+
+Under a checkpoint — `solve(checkpoint=...)`, the run's ambient one, or the
+reasoning handler's `context["checkpoint"]` — a search survives a crash
+without starting from zero. The granularity is **one LLM call**:
+
+- every thought-generation call (in the fallback expansion, together with the
+  sandbox runs of its `[EXECUTE]` blocks) is a recorded step keyed by a hash
+  of the state it expands and `k`;
+- every thought evaluation is a recorded step keyed by a hash of the thought.
+
+Selection (UCT, ties broken by order), backpropagation and the `patience`
+early stop are deterministic functions of those results, so a resumed search
+**replays the recorded calls, rebuilds the identical tree and returns the
+same answer** an uninterrupted search would have, paying only for the calls
+the crashed attempt never finished. Only a successful call is recorded: a
+generation that failed (an empty expansion) or an evaluation that degraded to
+`0.0` is asked again on resume, and a different result there simply leads the
+search down a different, equally valid path. The wall-clock deadline is per
+attempt, so a resumed search can stop earlier than the original would have.
+The steps live under a `tot` child scope identified by the problem and the
+search parameters, so two searches in one run never share records. On replay
+the [`ThoughtCache`](#tree-of-thoughts-tot) is not consulted.
 
 #### Deadline and convergence bounds on async MCTS
 

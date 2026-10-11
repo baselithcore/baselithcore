@@ -6,9 +6,16 @@ the :class:`~baselith.plugins.coding_agent.agent.CodingAgent` it works for.
 
 from __future__ import annotations
 
+import json
 import shutil
 from typing import TYPE_CHECKING, Any
 
+from baselith.plugins.coding_agent.durable import (
+    coding_scope,
+    digest,
+    durable_ask,
+    durable_tests,
+)
 from baselith.plugins.coding_agent.harness import (
     TestReport,
     new_run_key,
@@ -84,10 +91,33 @@ async def ask_workspace(agent: CodingAgent, prompt: str, model: Any) -> Any:
 async def workspace_result(
     agent: CodingAgent, ws: Workspace, problem: str, lang: str
 ) -> WorkspaceResult:
-    """Verified when the workspace can run in the sandbox, unverified (with why) otherwise."""
+    """Verified when the workspace can run in the sandbox, unverified (with why) otherwise.
+
+    With a checkpoint in context every answer and sandbox run (the import probe included) is
+    a recorded step, so a resumed run replays them instead of paying for them again.
+    """
+    scope = coding_scope(
+        "fix_workspace",
+        {
+            "language": lang,
+            "target": ws.target,
+            "test_path": ws.test_path,
+            "files": digest(json.dumps(ws.files, sort_keys=True)),
+            "problem": digest(problem),
+        },
+    )
+
+    async def _ask(prompt: str, model: Any) -> Any:
+        return await ask_workspace(agent, prompt, model)
 
     async def ask(prompt: str, model: Any) -> Any:
-        return await ask_workspace(agent, prompt, model)
+        return await durable_ask(scope, prompt, model, _ask)
+
+    async def run_tests(code: str, tests: str) -> TestReport:
+        async def _run(c: str, t: str) -> TestReport:
+            return await run_workspace_tests(agent, ws, c, t)
+
+        return await durable_tests(scope, code, tests, _run)
 
     if lang != "python":
         return await unverified(ask, ws, problem, lang, "language")
@@ -97,9 +127,7 @@ async def workspace_result(
         return await unverified(ask, ws, problem, lang, "sandbox_unavailable")
     target = module_path(ws.target, ws.roots)
     # The probe asserts something: a passing test that checks nothing is never verified.
-    probe = await run_workspace_tests(
-        agent,
-        ws,
+    probe = await run_tests(
         ws.files[ws.target],
         f"import {target} as _target\n\n\ndef test_imports():\n"
         f"    assert _target.__name__ == {target!r}\n",
@@ -110,10 +138,6 @@ async def workspace_result(
         # The target does not import in the sandbox as it is (a screened context file, a
         # local import that fails, a file that is not a module): no test run can pass.
         return await unverified(ask, ws, problem, lang, "probe_failed")
-
-    async def run_tests(code: str, tests: str) -> TestReport:
-        return await run_workspace_tests(agent, ws, code, tests)
-
     return await verified(ask, run_tests, ws, problem, lang, agent.max_fix_attempts)
 
 

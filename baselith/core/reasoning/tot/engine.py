@@ -11,11 +11,13 @@ import re
 from typing import Any
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 from baselith.core.reasoning.prompts import (
     THOUGHT_EVALUATION_PROMPT,
     THOUGHT_GENERATION_PROMPT,
 )
 
+from .durable import digest, recorded, search_scope
 from .mcts import backpropagate, get_best_leaf, mcts_search_async, uct_select
 from .tree import ThoughtNode, export_tree_to_mermaid
 
@@ -120,12 +122,17 @@ class TreeOfThoughts:
         state = "\n".join(node.get_path())
         prompt = THOUGHT_GENERATION_PROMPT.format(problem=problem, state=state, k=k)
 
-        try:
+        async def _ask() -> list[str]:
             response = await self.llm_service.generate_response(prompt)
-            return [
-                ThoughtNode(content=t, depth=node.depth + 1)
-                for t in self._parse_thoughts(response, k)
-            ]
+            return self._parse_thoughts(response, k)
+
+        try:
+            thoughts = await recorded(
+                "tot_generate", {"state": digest(state), "k": k}, _ask
+            )
+            return [ThoughtNode(content=t, depth=node.depth + 1) for t in thoughts]
+        except CheckpointConflictError:
+            raise  # the run is owned elsewhere now: stop, do not score 0
         except Exception as e:
             logger.error(f"Error generating thoughts: {e}")
             return []
@@ -183,10 +190,20 @@ class TreeOfThoughts:
             logger.debug("Thought cache unavailable; scoring uncached", exc_info=True)
             cache = None
 
-        try:
+        async def _score() -> float:
             if cache is None:
                 return await _eval(node.content)
-            return await cache.get_or_evaluate_async(node.content, problem, _eval)
+            return float(
+                await cache.get_or_evaluate_async(node.content, problem, _eval)
+            )
+
+        try:
+            score = await recorded(
+                "tot_evaluate", {"thought": digest(node.content)}, _score
+            )
+            return float(score)
+        except CheckpointConflictError:
+            raise
         except Exception as e:
             # Failure degrades this one evaluation to 0.0 without caching it.
             logger.error(f"Error evaluating thought async: {e}")
@@ -217,6 +234,8 @@ class TreeOfThoughts:
         for result in results:
             if isinstance(result, float):
                 scores.append(result)
+            elif isinstance(result, CheckpointConflictError):
+                raise result
             else:
                 if isinstance(result, BaseException):
                     logger.warning(f"Thought evaluation failed: {result}")
@@ -264,10 +283,20 @@ class TreeOfThoughts:
         tools: list[Any] | None = None,
         strategy: str = "mcts",
         initial_state: str | None = None,
+        checkpoint: Any | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
         Solve a problem using Tree of Thoughts with optional tools.
+
+        Durable under a checkpoint (``checkpoint=``, or the run's ambient one):
+        every thought-generation call (with its sandbox runs) and every
+        evaluation is a recorded step of a ``tot`` child scope, keyed by a
+        hash of the state it expands or the thought it scores. Selection,
+        backpropagation and the early stop are deterministic functions of
+        those results, so a resumed search replays the recorded calls,
+        rebuilds the same tree, and pays only for the calls the crashed
+        attempt never finished.
 
         Args:
             problem: Problem description to solve.
@@ -281,6 +310,31 @@ class TreeOfThoughts:
         Returns:
             Dictionary with solution, steps, and tree visualization.
         """
+        identity = {
+            "problem": problem,
+            "k": k,
+            "max_steps": max_steps,
+            "strategy": strategy,
+            "initial_state": initial_state,
+            "iterations": kwargs.get("iterations"),
+            "branching_factor": kwargs.get("branching_factor"),
+        }
+        with search_scope(checkpoint, identity):
+            return await self._solve(
+                problem, k, max_steps, tools, strategy, initial_state, **kwargs
+            )
+
+    async def _solve(
+        self,
+        problem: str,
+        k: int,
+        max_steps: int,
+        tools: list[Any] | None,
+        strategy: str,
+        initial_state: str | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Body of :meth:`solve`, run with the search's checkpoint scope bound."""
         self.tools = tools or []
         root = ThoughtNode(content=initial_state or problem, score=0.0)
         best_leaf = None
@@ -361,42 +415,51 @@ class TreeOfThoughts:
         )
 
         try:
-            response = await self.llm_service.generate_response(prompt)
-            thoughts = self._parse_thoughts(response, k)
-
-            # Tool Execution Logic
-            processed_thoughts = []
-            for thought_content in thoughts:
-                code_match = re.search(
-                    r"\[EXECUTE\](.*?)\[/EXECUTE\]", thought_content, re.DOTALL
-                )
-                if code_match and self.tools:
-                    code = code_match.group(1).strip()
-                    tool_output = "Tool execution failed"
-                    try:
-                        sandbox = self.tools[0]
-                        result = await sandbox.execute_code_async(code)
-                        tool_output = (
-                            result.stdout if result.exit_code == 0 else result.stderr
-                        )
-                    except Exception as e:
-                        logger.warning("ToT sandbox execution raised", exc_info=True)
-                        tool_output = f"Error: {e}"
-
-                    thought_content += f"\n[RESULT]\n{tool_output}\n[/RESULT]"
-
-                processed_thoughts.append(
-                    ThoughtNode(
-                        content=thought_content, depth=node.depth + 1, parent=node
-                    )
-                )
-
+            contents = await recorded(
+                "tot_expand",
+                {"state": digest(state), "k": k},
+                lambda: self._expand_contents(prompt, k),
+            )
+            processed_thoughts = [
+                ThoughtNode(content=content, depth=node.depth + 1, parent=node)
+                for content in contents
+            ]
             node.children.extend(processed_thoughts)
             return processed_thoughts
-
+        except CheckpointConflictError:
+            raise
         except Exception as e:
             logger.error(f"Error generating thoughts: {e}")
             return []
+
+    async def _expand_contents(self, prompt: str, k: int) -> list[str]:
+        """One expansion's thoughts, sandbox results spliced in (one step)."""
+        response = await self.llm_service.generate_response(prompt)
+        thoughts = self._parse_thoughts(response, k)
+
+        # Tool Execution Logic
+        processed: list[str] = []
+        for thought_content in thoughts:
+            code_match = re.search(
+                r"\[EXECUTE\](.*?)\[/EXECUTE\]", thought_content, re.DOTALL
+            )
+            if code_match and self.tools:
+                code = code_match.group(1).strip()
+                tool_output = "Tool execution failed"
+                try:
+                    sandbox = self.tools[0]
+                    result = await sandbox.execute_code_async(code)
+                    tool_output = (
+                        result.stdout if result.exit_code == 0 else result.stderr
+                    )
+                except Exception as e:
+                    logger.warning("ToT sandbox execution raised", exc_info=True)
+                    tool_output = f"Error: {e}"
+
+                thought_content += f"\n[RESULT]\n{tool_output}\n[/RESULT]"
+
+            processed.append(thought_content)
+        return processed
 
 
 class TreeOfThoughtsAsync(TreeOfThoughts):

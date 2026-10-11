@@ -400,6 +400,36 @@ for agent_index, usage in result.breakdown().items():
 `AgentUsage`, `CostFn`, `ReviewDecision`, and `ReviewVerdict` are exported
 from `baselith.core.agent` alongside the existing crew types.
 
+### Durable crews (`Crew.run(checkpoint=...)`)
+
+Under a checkpoint a crew resumes where it stopped instead of re-running from
+task 1. `Crew.run(inputs, checkpoint=...)` mirrors
+`Agent.run(checkpoint=...)`; without the argument it uses the run's ambient
+checkpoint, which the orchestrator binds while a flow handler runs — so a crew
+started from inside a handler is durable with no extra wiring, and one run
+outside any checkpoint behaves exactly as before.
+
+Every agent call the crew makes is a recorded step under a child scope of the
+run ([composite runners](orchestration.md#composite-runners-child-scopes-and-what-each-one-records)),
+keyed by its role, task index and a hash of its prompt:
+
+- **sequential / parallel** — one step per task: a resumed crew replays the
+  finished tasks' outputs (and threads them into later prompts verbatim) and
+  runs only the interrupted task and those after it. Parallel tasks still run
+  concurrently; their saves are serialised.
+- **hierarchical** — the manager's brief, the worker run, the review and the
+  bounded revision are four separate steps, so a crash during the review
+  re-runs neither the brief nor the worker.
+- **inside a task** — the task's agent gets its own scope as `checkpoint=`,
+  so the tool calls of an interrupted task replay instead of running twice,
+  and its idempotency-ledger keys are scoped to the task.
+
+A replayed `TaskResult` carries the recorded `output` (a structured
+`output_type` is re-validated into the model), `text`, tool-call names and
+iteration count; `messages` are not recorded, and `latency_ms` measures the
+replay (~0). A manager failure that fails open is not recorded, so the resumed
+run asks again.
+
 ## Group chat (`GroupChat` + speaker selection)
 
 The collaboration topologies above are structured — `Crew` is a task DAG, the
@@ -477,6 +507,16 @@ bounded by:
    `terminated_by: "budget"`. Inside an orchestrated request the ambient
    budget is used as is and its breach propagates. `budget=None` disables
    both.
+
+### Durable chats (`GroupChat.run(topic, checkpoint=...)`)
+
+Under a checkpoint (explicit, or the run's ambient one) every round — the
+speaker the selector chose and what they said — is a recorded step keyed by
+the round number. A resumed chat replays the transcript so far without calling
+the selector or any participant, re-checks the `terminate` predicate on it,
+and continues from the first unrecorded round. While a participant speaks,
+its round's scope is the ambient checkpoint, so a participant that runs a
+crew or a typed agent through it records its own work too.
 
 All group-chat symbols (`GroupChat`, `GroupChatResult`, `ChatMessage`,
 `Participant`, `SpeakerSelector` and the three selectors) are exported from

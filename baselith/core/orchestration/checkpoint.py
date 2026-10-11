@@ -54,6 +54,7 @@ from baselith.core.orchestration.checkpoint_errors import (
     CheckpointLeaseHeldError,
 )
 from baselith.core.orchestration.checkpoint_lease import LeaseHolder
+from baselith.core.orchestration.checkpoint_scope import ScopeHost
 
 if TYPE_CHECKING:  # re-exported below through the module __getattr__ shim
     from baselith.core.orchestration.checkpoint_approvals import (
@@ -238,12 +239,13 @@ class CheckpointStore(Protocol):
         ...
 
 
-class CheckpointManager(LeaseHolder):
+class CheckpointManager(LeaseHolder, ScopeHost):
     """Runtime façade a handler uses to make its tool steps durable.
 
     Exposed to handlers on the orchestration context as ``context["checkpoint"]``.
     Wrap each tool invocation in :meth:`run_step`; call :meth:`complete` /
-    :meth:`fail` at the end of the run.
+    :meth:`fail` at the end of the run. Composite runners record their units
+    under :meth:`scope` (see :mod:`~baselith.core.orchestration.checkpoint_scope`).
 
     Args:
         store: The checkpoint store.
@@ -387,15 +389,9 @@ class CheckpointManager(LeaseHolder):
         self.checkpoint.status = STATUS_RUNNING
         self._sync_budget()
         self.extend_local_lease()
-        # Stores may expose an incremental fast-path that writes only the new
-        # step instead of re-serializing the whole accumulated state (which
-        # made an n-step run O(n²) bytes over the wire). Optional by design:
-        # any store implementing just the CheckpointStore protocol still works.
-        save_step = getattr(self.store, "save_step", None)
-        if save_step is not None:
-            await save_step(self.checkpoint, key, entry, trajectory_entry)
-        else:
-            await self.store.save(self.checkpoint)
+        # Incremental when the store supports it; serialised either way, so
+        # concurrent units of a composite runner never race the version CAS.
+        await self._persist((key, entry, trajectory_entry))
         return result
 
     def update_budget(self, snapshot: Any) -> None:
@@ -415,14 +411,14 @@ class CheckpointManager(LeaseHolder):
         self.checkpoint.status = STATUS_COMPLETED
         self.checkpoint.answer = answer
         self._sync_budget()
-        await self.store.save(self.checkpoint)
+        await self._persist()
 
     async def fail(self, error: str) -> None:
         """Mark the run failed and persist, so it can be inspected or resumed."""
         self.checkpoint.status = STATUS_FAILED
         self.checkpoint.error = error
         self._sync_budget()
-        await self.store.save(self.checkpoint)
+        await self._persist()
 
     async def await_approval(self, tool_name: str, category: str) -> None:
         """Pause the run pending human approval and persist that state.
@@ -438,7 +434,7 @@ class CheckpointManager(LeaseHolder):
             "requested_at": time.time(),
         }
         self._sync_budget()
-        await self.store.save(self.checkpoint)
+        await self._persist()
 
     def approval_decision(self, tool_name: str, category: str) -> bool | None:
         """Recorded reviewer decision for this tool/category, if any.

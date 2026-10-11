@@ -31,9 +31,11 @@ from pydantic import BaseModel
 from baselith.core.guardrails.code_review import review_code
 from baselith.core.observability.agent_spans import agent_span
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 
 from . import flows
 from .compliance import mark_generated
+from .durable import coding_scope, digest, durable_ask, durable_tests
 from .harness import TestReport, build_test_script, new_run_key, parse_report, screen
 from .llm import ask_typed
 from .prompts import TEXT_SYSTEM_PROMPT, explain_prompt
@@ -52,17 +54,22 @@ _NOT_RUNNABLE = (
 
 @dataclass
 class _Call:
-    """What one task's flow sees of the agent: the task language, typed asks, test runs."""
+    """What one task's flow sees of the agent: the task language, typed asks, test runs.
+
+    ``scope`` is the task's checkpoint scope when the run has one: every answer and test run
+    is then a recorded step (:mod:`.durable`).
+    """
 
     agent: CodingAgent
     language: str
     max_attempts: int
+    scope: Any = None
 
     async def ask(self, prompt: str, model: type[M]) -> M:
-        return await self.agent._ask(prompt, model)
+        return await durable_ask(self.scope, prompt, model, self.agent._ask)
 
     async def run_tests(self, code: str, tests: str) -> TestReport:
-        return await self.agent._run_tests(code, tests)
+        return await durable_tests(self.scope, code, tests, self.agent._run_tests)
 
 
 class CodingAgent:
@@ -288,8 +295,11 @@ class CodingAgent:
                     final_code="",
                     error=_NOT_RUNNABLE,
                 )
+            scope = coding_scope(task, {"language": lang, "original": digest(original)})
             try:
-                result = await run(_Call(self, lang, self.max_fix_attempts))
+                result = await run(_Call(self, lang, self.max_fix_attempts, scope))
+            except CheckpointConflictError:
+                raise  # the run is owned elsewhere now: not a coding failure
             except Exception as exc:
                 logger.error(
                     "coding_task_error", task=task, error_type=type(exc).__name__
@@ -381,6 +391,8 @@ class CodingAgent:
         ) as span:
             try:
                 result = await workspace_result(self, workspace, problem, lang)
+            except CheckpointConflictError:
+                raise  # the run is owned elsewhere now: not a coding failure
             except Exception as exc:
                 logger.error(
                     "coding_task_error",

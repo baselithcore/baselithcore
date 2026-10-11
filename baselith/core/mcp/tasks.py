@@ -9,6 +9,14 @@ Opt-in on both sides. The client declares the extension in its per-request
 capabilities and the server advertises it in ``server/discover``; a server
 **must not** hand a task to a client that never asked for one, because that
 client would treat the handle as the answer.
+
+Handles are process-local (:class:`TaskStore` is in memory): a restart forgets
+them and ``tasks/get`` answers ``Unknown task`` — a terminal error, so a client
+does not poll forever. Within a live process, a ``working`` task whose driver
+ended without recording an outcome, or that has been working longer than
+``TaskStore(max_working_seconds=...)``, is failed with a reason when it is next
+read (the driver is cancelled in the second case). ``input_required`` tasks
+wait on the client and are never swept.
 """
 
 from __future__ import annotations
@@ -36,6 +44,9 @@ CANCELLED = "cancelled"
 
 TERMINAL_STATUSES = frozenset({COMPLETED, FAILED, CANCELLED})
 
+#: Default bound on how long a task may stay ``working`` (one hour).
+DEFAULT_MAX_WORKING_SECONDS = 3600.0
+
 
 @dataclass
 class Task:
@@ -50,6 +61,9 @@ class Task:
     error: dict[str, Any] | None = None
     input_requests: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
+    # When the task last entered ``working`` (creation, or resumption after
+    # input): what the max-working bound is measured from.
+    working_since: float = field(default_factory=time.monotonic)
     # Answers handed over by tasks/update, awaited by the running coroutine.
     answers: dict[str, Any] = field(default_factory=dict)
     _resumed: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
@@ -84,10 +98,19 @@ class TaskStore:
     Process-local, like the tasks themselves: a handle is durable for the
     lifetime of the server process. A deployment that needs handles to survive
     a restart backs this with shared storage.
+
+    Args:
+        max_working_seconds: Longest a task may stay ``working`` before it is
+            failed (and its driver cancelled) when next read; ``None`` lets it
+            run until its TTL. Orphans — ``working`` with no live driver — are
+            failed regardless.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, max_working_seconds: float | None = DEFAULT_MAX_WORKING_SECONDS
+    ) -> None:
         self._tasks: dict[str, Task] = {}
+        self.max_working_seconds = max_working_seconds
 
     def create(self, ttl_ms: int, poll_interval_ms: int) -> Task:
         self._prune()
@@ -110,17 +133,47 @@ class TaskStore:
         if task is None or task.expired():
             self._tasks.pop(task_id, None)
             raise InvalidParams(f"Unknown task: {task_id}")
+        self._reap(task, time.monotonic())
         return task
 
     def _prune(self) -> None:
         now = time.monotonic()
         for task_id in [t for t, task in self._tasks.items() if task.expired(now)]:
             del self._tasks[task_id]
+        for task in self._tasks.values():
+            self._reap(task, now)
+
+    def _reap(self, task: Task, now: float) -> None:
+        """Fail a ``working`` task nobody will ever finish."""
+        if task.status != WORKING:
+            return
+        driver = task._task
+        if driver is not None and driver.done():
+            _reconcile(task, driver)
+            if task.status != WORKING:
+                return
+        if driver is None or driver.done():
+            _fail(task, "Task orphaned: its worker ended without a result.")
+            logger.warning("mcp_task_orphaned", task_id=task.task_id)
+            return
+        limit = self.max_working_seconds
+        if limit is not None and (now - task.working_since) > limit:
+            # Status first: the driver's cancellation handler must not then
+            # report a client cancel the client never asked for.
+            _fail(task, f"Task exceeded the {limit:.0f}s working limit.")
+            driver.cancel()
+            logger.warning("mcp_task_working_timeout", task_id=task.task_id)
 
     def cancel_all(self) -> None:
         for task in self._tasks.values():
             if task._task is not None:
                 task._task.cancel()
+
+
+def _fail(task: Task, message: str) -> None:
+    task.status = FAILED
+    task.status_message = message
+    task.error = {"code": -32603, "message": message}
 
 
 def _reconcile(task: Task, finished: asyncio.Task[Any]) -> None:
@@ -134,6 +187,12 @@ def _reconcile(task: Task, finished: asyncio.Task[Any]) -> None:
     if exc is not None:
         task.status = FAILED
         task.error = {"code": -32603, "message": str(exc)}
+
+
+def _mark_cancelled(task: Task) -> None:
+    """Record a cancel unless the task already reached a terminal state."""
+    if task.status not in TERMINAL_STATUSES:
+        task.status = CANCELLED
 
 
 class TaskHandlerMixin:
@@ -170,7 +229,10 @@ class TaskHandlerMixin:
         """Run the work, translating its outcome into the task's state."""
         while True:
             try:
-                task.result = await coro_factory(task.answers)
+                result = await coro_factory(task.answers)
+                if task.status in TERMINAL_STATUSES:
+                    return  # failed by the working-time bound meanwhile
+                task.result = result
                 task.status = COMPLETED
             except InputRequired as exc:
                 # Mid-flight input: park the task and wait for tasks/update.
@@ -180,18 +242,20 @@ class TaskHandlerMixin:
                 try:
                     await task._resumed.wait()
                 except asyncio.CancelledError:
-                    task.status = CANCELLED
+                    _mark_cancelled(task)
                     raise
                 task.status = WORKING
+                task.working_since = time.monotonic()
                 task.input_requests = {}
                 continue
             except asyncio.CancelledError:
-                task.status = CANCELLED
+                _mark_cancelled(task)
                 raise
             except Exception as exc:
                 logger.warning("mcp_task_failed", task_id=task.task_id, error=str(exc))
-                task.status = FAILED
-                task.error = {"code": -32603, "message": str(exc)}
+                if task.status not in TERMINAL_STATUSES:
+                    task.status = FAILED
+                    task.error = {"code": -32603, "message": str(exc)}
             return
 
     async def _handle_task_get(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -225,6 +289,7 @@ class TaskHandlerMixin:
 __all__ = [
     "CANCELLED",
     "COMPLETED",
+    "DEFAULT_MAX_WORKING_SECONDS",
     "EXTENSION_ID",
     "FAILED",
     "INPUT_REQUIRED",

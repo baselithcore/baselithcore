@@ -193,12 +193,20 @@ class ChatServiceProtocol(Protocol):
         """
         ...
 
-    async def handle_chat_async(self, request: ChatRequest) -> ChatResponse:
+    async def handle_chat_async(
+        self,
+        request: ChatRequest,
+        *,
+        run_id: str | None = None,
+        extra_context: dict[str, Any] | None = None,
+    ) -> ChatResponse:
         """
         Handle an asynchronous chat request.
 
         Args:
             request: Chat request object
+            run_id: Stable run id; a retry under it resumes the run.
+            extra_context: Extra orchestration-context entries.
 
         Returns:
             Chat response object

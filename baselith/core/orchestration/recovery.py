@@ -36,7 +36,8 @@ from baselith.core.orchestration.checkpoint_errors import (
     CheckpointConflictError,
     CheckpointLeaseHeldError,
 )
-from baselith.core.orchestration.checkpoint_lease import lease_is_live
+from baselith.core.orchestration.checkpoint_lease import lease_is_live, was_yielded
+from baselith.core.orchestration.run_completion import notify_resumed_completion
 
 logger = get_logger(__name__)
 
@@ -181,8 +182,13 @@ async def resume_interrupted_runs(
             # No lease information at all: fall back to the silence guard.
             # The sweep is periodic, so without it a lease-less run that was
             # mid-execution would be re-entered and its agent loop run twice.
+            # A run yielded by a draining replica is known to be idle: no wait.
             unleased = getattr(checkpoint, "lease_expires_at", None) is None
-            if min_idle_seconds is not None and unleased:
+            if (
+                min_idle_seconds is not None
+                and unleased
+                and not was_yielded(checkpoint)
+            ):
                 silence = time.time() - last_progress_at(checkpoint)
                 if silence < min_idle_seconds:
                     report.skipped.append(run_id)
@@ -201,9 +207,12 @@ async def resume_interrupted_runs(
                 # run outright. Both the ambient contextvar (read by storage /
                 # memory / plugin seams) and the explicit context entry are
                 # set, because the guard compares the two.
-                await _process_as_tenant(orchestrator, checkpoint, run_id)
+                result = await _process_as_tenant(orchestrator, checkpoint, run_id)
                 report.resumed.append(run_id)
                 logger.info("recovery_resumed run=%s", run_id)
+                # A queued job's poller and webhook subscribers learn the
+                # outcome as if the job itself had finished the run.
+                await notify_resumed_completion(checkpoint, result)
             except CheckpointLeaseHeldError:
                 # Another worker claimed it between our read and our claim.
                 report.skipped.append(run_id)

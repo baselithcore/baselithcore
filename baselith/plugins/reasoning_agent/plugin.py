@@ -4,9 +4,14 @@ Reasoning Agent Plugin.
 Exposes the Tree of Thoughts engine to the BaselithCore orchestration layer.
 """
 
+import hashlib
 from collections.abc import Callable
 from typing import Any
 
+from baselith.core.orchestration.checkpoint_scope import (
+    bind_checkpoint,
+    resolve_checkpoint,
+)
 from baselith.core.plugins import AgentPlugin
 
 from .reasoning_agent import ReasoningAgent
@@ -145,11 +150,7 @@ class ReasoningFlowHandler:
             MAX_BRANCHING_FACTOR,
         )
 
-        result = await self.agent.solve(
-            problem_description=query,
-            max_steps=max_steps,
-            branching_factor=branching_factor,
-        )
+        result = await self._solve(context, query, max_steps, branching_factor)
 
         # Ensure result specific format if needed by orchestrator,
         # but generic dict is fine. we might want to standardize keys.
@@ -161,3 +162,44 @@ class ReasoningFlowHandler:
                 "tree_visualization": result.get("tree_visualization", ""),
             },
         }
+
+    async def _solve(
+        self,
+        context: dict[str, Any],
+        query: str,
+        max_steps: int,
+        branching_factor: int,
+    ) -> dict[str, Any]:
+        """The search, recorded as one checkpoint step when the run has a checkpoint.
+
+        A resumed run whose search had finished replays its result instead of searching
+        again. The scope is bound as ambient while the search runs, so the engine's own
+        per-call steps (generation, evaluation) nest under it and an interrupted search
+        resumes from its recorded calls.
+        """
+
+        async def search() -> dict[str, Any]:
+            return await self.agent.solve(
+                problem_description=query,
+                max_steps=max_steps,
+                branching_factor=branching_factor,
+            )
+
+        checkpoint = resolve_checkpoint(context.get("checkpoint"))
+        if checkpoint is None:
+            return await search()
+        identity = {
+            "query": hashlib.sha256(query.encode("utf-8")).hexdigest()[:16],
+            "max_steps": max_steps,
+            "branching_factor": branching_factor,
+        }
+        scope = checkpoint.scope("reasoning_agent", identity)
+
+        async def recorded_search() -> dict[str, Any]:
+            with bind_checkpoint(scope):
+                return await search()
+
+        result: dict[str, Any] = await scope.run_step(
+            "solve", identity, recorded_search, category="reasoning"
+        )
+        return result

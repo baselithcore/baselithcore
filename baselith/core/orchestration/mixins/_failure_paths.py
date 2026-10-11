@@ -10,7 +10,12 @@ Three ways out of the handler, three different obligations:
   ``Exception``, so the generic handler below never saw it and the checkpoint
   stayed ``running`` until the stale sweep noticed, half an hour later. Record
   it, then **re-raise**: swallowing a cancellation breaks structured
-  concurrency (the awaiting task never learns it was cancelled).
+  concurrency (the awaiting task never learns it was cancelled). A
+  cancellation while the process is **draining** (SIGTERM, a rolling deploy)
+  is not the run's end: the run is saved ``running`` with a
+  :data:`~baselith.core.orchestration.checkpoint_lease.YIELDED_KEY` marker
+  and its lease released, so another replica's recovery sweep resumes it at
+  once. Any other cancellation fails the run with ``cancelled``.
 * **Checkpoint conflict** — another executor wrote the run (it claimed the
   lease after this attempt lost it, or the stale sweep failed it). This copy
   is stale: nothing is written — a ``fail()`` would clobber the newer state —
@@ -29,6 +34,7 @@ from typing import Any
 
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_lease import YIELDED_KEY
 from baselith.core.orchestration.limits import BudgetExceededError
 from baselith.core.orchestration.run_events import EventType, publish_run_event
 
@@ -98,13 +104,44 @@ async def handle_cancellation(
     replace the original cancellation with an unrelated error, and the caller
     re-raises either way.
     """
-    logger.info("run_cancelled", extra={"intent": intent, "run_id": events_run_id})
+    from baselith.core.lifecycle.drain import is_draining
+
+    draining = is_draining()
+    logger.info(
+        "run_cancelled",
+        extra={"intent": intent, "run_id": events_run_id, "draining": draining},
+    )
     if checkpoint_mgr is not None:
         try:
-            await asyncio.shield(checkpoint_mgr.fail("cancelled"))
+            if draining:
+                await asyncio.shield(_yield_for_shutdown(checkpoint_mgr))
+            else:
+                await asyncio.shield(checkpoint_mgr.fail("cancelled"))
         except BaseException as exc:
             logger.warning("Failed to persist checkpoint cancellation: %s", exc)
-    publish_run_event(events_run_id, EventType.ERROR, {"error": "cancelled"})
+    error = "interrupted_by_shutdown" if draining else "cancelled"
+    publish_run_event(events_run_id, EventType.ERROR, {"error": error})
+
+
+async def _yield_for_shutdown(checkpoint_mgr: Any) -> None:
+    """Leave the run resumable: ``running``, marked yielded, budget saved.
+
+    The lease is released by ``process()``'s ``finally`` right after, so the
+    next recovery sweep on any replica re-enters the run immediately.
+    """
+    from baselith.core.orchestration.checkpoint import STATUS_RUNNING
+
+    checkpoint = checkpoint_mgr.checkpoint
+    checkpoint.status = STATUS_RUNNING
+    checkpoint.plugin_data[YIELDED_KEY] = {"reason": "shutdown", "at": time.time()}
+    sync = getattr(checkpoint_mgr, "_sync_budget", None)
+    if sync is not None:
+        sync()
+    persist = getattr(checkpoint_mgr, "_persist", None)
+    if persist is not None:
+        await persist()
+    else:
+        await checkpoint_mgr.store.save(checkpoint)
 
 
 def handle_checkpoint_conflict(

@@ -30,6 +30,7 @@ from baselith.core.services.chat.utils.conversation import (
 )
 from baselith.core.services.chat.utils.guard import validate_input
 from baselith.core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
+from baselith.core.services.chat.utils.metrics import record_chat_metric
 from baselith.core.services.chat.utils.streaming import on_stream_end
 from baselith.core.utils.concurrency import drain_async_iterator
 
@@ -347,7 +348,13 @@ class ChatService:
 
         return drain_async_iterator(lambda: self.handle_chat_stream_async(req))
 
-    async def handle_chat_async(self, req: ChatRequest) -> ChatResponse:
+    async def handle_chat_async(
+        self,
+        req: ChatRequest,
+        *,
+        run_id: str | None = None,
+        extra_context: dict[str, Any] | None = None,
+    ) -> ChatResponse:
         """
         Process a conversational request asynchronously.
 
@@ -355,6 +362,14 @@ class ChatService:
 
         Args:
             req: Chat request payload.
+            run_id: Stable id of the run this request is an attempt at (see
+                :func:`~baselith.core.orchestration.run_ids.derive_run_id`).
+                A retry under the same id resumes the run's checkpoint — or
+                returns its answer when it already completed — instead of
+                starting over. ``None`` runs a fresh, unnamed run.
+            extra_context: Additional orchestration-context entries (e.g. a
+                queued job's completion notifier), captured with the run's
+                inputs.
 
         Returns:
             ChatResponse: Structured response model.
@@ -372,10 +387,20 @@ class ChatService:
                 "rag_only": req.rag_only,
                 "kb_label": req.kb_label,
                 HISTORY_TEXT_KEY: history_text,
+                **(extra_context or {}),
             }
 
             # Async execution of the orchestration pipeline.
-            result = await self.agent.process(req.query, context)
+            if run_id is not None:
+                from baselith.core.orchestration.run_ids import (
+                    process_with_stable_run_id,
+                )
+
+                result = await process_with_stable_run_id(
+                    self.agent, req.query, context, run_id
+                )
+            else:
+                result = await self.agent.process(req.query, context)
             if is_recordable(result):
                 await record_turn(
                     self.history_manager,
@@ -463,29 +488,8 @@ class ChatService:
     def _record_metric(
         self, name: str, route: str = "", value: float | None = None
     ) -> None:
-        """
-        Update Prometheus metrics for chat operations.
-
-        Args:
-            name: Metric identifier (e.g., 'chat_requests_total').
-            route: Call context ('sync', 'async', 'stream').
-            value: Optional numeric value (e.g., latency duration).
-        """
-        try:
-            from baselith.core.observability.metrics import (
-                CHAT_REQUEST_ERRORS_TOTAL,
-                CHAT_REQUEST_LATENCY_SECONDS,
-                CHAT_REQUESTS_TOTAL,
-            )
-
-            if name == "chat_requests_total":
-                CHAT_REQUESTS_TOTAL.labels(route=route).inc()
-            elif name == "chat_request_errors_total":
-                CHAT_REQUEST_ERRORS_TOTAL.labels(route=route, reason="exception").inc()
-            elif name == "chat_request_latency" and value is not None:
-                CHAT_REQUEST_LATENCY_SECONDS.labels(route=route).observe(value)
-        except ImportError:
-            pass  # Fallback: ignore metrics if the module is unavailable or disabled.
+        """Update the chat Prometheus metrics (see ``utils.metrics``)."""
+        record_chat_metric(name, route, value)
 
 
 __all__ = ["ChatService", "ChatServiceConfig"]

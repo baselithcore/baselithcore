@@ -219,30 +219,81 @@ class GroupChat:
         self._terminate = terminate
         self._budget = budget
 
-    async def run(self, topic: str) -> GroupChatResult:
-        """Converse about ``topic`` until a bound or the predicate ends it."""
+    async def run(
+        self, topic: str, *, checkpoint: Any | None = None
+    ) -> GroupChatResult:
+        """Converse about ``topic`` until a bound or the predicate ends it.
+
+        Args:
+            topic: What the participants discuss.
+            checkpoint: Optional checkpoint manager (or scope), defaulting to
+                the run's ambient one. With one, every round — the speaker
+                chosen and what they said — is a recorded step under a child
+                scope keyed by the round number, so a resumed chat replays the
+                transcript so far without calling the selector or any
+                participant, and continues from the first unrecorded round.
+        """
         from baselith.core.orchestration.budget_context import (
             get_active_budget,
             standalone_budget,
         )
+        from baselith.core.orchestration.checkpoint_scope import resolve_checkpoint
 
+        parent = resolve_checkpoint(checkpoint)
+        scope = None
+        if parent is not None:
+            identity = {
+                "topic": topic,
+                "participants": [p.name for p in self._participants],
+                "max_rounds": self._max_rounds,
+            }
+            scope = parent.scope("group_chat", identity)
         if self._budget is not DEFAULT:
-            return await self._converse(topic, ticked=self._budget, owned=None)
+            return await self._converse(
+                topic, ticked=self._budget, owned=None, scope=scope
+            )
         ambient = get_active_budget()
         with standalone_budget(shared_loop_limits()) as bound:
             # Only a budget this chat created is ours to stop on; an ambient
             # one belongs to the request, which handles its own breach.
             owned = bound if ambient is None else None
-            return await self._converse(topic, ticked=None, owned=owned)
+            return await self._converse(topic, ticked=None, owned=owned, scope=scope)
+
+    async def _turn(
+        self, topic: str, transcript: list[ChatMessage], scope: Any, round_no: int
+    ) -> ChatMessage:
+        """Pick a speaker and let them talk — a recorded step under ``scope``."""
+        from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
+
+        async def _speak() -> dict[str, str]:
+            speaker = await self._selector.select(self._participants, topic, transcript)
+            # The participant's own durable work lands under this round.
+            calls = scope.scope("turn_calls", {"round": round_no}) if scope else None
+            with bind_checkpoint(calls):
+                content = await speaker.respond(topic, list(transcript))
+            return {"speaker": speaker.name, "content": content}
+
+        if scope is None:
+            spoken = await _speak()
+        else:
+            spoken = await scope.run_step(
+                "turn", {"round": round_no}, _speak, category="group_chat"
+            )
+        return ChatMessage(speaker=spoken["speaker"], content=spoken["content"])
 
     async def _converse(
-        self, topic: str, *, ticked: Any | None, owned: Any | None
+        self,
+        topic: str,
+        *,
+        ticked: Any | None,
+        owned: Any | None,
+        scope: Any = None,
     ) -> GroupChatResult:
         """The round loop: ``ticked`` is ticked per round, ``owned`` checked."""
         from baselith.core.orchestration.limits import BudgetExceededError
 
         result = GroupChatResult()
-        for _ in range(self._max_rounds):
+        for round_no in range(self._max_rounds):
             try:
                 if ticked is not None:
                     ticked.tick()
@@ -252,16 +303,13 @@ class GroupChat:
                 result.terminated_by = "budget"
                 return result
             try:
-                speaker = await self._selector.select(
-                    self._participants, topic, result.transcript
-                )
-                content = await speaker.respond(topic, list(result.transcript))
+                message = await self._turn(topic, result.transcript, scope, round_no)
             except BudgetExceededError:
                 if owned is None:
                     raise  # not this chat's budget: its owner handles it
                 result.terminated_by = "budget"
                 return result
-            result.transcript.append(ChatMessage(speaker=speaker.name, content=content))
+            result.transcript.append(message)
             result.rounds += 1
             if self._terminate is not None and self._terminate(result.transcript):
                 result.terminated_by = "predicate"

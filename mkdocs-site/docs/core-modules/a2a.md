@@ -20,6 +20,9 @@ baselith/core/a2a/
 ├── protocol.py      # JSON-RPC types, A2ARequest/A2AResponse, A2AMethod, ErrorCode
 ├── client.py        # A2AClient, A2AClientConfig, A2AClientPool
 ├── server.py        # A2AServer, EchoA2AServer, TaskStore, InMemoryTaskStore
+├── task_orphans.py  # Orphaned-task detection: lazy check on poll + sweep_orphaned_tasks
+├── task_store_postgres.py  # PostgresTaskStore (durable, tenant-scoped JSONB rows)
+├── task_streams.py  # tasks/resubscribe + push-notification answers
 ├── router.py        # create_wellknown_router, create_a2a_router, create_standalone_app
 ├── security.py      # HMAC request signing (BASELITH_A2A_SHARED_SECRET)
 ├── guards.py        # Per-IP rate limit + request-body cap on the JSON-RPC endpoint
@@ -229,7 +232,9 @@ final task in one response. The card also carries a `protocolVersion` field
 endpoint it replays the task snapshot followed by the terminal
 `status-update` (`final: true`) — the tail a reconnecting client needs; over
 sync `dispatch()` it returns the current snapshot. Unknown ids get the spec's
-`TaskNotFoundError` (-32003).
+`TaskNotFoundError` (-32003). An orphaned task is failed before it is replayed
+(see [Orphaned tasks](#orphaned-tasks)), so the `final: true` event always
+carries a terminal state.
 
 Push-notification configuration is answered with the spec's
 `PushNotificationNotSupportedError` (-32007) — the conformant reply for an agent
@@ -550,6 +555,50 @@ server = AnalyzerAgent(my_agent_card, task_store=store)
     [migration 007](db.md#who-creates-the-schema) owns the
     schema and the runtime role holds no DDL rights. The call stays safe
     either way: with the gate off the table is expected to exist already.
+
+### Orphaned tasks
+
+A server that returns a `working` task and finishes it in the background
+updates the task later — unless the process dies first. Without a cleanup the
+row stayed `working` forever (in Postgres, across every restart) and a peer
+polling `tasks/get` polled forever. `baselith/core/a2a/task_orphans.py` closes
+that in two ways:
+
+* **On poll (always on).** `tasks/get` and `tasks/resubscribe` fail a
+  `submitted`/`working` task whose last status change (`status.timestamp`) is
+  older than the server's `orphan_timeout_seconds`, save it, and return it.
+  The task moves to `failed` with an agent status message
+  (`Task orphaned: no progress for …s (timeout …s); presumed lost to a crash or
+  restart.`) and `metadata.orphaned = {silence_seconds, timeout_seconds}`.
+* **Sweep (opt-in).** `sweep_orphaned_tasks(store, max_age_seconds=3600.0,
+  limit=100)` fails every such task in the store whether or not anyone polls —
+  call it from your scheduler. It needs the store's optional `fail_orphaned`
+  method, which `InMemoryTaskStore` and `PostgresTaskStore` implement; a
+  store without it is skipped with a warning. The Postgres sweep reads across
+  tenants under `system_tenant_scope()`, measures silence from the row's
+  `updated_at` (its last save), keeps each row's own `tenant_id`, and writes
+  with a conditional `UPDATE` that leaves a row alone if it moved since it was
+  read (a live worker saved progress, or another replica's sweep won).
+
+```python
+from baselith.core.a2a import PostgresTaskStore
+from baselith.core.a2a.task_orphans import sweep_orphaned_tasks
+
+server = AnalyzerAgent(card, task_store=store, orphan_timeout_seconds=1800.0)
+failed_ids = await sweep_orphaned_tasks(store, max_age_seconds=1800.0)
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `A2AServer(orphan_timeout_seconds=...)` | `3600.0` | Silence before a polled task is failed; `None` disables the check. |
+| `sweep_orphaned_tasks(max_age_seconds=...)` | `3600.0` | Silence before the sweep fails a task. |
+| `sweep_orphaned_tasks(limit=...)` | `100` | Tasks failed per call; a backlog drains across calls. |
+
+`input-required` and `auth-required` tasks are never touched — they wait on the
+client or a human, not on a worker that might have died. Pick a timeout well
+above your longest legitimate background job: a worker that is merely slow and
+saves its result after the timeout overwrites the `failed` state, but a client
+that already stopped polling will not see it.
 
 ---
 

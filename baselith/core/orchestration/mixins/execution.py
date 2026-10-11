@@ -11,6 +11,7 @@ from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.autonomy import ApprovalPendingError
 from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 from baselith.core.orchestration.checkpoint_lease import end_checkpoint_attempt
+from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
 from baselith.core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -329,7 +330,9 @@ class ExecutionMixin:
         # and wrapped in an agent span so the trace stream records which agent
         # ran and under which parent.
         try:
-            with dispatch_attribution(self, intent):
+            # The run's checkpoint is also ambient while the handler runs, so a
+            # crew, group chat or ToT search it starts records its units.
+            with dispatch_attribution(self, intent), bind_checkpoint(checkpoint_mgr):
                 result = await handler.handle(query, context)
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__

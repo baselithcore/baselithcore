@@ -6,7 +6,9 @@ description: LLM, VectorStore, Vision, Voice, and other services
 The `baselith/core/services` module provides domain-agnostic services. The chat service
 (`baselith/core/services/chat/`: request handling, streaming and per-conversation history)
 is documented in [Chat & RAG](chat.md), in particular
-[Conversation History](chat.md#conversation-history).
+[Conversation History](chat.md#conversation-history) and its
+[entry points](chat.md#entry-points) — `handle_chat_async` takes a stable
+`run_id` so a retried request resumes its durable run.
 
 ## Overview
 

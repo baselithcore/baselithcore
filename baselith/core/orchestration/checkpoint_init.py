@@ -23,6 +23,7 @@ from baselith.core.orchestration.checkpoint_inputs import (
     restore_run_inputs,
 )
 from baselith.core.orchestration.checkpoint_lease import (
+    YIELDED_KEY,
     configured_lease_seconds,
     new_owner_id,
     supports_leases,
@@ -86,6 +87,7 @@ async def init_checkpoint(
             _restore_budget(budget, existing.budget or {})
             restored = restore_run_inputs(context, existing.inputs)
             existing.status = STATUS_RUNNING
+            existing.plugin_data.pop(YIELDED_KEY, None)
             logger.info(
                 "checkpoint_resume run=%s steps=%d restored_inputs=%s",
                 run_id,

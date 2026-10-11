@@ -151,7 +151,10 @@ async def drive(
     context = gate_context(agent)
 
     if checkpoint is not None and not run_id:
-        run_id = checkpoint.run_id
+        # A child scope (a crew task, a workflow node) has its own ledger id:
+        # its occurrences restart per scope, so sharing the run id would let
+        # two scopes' identical calls collide in the ledger.
+        run_id = getattr(checkpoint, "ledger_run_id", None) or checkpoint.run_id
     occurrences = CallOccurrences()
     repeats = (
         RepeatGuard(agent.max_identical_calls)

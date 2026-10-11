@@ -340,6 +340,18 @@ Lifecycle on the worker:
    `running`. Only the attempt that exhausts the budget — or a job enqueued
    without retries — marks `failed` and emits `agent.failed`. Pollers should
    stop on `completed`, `failed` or `cancelled` only.
+5. **Every attempt is the same durable run.** The run id is derived from the
+   RQ job id (`agent_job_run_id(job_id)`), so a retry resumes the run's
+   checkpoint — completed tool and LLM steps replay, the tool ledger matches
+   the effects the failed attempt caused — instead of starting over, and a
+   retry of a run that already completed returns its recorded answer (see
+   [stable run ids](orchestration.md#stable-run-ids-for-chat-requests-and-queued-jobs)).
+6. **A worker that dies mid-run still reports.** The API's recovery sweep may
+   finish the run first; the run carries a `task_queue.agent_run` completion
+   notifier, so the sweep calls `notify_resumed_run`, which marks the
+   TaskTracker `completed` / `failed` and emits the same terminal webhook.
+   Delivery is at-least-once: a later RQ retry of the job returns the recorded
+   answer and notifies again.
 
 Both routes call the synchronous queue/tracker clients through
 `asyncio.to_thread`, so a slow Redis never blocks the event loop. Query length

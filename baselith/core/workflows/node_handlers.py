@@ -8,12 +8,14 @@ argument and are bound with ``functools.partial`` at registration time.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from baselith.core.observability.logging import get_logger
 
 from .builder import WorkflowDefinition, WorkflowNode
 from .conditions import _safe_condition
+from .durable import NODE_CHECKPOINT_KEY
 
 if TYPE_CHECKING:
     from .executor import ExecutionContext, WorkflowExecutor
@@ -115,8 +117,25 @@ async def handle_agent(
     last = context.get_last_output()
     template = node.config.get("prompt")
     prompt = template.replace("{input}", str(last)) if template else str(last or "")
-    result = await agent.run(prompt)
+    checkpoint = context.__dict__.get(NODE_CHECKPOINT_KEY)
+    if checkpoint is not None and _accepts_checkpoint(agent.run):
+        # Durable run: the node visit's own scope, so the agent's tool calls
+        # (or a crew's tasks) replay when an interrupted node is re-entered.
+        result = await agent.run(prompt, checkpoint=checkpoint)
+    else:
+        result = await agent.run(prompt)
     return getattr(result, "output", result)
+
+
+def _accepts_checkpoint(run: Any) -> bool:
+    """Whether ``run`` takes a ``checkpoint`` keyword (agents, crew adapters)."""
+    try:
+        params = inspect.signature(run).parameters
+    except (TypeError, ValueError):
+        return False
+    return "checkpoint" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
 
 async def handle_tool(

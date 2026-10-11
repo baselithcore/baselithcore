@@ -19,6 +19,7 @@ from .conditions import (  # noqa: F401  (re-export: tests and callers import fr
     _ast_interpret,
     _safe_condition,
 )
+from .durable import run_durable_node
 from .versioning import VersionMismatchError, pin_run_definition
 
 logger = get_logger(__name__)
@@ -329,11 +330,8 @@ class WorkflowExecutor:
                     # the node's final output without re-executing it. One
                     # run_step per node visit: the n-th visit of a node is its
                     # n-th occurrence, however many retries the run needed.
-                    output = await checkpoint.run_step(
-                        f"workflow:{node.id}",
-                        {"node_id": node.id, "node_type": node.type.value},
-                        lambda: self._run_node_attempts(handler, node, context),
-                        category="workflow_node",
+                    output = await run_durable_node(
+                        self, checkpoint, handler, node, context
                     )
                 else:
                     output = await self._run_node_attempts(handler, node, context)

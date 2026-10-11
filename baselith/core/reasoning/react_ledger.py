@@ -137,7 +137,11 @@ class ToolLedgerMixin:
         """
         run_id = getattr(self, "_ledger_run_id", None)
         if run_id is None:
-            run_id = getattr(self._checkpoint, "run_id", None) or new_run_id()
+            run_id = (
+                getattr(self._checkpoint, "ledger_run_id", None)
+                or getattr(self._checkpoint, "run_id", None)
+                or new_run_id()
+            )
             self._ledger_run_id = run_id
         cursor = getattr(self._checkpoint, "_cursor", None)
         if isinstance(cursor, int):

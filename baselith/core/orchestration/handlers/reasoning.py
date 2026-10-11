@@ -160,8 +160,15 @@ class ReasoningHandler(BaseFlowHandler):
         else:
             strategy = tot_config.strategy
 
+        # Durable under the run's checkpoint: each generation and evaluation
+        # call is a recorded step, so a resumed search rebuilds the same tree
+        # without paying for it again (see baselith.core.reasoning.tot.durable).
         result = await self.tot_engine.solve(
-            problem=query, k=k, max_steps=max_steps, strategy=strategy
+            problem=query,
+            k=k,
+            max_steps=max_steps,
+            strategy=strategy,
+            checkpoint=context.get("checkpoint"),
         )
 
         solution = result.get("solution", "No solution found.")

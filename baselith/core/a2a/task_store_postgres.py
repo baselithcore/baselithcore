@@ -11,17 +11,24 @@ Usage::
     store = PostgresTaskStore()
     await store.initialize()          # idempotent DDL
     server = MyAgent(task_store=store)
+
+Tasks a crash leaves ``submitted``/``working`` are failed by
+:meth:`PostgresTaskStore.fail_orphaned` (driven by
+:func:`baselith.core.a2a.task_orphans.sweep_orphaned_tasks`), and lazily when
+polled through the server.
 """
 
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import orjson
 from psycopg.rows import dict_row
 
 from baselith.core.a2a.server import TaskStore
-from baselith.core.a2a.types import Task
+from baselith.core.a2a.task_orphans import DEFAULT_SWEEP_LIMIT, mark_orphaned
+from baselith.core.a2a.types import Task, TaskState
 from baselith.core.context import get_current_tenant_id
 from baselith.core.db.connection import get_async_cursor, system_tenant_scope
 from baselith.core.db.ddl import skip_runtime_ddl
@@ -51,6 +58,23 @@ WHERE a2a_tasks.tenant_id = EXCLUDED.tenant_id
 """
 
 _SELECT = "SELECT data FROM a2a_tasks WHERE task_id = %s AND tenant_id = %s"
+
+# Orphan sweep (cross-tenant, run under ``system_tenant_scope``). The status
+# column stores ``TaskState.value``; only the "a worker should be on this"
+# states qualify — input/auth-required tasks wait on the client, not a worker.
+_SELECT_ORPHANS = """
+SELECT task_id, tenant_id, status, data, updated_at FROM a2a_tasks
+WHERE status IN ('submitted', 'working') AND updated_at < %s
+ORDER BY updated_at
+LIMIT %s
+"""
+
+# Conditional: a task that moved since the sweep read it (a live worker saved
+# progress, or another replica's sweep won) is left alone.
+_FAIL_ORPHAN = """
+UPDATE a2a_tasks SET status = %s, data = %s::jsonb, updated_at = %s
+WHERE task_id = %s AND tenant_id = %s AND status = %s AND updated_at = %s
+"""
 _DELETE = "DELETE FROM a2a_tasks WHERE task_id = %s AND tenant_id = %s"
 
 
@@ -111,3 +135,60 @@ class PostgresTaskStore(TaskStore):
         async with get_async_cursor() as cur:
             await cur.execute(_DELETE, (task_id, _tenant()))
             return bool(cur.rowcount)
+
+    async def fail_orphaned(
+        self,
+        *,
+        max_age_seconds: float,
+        now: float | None = None,
+        limit: int = DEFAULT_SWEEP_LIMIT,
+    ) -> list[str]:
+        """Fail ``submitted``/``working`` tasks silent for ``max_age_seconds``.
+
+        Cross-tenant maintenance (see :mod:`baselith.core.a2a.task_orphans`):
+        rows are read and rewritten under ``system_tenant_scope`` and each
+        keeps its own ``tenant_id``. Silence is measured from the row's
+        ``updated_at`` (its last save). Each write is conditional on the row
+        not having moved since it was read.
+
+        Returns:
+            Ids of the tasks this call failed.
+        """
+        current = time.time() if now is None else now
+        failed: list[str] = []
+        with system_tenant_scope():
+            async with get_async_cursor(row_factory=dict_row) as cur:  # type: ignore[arg-type]
+                await cur.execute(_SELECT_ORPHANS, (current - max_age_seconds, limit))
+                rows = await cur.fetchall()
+            for row in rows:
+                if await self._fail_orphan_row(row, max_age_seconds, current):
+                    failed.append(str(row["task_id"]))
+        return failed
+
+    async def _fail_orphan_row(
+        self, row: dict[str, Any], max_age_seconds: float, now: float
+    ) -> bool:
+        data = row["data"]
+        if isinstance(data, str):
+            data = orjson.loads(data)
+        task = Task.from_dict(data)
+        mark_orphaned(task, now - float(row["updated_at"]), max_age_seconds)
+        async with get_async_cursor() as cur:
+            await cur.execute(
+                _FAIL_ORPHAN,
+                (
+                    TaskState.FAILED.value,
+                    orjson.dumps(task.to_dict()).decode(),
+                    now,
+                    row["task_id"],
+                    row["tenant_id"],
+                    row["status"],
+                    row["updated_at"],
+                ),
+            )
+            moved = not cur.rowcount
+        if moved:
+            logger.debug("a2a_orphan_skip_moved task_id=%s", row["task_id"])
+        else:
+            logger.warning("a2a_task_orphaned task_id=%s", row["task_id"])
+        return not moved

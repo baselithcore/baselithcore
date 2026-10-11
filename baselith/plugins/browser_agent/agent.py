@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 from baselith.core.services.vision.models import (
     ImageContent,
     VisionCapability,
@@ -29,6 +30,7 @@ from baselith.core.services.vision.service import VisionService
 from .actions import build_action as _build_action
 from .actions import clamp_wait_seconds as _clamp_wait_seconds
 from .actions import normalize_selector as _normalize_selector
+from .durable import durable_task, mark_effect
 from .prompts import BROWSER_SYSTEM_PROMPT as _BROWSER_SYSTEM_PROMPT
 from .ssrf import (  # noqa: F401
     SsrfVerdictCache,
@@ -379,7 +381,12 @@ Respond ONLY with valid JSON matching one of the schemas above."""
             )
 
     async def execute_task(self, task: str) -> BrowserAgentResult:
-        """Execute a browser automation task."""
+        """Execute a browser automation task (one recorded step in a checkpointed run:
+        see :mod:`baselith.plugins.browser_agent.durable` for what a resume does)."""
+        return await durable_task(task, self.max_steps, self._run_task)
+
+    async def _run_task(self, task: str) -> BrowserAgentResult:
+        """The browser loop behind :meth:`execute_task`."""
         if not self._page:
             await self.start()
 
@@ -432,6 +439,7 @@ Respond ONLY with valid JSON matching one of the schemas above."""
                         )
                     continue
 
+                await mark_effect(steps, action)
                 success = await self.execute_action(action)
                 if not success:
                     await asyncio.sleep(1)
@@ -445,6 +453,8 @@ Respond ONLY with valid JSON matching one of the schemas above."""
                 error=f"Max steps ({self.max_steps}) reached",
                 screenshots=screenshots[-3:],
             )
+        except CheckpointConflictError:
+            raise  # the run is owned elsewhere now: stop, record nothing
         except Exception as exc:
             logger.exception("browser_task_error", error=str(exc))
             return BrowserAgentResult(

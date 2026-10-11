@@ -174,6 +174,27 @@ profile's metadata (dynamic agents registered via `register_dynamic_agent`
 copy `spec.model` into `metadata["model"]`) or from the matching spec, and
 passes it to `llm_service.generate_response(prompt, model=model_override)`.
 
+### Durable swarm runs
+
+Under the run's checkpoint (the orchestrator wires it), `SwarmHandler` records
+three kinds of steps under a `swarm` child scope
+([composite runners](orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **the decomposition** — the LLM's sub-task list. A resumed run gets the
+  same sub-tasks back without asking the model again (a fresh decomposition
+  could split the work differently and orphan every recorded result); the
+  dynamic agents it named are re-registered in the new request colony from
+  the record.
+- **each sub-task result**, keyed by its index and definition — a recorded
+  sub-task replays with no auction, no LLM call and no budget charge; a
+  sub-task that raised is not recorded and runs again.
+- **the synthesis** call.
+
+A crash during the synthesis therefore resumes into a single LLM call. The
+colony's in-memory state (pheromones, auction history, stats) is rebuilt per
+request and is not part of the record. The `SimulationHandler` records the
+same steps per round under the run's checkpoint.
+
 ### Scenario Simulation Mode
 
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory (when the colony has a memory manager) and used to update the "World State" for Round N+1.

@@ -12,12 +12,21 @@ Use cases:
 """
 
 import asyncio
+import hashlib
 from collections.abc import Callable
 from typing import Any
 
 from baselith.core.config.swarm import SwarmConfig
 from baselith.core.observability.agent_spans import agent_span
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.autonomy import ApprovalPendingError
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_scope import (
+    bind_checkpoint,
+    current_checkpoint,
+    durable_step,
+    resolve_checkpoint,
+)
 from baselith.core.orchestration.enforcement import (
     enforce_iteration,
     enforce_tool_invocation,
@@ -36,6 +45,7 @@ from baselith.core.orchestration.handlers.swarm_agents import (
     VirtualAgentSpec as VirtualAgentSpec,
 )
 from baselith.core.orchestration.handlers.swarm_agents import (
+    build_synthesis_prompt,
     decompose_task,
     gather_memory_context,
     resolve_agent_persona,
@@ -186,7 +196,14 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
                 - sub_results: Results from individual agents
                 - coordination_stats: Colony statistics
         """
-        with request_colony_scope(self.new_request_colony(context)):
+        parent = resolve_checkpoint(context.get("checkpoint"))
+        scope = parent.scope("swarm", {"query": query}) if parent else None
+        # Under a checkpoint the decomposition, every sub-task result and the
+        # synthesis are recorded steps of this scope (resume skips them).
+        with (
+            request_colony_scope(self.new_request_colony(context)),
+            bind_checkpoint(scope),
+        ):
             return await self._handle_in_colony(query, context)
 
     async def _handle_in_colony(
@@ -225,6 +242,8 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
                 },
             }
 
+        except (ApprovalPendingError, CheckpointConflictError):
+            raise  # a durable pause / lost lease: the execution mixin's call
         except Exception as e:
             logger.error(f"Error in SwarmHandler: {e}", exc_info=True)
             return self._error_response(str(e))
@@ -244,11 +263,13 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
         request, so the caller can unregister them when the request completes.
         """
         del context  # reserved for future budget-aware decomposition
+        checkpoint = current_checkpoint()
         return await decompose_task(
             self.llm_service,
             self._colony,
             query,
             [] if dynamic_agent_ids is None else dynamic_agent_ids,
+            **({"checkpoint": checkpoint} if checkpoint is not None else {}),
         )
 
     async def _execute_subtasks(
@@ -277,17 +298,7 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
         results = []
 
         async def execute_single(task_def: dict[str, Any]) -> dict[str, Any]:
-            """
-            Execute a single sub-task using assignment logic.
-
-            Finds an agent with matching capabilities and runs the task.
-
-            Args:
-                task_def: The specific task request.
-
-            Returns:
-                Dict[str, Any]: The individual agent's response.
-            """
+            """Auction one sub-task to a capable agent and run it."""
             # Enforce the per-request loop budget: each sub-task is one
             # iteration + one tool call. Raises BudgetExceededError when a cap
             # is hit, which surfaces as a failed sub-task result below.
@@ -348,12 +359,22 @@ class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
         # here so it binds to the running loop.
         max_concurrency = max(1, self.colony_config.max_concurrent_subtasks)
         semaphore = asyncio.Semaphore(max_concurrency)
+        checkpoint = current_checkpoint()
 
-        async def _bounded(task_def: dict[str, Any]) -> dict[str, Any]:
+        async def _bounded(index: int, task_def: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:
-                return await execute_single(task_def)
+                # A recorded sub-task replays: no auction, no LLM call, no
+                # budget charge. Failures raise out of the step unrecorded.
+                result: dict[str, Any] = await durable_step(
+                    checkpoint,
+                    "swarm_subtask",
+                    {"index": index, "task": task_def},
+                    lambda: execute_single(task_def),
+                    category="swarm",
+                )
+                return result
 
-        tasks_async = [_bounded(t) for t in sub_tasks]
+        tasks_async = [_bounded(i, t) for i, t in enumerate(sub_tasks)]
         results = await asyncio.gather(*tasks_async, return_exceptions=True)
 
         # Handle exceptions
@@ -441,31 +462,18 @@ Provide a detailed response, incorporating relevant memories and relationship da
                     )
             return "\n\n".join(parts) if parts else "No results available."
 
-        # Build synthesis prompt
-        results_text = "\n\n".join(
-            f"### Contribution from {r.get('agent', 'Agent')}:\n{r.get('result', 'N/A')}"
-            for r in sub_results
-            if r.get("success")
-        )
-
-        prompt = f"""Synthesize the following contributions from different specialized agents into a cohesive and complete response.
-
-## Original Question
-{original_query}
-
-## Agent Contributions
-{results_text}
-
-## Instructions
-Create a final response that:
-1. Integrates all relevant contributions
-2. Is well-structured and readable
-3. Highlights key points
-4. Resolves any contradictions
-"""
+        results_text, prompt = build_synthesis_prompt(original_query, sub_results)
         try:
-            synthesis: str = await self.llm_service.generate_response(prompt)
+            synthesis: str = await durable_step(
+                current_checkpoint(),
+                "swarm_synthesize",
+                {"prompt": hashlib.sha256(prompt.encode()).hexdigest()[:16]},
+                lambda: self.llm_service.generate_response(prompt),
+                category="swarm",
+            )
             return synthesis
+        except CheckpointConflictError:
+            raise
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             # Fallback

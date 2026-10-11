@@ -43,6 +43,9 @@ baselith/core/orchestration/
 ├── checkpoint_sqlite.py     # SQLite-backed CheckpointStore (single durable file)
 ├── checkpoint_factory.py    # Default store resolution (enabled by default)
 ├── checkpoint_history.py    # Versioned snapshots: list_runs / get_state_history (time-travel)
+├── checkpoint_scope.py      # Child scopes for composite runners + the ambient checkpoint
+├── run_ids.py               # Stable run ids for retrying entry points (chat, queued jobs)
+├── run_completion.py        # Notify a run's originator when the recovery sweep finishes it
 ├── call_keys.py             # Content-addressed call keys: tool + args + occurrence
 ├── idempotency.py           # Cross-process tool ledger: derive key, claim, replay
 ├── idempotency_postgres.py  # Postgres-backed ToolLedger (tool_invocations)
@@ -872,6 +875,100 @@ and quietly ran Tree-of-Thoughts.
   `resume_tools_unresolved` instead of running a different engine.
   `tool_calls` (plain dataclasses) round-trip.
 
+#### Composite runners: child scopes and what each one records
+
+A tool step is keyed by `(tool, args, occurrence)` within the run. That is the
+right identity for one agent loop and the wrong one for a runner made of
+units: a crew whose task 2 makes the same call task 1 made would, on resume,
+match task 1's record once task 1 replays instead of re-running. Composite
+runners therefore record under a **child scope**
+(`baselith/core/orchestration/checkpoint_scope.py`):
+
+```python
+scope = manager.scope("crew", {"tasks": [...], "inputs": {...}})   # CheckpointScope
+task = scope.scope("crew_task", {"index": 2, "prompt": "<hash>"})
+await task.run_step("search", {"q": "x"}, call)   # key: crew:…:0/crew_task:…:0/search
+```
+
+A scope is a namespaced view of the run's manager: same checkpoint, lease and
+version counter, its own occurrence counter, so a unit's keys depend only on
+what it is and how many identical units preceded it under the same parent —
+never on what its siblings did. `scope.ledger_run_id` (`<run_id>/<path>`) is
+what an agent running inside the scope uses for its idempotency-ledger keys,
+for the same reason. Approvals and resume still address the run
+(`scope.run_id` is the run's id).
+
+**The ambient checkpoint.** While a flow handler runs, the orchestrator binds
+the run's manager as the ambient checkpoint (`current_checkpoint()` /
+`bind_checkpoint()`), and a runner re-binds its own scope while a unit runs.
+A crew, group chat or Tree-of-Thoughts search started anywhere inside a
+handler therefore records itself without the call site passing anything; each
+also takes an explicit `checkpoint=` that wins over the ambient one.
+`durable_step(checkpoint, name, args, fn)` is the helper for code that is
+durable only when a checkpoint exists: it runs `fn` directly otherwise.
+
+**Concurrent units.** Every store write of a manager is serialised by one
+lock, so units that run concurrently (a parallel crew, swarm sub-tasks, ToT
+evaluations) execute in parallel and only their saves queue — two concurrent
+saves of one checkpoint would otherwise race the compare-and-swap on
+`version`.
+
+What each runner records (a step is replayed on resume, never re-executed):
+
+| Runner | Recorded step | Granularity on resume |
+|--------|---------------|-----------------------|
+| `Agent.run(checkpoint=…)` | every approved tool call | LLM turns re-run; recorded tool results replay |
+| `Crew` (sequential / parallel) | each task's agent call (output, text) | finished tasks replay; the interrupted task re-runs, its tool calls replay |
+| `Crew` (hierarchical) | the manager's brief and review, the worker run, the revision — four separate steps | a crash after the review re-runs nothing recorded |
+| `GroupChat` | each round: chosen speaker + what they said | recorded rounds replay without calling the selector or a participant |
+| Workflow node | the node visit (all its retries) | finished nodes replay; an interrupted AGENT node's agent / crew / colony resumes from its own records (see [Workflows](workflows.md#durable-execution-checkpoint-replay)) |
+| Swarm handler | the LLM decomposition, each sub-task result, the synthesis | a resumed swarm gets the same sub-tasks back and runs only the unfinished ones |
+| Tree-of-Thoughts / MCTS | each generation call (with its sandbox runs) and each evaluation | the search rebuilds the same tree from the record (see [Reasoning](reasoning.md)) |
+| Plugin agents | see the [coding / browser agents](agents.md) and [reasoning agent](../plugins/reasoning-agent.md) pages | |
+
+A step records only a **successful** call: a failure raises out of the step
+unrecorded, so a resumed run retries it rather than replaying the error. A
+unit's identity hashes its prompt or state, and a prompt embeds earlier
+replayed outputs verbatim, so a resumed run lands on the same keys; where a
+unit's input changed (a fail-open manager brief that succeeds on the retry),
+its key changes and it simply runs again — correctness before savings.
+
+#### Stable run ids for chat requests and queued jobs
+
+Resume only helps an entry point that asks for the same run twice. The chat
+service used to call `process()` without a `run_id`, and every RQ attempt of
+an agent-run job started a new run, so a retry re-paid every LLM call and the
+idempotency ledger had nothing to match.
+
+- **`POST /chat`** names its run after the request's `Idempotency-Key` header,
+  or else its request id (a client-supplied `X-Request-ID`, or the one the
+  request-id middleware generated), through
+  `derive_run_id("chat", key, tenant_id=…, principal=…)` — scoped to the
+  tenant and the user, so two principals reusing a header value never share
+  a run or each other's answers.
+- **RQ agent-run jobs** use the job id: every attempt of a job is the same run
+  (`agent_job_run_id(job_id)`).
+
+`process_with_stable_run_id(orchestrator, query, context, run_id)`
+(`run_ids.py`) decides what an attempt does: no checkpoint yet → a fresh run
+under the id; `completed` → its recorded answer, nothing executes;
+`running` / `failed` → `resume=True`; `awaiting_approval` → the pause,
+unchanged (decisions go through `/approvals`); a checkpoint recorded for a
+**different query** → left alone, the attempt runs fresh under a new id. A
+run whose lease another live executor holds raises `CheckpointLeaseHeldError`
+— `POST /chat` answers **409**, an RQ attempt fails and is retried later.
+
+**A sweep-resumed job still reports.** When a worker dies mid-run, the API's
+recovery sweep may finish the run before (or instead of) an RQ retry. The job
+records a completion notifier in the run's inputs
+(`completion_notify: {"kind": "task_queue.agent_run", "task_id": …}`), and
+after a sweep-resumed run returns, `notify_resumed_completion`
+(`run_completion.py`) updates the TaskTracker and fires the
+`agent.completed` / `agent.failed` webhook exactly as the job would have.
+Kinds resolve through a registry (`register_completion_notifier`), never an
+import path read from the stored row. Delivery is at-least-once: a later RQ
+retry of the same job returns the recorded answer and notifies again.
+
 #### Concurrency: compare-and-swap writes and per-run leases
 
 **Writes are compare-and-swap on `version`.** `save` and `save_step` succeed
@@ -1345,6 +1442,20 @@ before anything executes; when two sweeps race, the loser gets
 carries no lease at all (written before the upgrade, or by a store without
 lease support) falls back to the old silence guard,
 `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`.
+
+**A graceful shutdown hands runs back.** A rolling deploy sends SIGTERM, the
+server waits out its graceful-shutdown timeout and then cancels whatever is
+still running. That cancellation used to fail every in-flight run with
+`cancelled` — for good. Now, when the cancellation arrives while the process
+is **draining** (`baselith.core.lifecycle.drain.is_draining()`, set by the
+first stop signal), the run is saved `running` with a
+`plugin_data["yielded_for_shutdown"]` marker, its budget snapshot written and
+its lease released. The next sweep on any replica resumes it immediately — the
+marker exempts it from the silence guard — and the resume clears the marker;
+recorded steps replay, so only the step that was in flight runs again. A
+cancellation outside a drain (a client disconnect, an explicit cancel, a
+request timeout) still fails the run with `cancelled`. The run-event stream
+reports `interrupted_by_shutdown` instead of `cancelled` for a yielded run.
 
 **Orphans are failed even with resume off.** With auto resume off (explicitly,
 or on the memory backend), the startup

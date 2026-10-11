@@ -16,6 +16,19 @@ while the job still has ``retries_left`` is recorded as the non-terminal
 budget (or a job enqueued without retries) marks ``failed`` and emits
 ``agent.failed``. Otherwise a poller would see ``failed`` and stop while a
 later retry completes the run.
+
+Every attempt of a job is the same durable run: the run id is derived from the
+RQ job id (:func:`agent_job_run_id`), so a retry resumes the run's checkpoint
+— completed tool and LLM steps replay — instead of starting over, and the
+idempotency ledger matches the effects the failed attempt already caused. A
+retry of a run that already completed returns its recorded answer.
+
+If the worker dies mid-run, the API's recovery sweep may finish the run
+before (or instead of) an RQ retry. The run carries a completion notifier
+(``completion_notify`` in its inputs), and the sweep calls
+:func:`notify_resumed_run`: the TaskTracker and the terminal webhook are
+updated exactly as a normal completion would. Delivery is at-least-once — a
+later RQ retry of the same job returns the recorded answer and notifies again.
 """
 
 from __future__ import annotations
@@ -26,6 +39,7 @@ from typing import Any
 from rq import get_current_job
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.run_completion import COMPLETION_NOTIFY_KEY
 
 logger = get_logger(__name__)
 
@@ -45,10 +59,57 @@ def _get_webhooks() -> Any:
     return get_webhook_service()
 
 
-async def _handle_chat(req: Any) -> Any:
+async def _handle_chat(
+    req: Any, run_id: str | None = None, extra_context: dict[str, Any] | None = None
+) -> Any:
     from baselith.core.chat import chat_service
 
-    return await chat_service.handle_chat_async(req)
+    return await chat_service.handle_chat_async(
+        req, run_id=run_id, extra_context=extra_context
+    )
+
+
+def agent_job_run_id(job_id: str) -> str:
+    """The durable run id shared by every attempt of the RQ job ``job_id``."""
+    from baselith.core.orchestration.run_ids import derive_run_id
+
+    return derive_run_id("agent-job", job_id)
+
+
+async def notify_resumed_run(spec: dict[str, Any], result: dict[str, Any]) -> None:
+    """Report a run the recovery sweep finished on behalf of a dead job.
+
+    Registered as the ``task_queue.agent_run`` completion notifier (see
+    :mod:`baselith.core.orchestration.run_completion`).
+    """
+    task_id = str(spec.get("task_id", ""))
+    if not task_id or result.get("awaiting_approval"):
+        return  # not terminal: the approval resume finishes it later
+    tracker = _get_tracker()
+    if result.get("error"):
+        error = str(result.get("response", "agent run failed"))
+        await asyncio.to_thread(tracker.mark_failed, task_id, error)
+        await _emit(AGENT_FAILED_EVENT, {"task_id": task_id, "error": error})
+        return
+    payload = {
+        "answer": result.get("response", ""),
+        "metadata": dict(result.get("metadata") or {}),
+    }
+    await asyncio.to_thread(
+        tracker.mark_completed,
+        task_id,
+        "Agent run completed (resumed by recovery)",
+        result=payload,
+    )
+    await _emit(AGENT_COMPLETED_EVENT, {"task_id": task_id, **payload})
+
+
+async def _emit(event: str, data: dict[str, Any]) -> None:
+    """Best-effort webhook: a webhook outage never fails a finished run."""
+    try:
+        await _get_webhooks().emit(event, data)
+    except Exception as exc:
+        logger.warning("agent_run_webhook_failed event=%s error=%s", event, exc)
 
 
 def _retries_left(job: Any) -> int:
@@ -91,17 +152,22 @@ def run_agent_task(
         from baselith.core.models.chat import ChatRequest
 
         req = ChatRequest(query=query, conversation_id=conversation_id)
-        response = await _handle_chat(req)
+        response = await _handle_chat(
+            req,
+            run_id=agent_job_run_id(job_id),
+            extra_context={
+                COMPLETION_NOTIFY_KEY: {
+                    "kind": "task_queue.agent_run",
+                    "task_id": job_id,
+                }
+            },
+        )
         return {
             "answer": response.answer,
             "metadata": dict(response.metadata or {}),
         }
 
-    async def _notify(event: str, data: dict[str, Any]) -> None:
-        try:
-            await _get_webhooks().emit(event, data)
-        except Exception as exc:
-            logger.warning("agent_run_webhook_failed event=%s error=%s", event, exc)
+    _notify = _emit
 
     async def _run_and_notify() -> dict[str, Any]:
         try:
@@ -127,4 +193,10 @@ def run_agent_task(
     return result
 
 
-__all__ = ["AGENT_COMPLETED_EVENT", "AGENT_FAILED_EVENT", "run_agent_task"]
+__all__ = [
+    "AGENT_COMPLETED_EVENT",
+    "AGENT_FAILED_EVENT",
+    "agent_job_run_id",
+    "notify_resumed_run",
+    "run_agent_task",
+]

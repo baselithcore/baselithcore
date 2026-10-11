@@ -22,6 +22,12 @@ from .protocol import (
     JSONRPCRequest,
     JSONRPCResponse,
 )
+from .task_orphans import (
+    DEFAULT_ORPHAN_TIMEOUT_SECONDS,
+    DEFAULT_SWEEP_LIMIT,
+    fail_orphaned_tasks,
+    reap_if_orphaned,
+)
 from .types import (
     Artifact,
     Message,
@@ -32,9 +38,7 @@ from .types import (
 logger = get_logger(__name__)
 
 
-# =============================================================================
-# Task Store Protocol
-# =============================================================================
+# --- Task Store Protocol ---
 
 
 class TaskStore(ABC):
@@ -78,10 +82,19 @@ class InMemoryTaskStore(TaskStore):
             return True
         return False
 
+    async def fail_orphaned(
+        self,
+        *,
+        max_age_seconds: float,
+        now: float | None = None,
+        limit: int = DEFAULT_SWEEP_LIMIT,
+    ) -> list[str]:
+        """Fail orphaned tasks (see :mod:`baselith.core.a2a.task_orphans`)."""
+        tasks = list(self._tasks.values())
+        return await fail_orphaned_tasks(self, tasks, max_age_seconds, now, limit)
 
-# =============================================================================
-# A2A Server
-# =============================================================================
+
+# --- A2A Server ---
 
 
 class A2AServer(ABC):
@@ -115,6 +128,7 @@ class A2AServer(ABC):
         self,
         agent_card: AgentCard,
         task_store: TaskStore | None = None,
+        orphan_timeout_seconds: float | None = DEFAULT_ORPHAN_TIMEOUT_SECONDS,
     ) -> None:
         """
         Initialize A2A server.
@@ -122,13 +136,16 @@ class A2AServer(ABC):
         Args:
             agent_card: Agent metadata card
             task_store: Optional task store (defaults to in-memory)
+            orphan_timeout_seconds: A ``submitted``/``working`` task silent for
+                longer is failed when polled (``tasks/get``,
+                ``tasks/resubscribe``) — see :mod:`baselith.core.a2a.task_orphans`.
+                ``None`` disables the check.
         """
         self.agent_card = agent_card
         self.task_store = task_store or InMemoryTaskStore()
+        self.orphan_timeout_seconds = orphan_timeout_seconds
 
-    # -------------------------------------------------------------------------
-    # JSON-RPC Dispatch
-    # -------------------------------------------------------------------------
+    # --- JSON-RPC Dispatch ---
 
     async def dispatch(self, request_data: dict[str, Any]) -> dict[str, Any]:
         """
@@ -295,9 +312,7 @@ class A2AServer(ABC):
                 JSONRPCError.method_not_found(method),
             )
 
-    # -------------------------------------------------------------------------
-    # Method Handlers
-    # -------------------------------------------------------------------------
+    # --- Method Handlers ---
 
     async def _handle_message_send(
         self,
@@ -356,7 +371,9 @@ class A2AServer(ABC):
                 request.id,
                 JSONRPCError.task_not_found(task_id),
             )
-
+        task = await reap_if_orphaned(
+            self.task_store, task, self.orphan_timeout_seconds
+        )
         return JSONRPCResponse.success(request.id, task.to_dict())
 
     async def _handle_tasks_cancel(self, request: JSONRPCRequest) -> JSONRPCResponse:
@@ -394,9 +411,7 @@ class A2AServer(ABC):
 
         return JSONRPCResponse.success(request.id, task.to_dict())
 
-    # -------------------------------------------------------------------------
-    # Abstract Methods (Implement in Subclass)
-    # -------------------------------------------------------------------------
+    # --- Abstract Methods (Implement in Subclass) ---
 
     @abstractmethod
     async def handle_message(
@@ -421,9 +436,7 @@ class A2AServer(ABC):
         """
         ...
 
-    # -------------------------------------------------------------------------
-    # Utility Methods
-    # -------------------------------------------------------------------------
+    # --- Utility Methods ---
 
     def create_task(
         self,
@@ -443,9 +456,7 @@ class A2AServer(ABC):
         return Artifact.text_artifact(text, name, description)
 
 
-# =============================================================================
-# Simple Echo Server (Example/Testing)
-# =============================================================================
+# --- Simple Echo Server (Example/Testing) ---
 
 
 class EchoA2AServer(A2AServer):

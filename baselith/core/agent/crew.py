@@ -290,12 +290,20 @@ class Crew:
         return self.cost_fn(task, output) if self.cost_fn is not None else 0.0
 
     async def _timed_agent_run(
-        self, task: Task, prompt: str
+        self, task: Task, prompt: str, scope: Any = None, index: int = 0
     ) -> tuple[AgentResult[Any], int]:
-        """Run the task's agent and return (result, elapsed milliseconds)."""
+        """Run the task's agent and return (result, elapsed milliseconds).
+
+        Under a checkpoint ``scope`` the call is a recorded step (see
+        :mod:`baselith.core.agent._crew_durable`); a replayed one costs ~0 ms.
+        """
+        from baselith.core.agent._crew_durable import durable_agent_run
+
         assert task.agent is not None  # guaranteed by __init__
         start = time.perf_counter()
-        result = await task.agent.run(prompt)
+        result = await durable_agent_run(
+            task.agent, prompt, scope, role="task", index=index
+        )
         return result, int((time.perf_counter() - start) * 1000)
 
     async def _run_task(
@@ -304,12 +312,13 @@ class Crew:
         task: Task,
         inputs: dict[str, Any],
         context: list[tuple[str, str]],
+        scope: Any = None,
     ) -> TaskResult:
         assert task.agent is not None  # guaranteed by __init__
         name = task.name or f"task-{index}"
         prompt = self._task_prompt(task, inputs, context)
         logger.debug("crew_task_start name=%s", name)
-        result, latency_ms = await self._timed_agent_run(task, prompt)
+        result, latency_ms = await self._timed_agent_run(task, prompt, scope, index)
         return TaskResult(
             name=name,
             output=result.output,
@@ -329,22 +338,44 @@ class Crew:
             return shared_loop_limits()
         return self.loop_limits
 
-    async def run(self, inputs: dict[str, Any] | None = None) -> CrewResult:
+    async def run(
+        self,
+        inputs: dict[str, Any] | None = None,
+        *,
+        checkpoint: Any | None = None,
+    ) -> CrewResult:
         """Execute the task list and return per-task results in order.
 
         The whole run — every task, and in ``hierarchical`` mode every manager
         turn — shares one ambient ``LoopBudget`` (see ``loop_limits``); a
         breach of its dollar, token or wall-clock cap aborts the crew with
         :class:`~baselith.core.orchestration.limits.BudgetExceededError`.
-        """
-        with standalone_budget(self._crew_limits()):
-            return await self._run(inputs or {})
 
-    async def _run(self, inputs: dict[str, Any]) -> CrewResult:
+        Args:
+            inputs: Template inputs for the task descriptions.
+            checkpoint: Optional
+                :class:`~baselith.core.orchestration.checkpoint.CheckpointManager`
+                (or a scope of one), mirroring ``Agent.run(checkpoint=...)``.
+                Defaults to the run's ambient checkpoint, which the
+                orchestrator binds while a flow handler runs. With one, every
+                agent call of the crew is a recorded step under a child scope:
+                a resumed crew replays completed tasks' outputs instead of
+                re-running them, and the interrupted task's tool calls replay
+                too (see :mod:`baselith.core.agent._crew_durable`). Without
+                one nothing changes.
+        """
+        from baselith.core.agent._crew_durable import crew_scope
+
+        resolved = inputs or {}
+        scope = crew_scope(self, resolved, checkpoint)
+        with standalone_budget(self._crew_limits()):
+            return await self._run(resolved, scope)
+
+    async def _run(self, inputs: dict[str, Any], scope: Any = None) -> CrewResult:
         if self.process == "hierarchical":
             from baselith.core.agent.crew_hierarchical import run_hierarchical
 
-            return await run_hierarchical(self, inputs)
+            return await run_hierarchical(self, inputs, scope)
         if self.process == "parallel":
             # Bounded, not a bare gather: every task is a full LLM call, so a
             # caller-sized task list would otherwise open that many
@@ -356,7 +387,7 @@ class Crew:
             )
             results = await bounded_gather(
                 [
-                    self._run_task(i, task, inputs, [])
+                    self._run_task(i, task, inputs, [], scope)
                     for i, task in enumerate(self.tasks)
                 ],
                 limit=limit,
@@ -366,7 +397,7 @@ class Crew:
         context: list[tuple[str, str]] = []
         task_results: list[TaskResult] = []
         for index, task in enumerate(self.tasks):
-            task_result = await self._run_task(index, task, inputs, context)
+            task_result = await self._run_task(index, task, inputs, context, scope)
             task_results.append(task_result)
             context.append((task_result.name, task_result.text))
         return CrewResult(task_results=task_results)

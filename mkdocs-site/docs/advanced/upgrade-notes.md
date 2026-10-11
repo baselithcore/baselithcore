@@ -564,6 +564,60 @@ attachment references; never secrets) are restored on every resume — install
 the boot log warns `checkpoint_backend_not_durable` when
 `ORCHESTRATOR_CHECKPOINT_BACKEND=auto` falls back to the in-memory store.
 
+### Retries and redeploys resume runs instead of restarting them
+
+Durability now reaches the entry points and runners that had none
+([Orchestration › Composite runners](../core-modules/orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **A shutdown no longer fails in-flight runs.** A run cancelled while the
+  process is draining (SIGTERM, a rolling deploy) is saved `running` with a
+  `yielded_for_shutdown` marker and its lease released; the next recovery
+  sweep on any replica resumes it at once. Only a cancellation outside a drain
+  (client disconnect, explicit cancel, timeout) still fails it with
+  `cancelled`. Its run-event stream now ends with `interrupted_by_shutdown`.
+- **`POST /chat` names its run.** The run id is derived from the request's
+  `Idempotency-Key` (else its `X-Request-ID`, else a generated one), scoped to
+  tenant and user. A client retrying with the same key resumes the run, or
+  gets the recorded answer of one that already completed, instead of starting
+  over; a retry while the first attempt still executes answers **409**. A key
+  reused for a different query starts a fresh run.
+- **An RQ agent-run retry resumes its run.** Every attempt of a job runs under
+  `agent_job_run_id(job_id)`, so completed steps replay and the tool ledger
+  matches. When the recovery sweep finishes a run whose worker died, the
+  TaskTracker and the `agent.completed` / `agent.failed` webhook are updated
+  as if the job had finished it — at least once: a later retry of the same job
+  reports again. `ChatService.handle_chat_async` takes keyword-only `run_id`
+  and `extra_context`; a test double that replaces it must accept them.
+- **Crews, group chats, swarms and Tree-of-Thoughts searches record their
+  units** under the run's checkpoint — explicit (`Crew.run(checkpoint=...)`,
+  `GroupChat.run(..., checkpoint=...)`, `solve(checkpoint=...)`) or the
+  ambient one the orchestrator binds while a handler runs. A resumed run skips
+  finished tasks, rounds, sub-tasks and LLM calls. Results of those units are
+  now persisted, so they must be JSON-serialisable (structured `output_type`
+  models are dumped and re-validated). Under a checkpoint, a crew task's agent
+  keys its idempotency-ledger entries by `<run_id>/<scope path>`, not the bare
+  run id.
+- **Workflow AGENT nodes receive `checkpoint=`** when their agent's `run`
+  accepts it, so an interrupted crew or agent node resumes inside the node
+  rather than re-running it whole.
+- **Plugin agents.** Inside a checkpointed run, the coding agent records each
+  model answer and sandbox test run, so a resumed run continues from the first
+  unfinished step. A browser task is recorded as one step: a finished task
+  replays its result without screenshots; an interrupted task that already
+  clicked or typed returns a failed "interrupted" result instead of re-running,
+  while a read-only one re-runs from scratch. The reasoning-agent flow handler
+  records the whole Tree-of-Thoughts search.
+- **A2A and MCP tasks no longer poll forever.** A2A tasks left
+  `submitted`/`working` by a crash are failed when `tasks/get` or
+  `tasks/resubscribe` finds them silent for longer than
+  `A2AServer(orphan_timeout_seconds=3600.0)` (`None` restores the old
+  behaviour), and `baselith.core.a2a.task_orphans.sweep_orphaned_tasks` does
+  the same across a whole in-memory or Postgres store. MCP tasks end `failed`
+  when their driver ends without a result or after
+  `TaskStore(max_working_seconds=3600.0)` of work. Raise either timeout above
+  your longest legitimate background job. MCP task handles stay process-local:
+  after a restart the client gets "Unknown task".
+
 ### Production refuses to start on a stale schema (`DB_SCHEMA_CHECK`)
 
 With `APP_ENV=production` and `DB_SCHEMA_CHECK` unset, startup now **aborts**
