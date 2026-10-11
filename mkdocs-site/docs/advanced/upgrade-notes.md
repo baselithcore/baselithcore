@@ -205,6 +205,53 @@ marks `failed` and emits `agent.failed`. A poller must stop on `completed`,
 `failed` or `cancelled` only. See
 [Task Queue › Async Agent Runs](../core-modules/task-queue.md#async-agent-runs-agentasync).
 
+### MCP stdio servers launch only from what the operator allows
+
+The MCP client now treats every server it launches as untrusted. A stdio
+server that started under 0.x will most likely **not start** after the upgrade
+until you opt in:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `MCP_STDIO_ALLOWED_DIRS` | `""` | Absolute directories a `python`/`node`/`deno`/`bun`/`uv` server script must live in. Empty: no script runs. |
+| `MCP_STDIO_TRUSTED_BIN_DIRS` | system dirs + active venv | Where a command name is resolved. `PATH` is never consulted. |
+| `MCP_STDIO_ALLOWED_MODULES` | `""` | Modules `python -m` may run. Empty: `-m` is refused. |
+| `MCP_ALLOW_PACKAGE_RUNNERS` | `false` | `npx`, `uvx`, `bunx` and friends, even when listed in `MCP_ALLOWED_COMMANDS`. |
+| `MCP_STDIO_ENV_PASSTHROUGH` | `""` | Extra parent variables a server may inherit (a trailing `*` matches a prefix). |
+| `MCP_STDIO_ALLOWED_ENV_KEYS` | `""` | Loader variables (`PATH`, `LD_*`, `PYTHON*`, `NODE_*`, proxies) a spec's `env` may set. |
+
+**What can break:**
+
+- A server run through an interpreter (`python server.py`, `node index.js`)
+  is refused until its directory is in `MCP_STDIO_ALLOWED_DIRS`; inline code
+  (`python -c`, `node -e`) and remote scripts are refused for good.
+- Shells and exec-wrappers (`sh`, `bash`, `env`, `xargs`, ...) are refused
+  whatever `MCP_ALLOWED_COMMANDS` says, and allowlist names now match exactly:
+  list `python3.12` to allow `python3.12`.
+- The server no longer inherits the parent environment. Only a short built-in
+  list (`PATH`, `HOME`, locale, temp and time-zone variables) passes; a server
+  that read an API key from the inherited environment must get it through its
+  spec's `env` or `MCP_STDIO_ENV_PASSTHROUGH`.
+- Server-initiated requests (`sampling/createMessage`, `elicitation/create`,
+  `roots/list`) are answered with a JSON-RPC error unless the `MCPClient` was
+  given an `input_provider`.
+
+See [MCP](../core-modules/mcp.md).
+
+### The MCP client refuses compressed responses
+
+The HTTP transport and `OAuthClient` send `Accept-Encoding: identity`, and a
+response with any other `Content-Encoding` fails with `MCPTransportError`
+before its body is read: the body caps count uncompressed bytes, and a
+compressed body would be inflated in memory before any cap could see it.
+`MCP_CLIENT_MAX_RESPONSE_BYTES` (4 MiB), `MCP_CLIENT_TOTAL_DEADLINE_SECONDS`
+(60) and a bounded `tools/list` pagination apply to every server.
+
+**What can break:** a remote MCP or OAuth server that compresses regardless of
+`Accept-Encoding`, or a tool listing past `MCP_CLIENT_MAX_PAGES` /
+`MCP_CLIENT_MAX_ITEMS`. `baselith.core.mcp.bounded_http.check_declared_length`
+is now `check_response_headers`.
+
 ---
 
 ## Supply chain
@@ -410,6 +457,38 @@ and the run pauses durably; only reachable when the agent was given an
 `AgentOutputValidationError` and `RuntimeError` should widen.
 
 See [Agent API › What `run()` raises](../core-modules/agent.md#what-run-raises).
+
+### Secrets: `env` and `file` cannot be re-registered
+
+`SECRETS_BACKEND` now also resolves providers published in the
+`baselith.secrets_providers` entry-point group, so installing a provider package
+is enough. In return, `register_secrets_provider("env", ...)` and
+`register_secrets_provider("file", ...)` raise `ValueError`, and a registered
+factory that returns something other than a `SecretsProvider` raises
+`TypeError` on first use. Resolution never falls back to `env`.
+
+See [Security](../core-modules/security.md).
+
+### A broken agent stream raises `StreamInterruptedError`
+
+`Agent.run_events` streams text token by token where the provider supports it
+(`LLM_STREAM_AGENT_TEXT=false` restores one chunk per model turn). A stream
+that breaks **after** text has reached the caller raises
+`StreamInterruptedError` (`baselith.core.services.llm.exceptions`) instead of
+failing over and replaying the turn, which would have sent the same text twice.
+Catch it where you consume the event stream.
+
+### Fewer exceptions are swallowed
+
+Every silent `except Exception: pass` in the framework is gone. Most now log;
+some catch only the errors the code can actually meet, so an unexpected error
+that 0.x hid now propagates. `DistributedLock.release()` re-raises a
+`CancelledError` it used to swallow, after deleting the lock key.
+
+### The `baselithbot` plugin is no longer bundled
+
+It was removed from the `baselith-core` distribution. A deployment that enabled
+it in its plugin configuration must remove the entry.
 
 ---
 

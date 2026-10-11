@@ -45,6 +45,11 @@ no change. The import rewrite is mechanical, and two tools cover it: a codemod
 that rewrites your code once, and a compat package that keeps the old names
 working while you migrate.
 
+The rename is not the only change in 1.0 that a running deployment notices:
+MCP stdio servers now need an explicit allowlist, the MCP client refuses
+compressed responses, and a few calls raise where they used to pass. Read
+[Upgrade Notes](upgrade-notes.md) before rolling forward.
+
 ## Option 1: rewrite your code with the codemod
 
 `scripts/migrate_namespace.py` is the same tool that moved this repository. It
