@@ -30,10 +30,12 @@ same intents typed in the Latin alphabet.
 
 A request to *reveal* the system prompt is told apart from a question
 *about* system prompts: possessive forms (``your``, ``你的``, ``अपना``) always
-count, a bare "show the system prompt" counts unless a topic word or another
-owner follows it (``... best practices``, ``系统提示的写法``, ``... für
-meinen Bot``) or, in Chinese and Japanese, a "how / write" word or a second
-object sits between verb and noun.
+count, and a bare "show the system prompt" counts unless a *how-to* topic
+follows it (``... best practices``, ``系统提示的写法``) or an "ideal / good"
+adjective marks it as a request for an example. An owner ("for my bot", "we
+use") or a word that is itself the content ("examples", "format", 模板) does
+not exempt it: that suffix is the attacker's to choose. In Chinese and
+Japanese a "how / write" word between verb and noun also marks a question.
 """
 
 from __future__ import annotations
@@ -54,13 +56,14 @@ from .variants import (
 
 #: Between a Chinese reveal verb and its object: no "how / what / write /
 #: about / some / good" (``告诉我怎么写系统提示`` asks how to write one).
-_ZH_REVEAL_GAP = "[^。！？\\n怎如何写寫编編什么麼样樣例关關些好]"
+_ZH_REVEAL_GAP = "[^。！？\\n怎如何写寫编編]"
 #: After the object: a topic word makes it a question *about* system prompts
 #: (``系统提示的写法``, ``系统提示词应该怎么写``), not a request for this one.
 _ZH_TOPIC = (
-    "(?![词詞]?(的|之)?(写法|寫法|写作|寫作|例子|示例|范例|範例|样例|樣例|模板|格式|"
-    "技巧|最佳|设计|設計|编写|編寫|怎么|怎麼|怎样|怎樣|如何|应该|應該|要怎|是什么|"
-    "是什麼|结构|結構|原则|原則|指南|教程|方法|要点|要點|作用|概念|定义|定義))"
+    # How-to topics only: a word that is itself the content (格式 format,
+    # 模板 template, 示例 example, 结构 structure, 内容 content) is a reveal.
+    "(?![词詞]?(的|之)?(写法|寫法|写作|寫作|编写|編寫|撰写|撰寫|怎么写|怎麼寫|"
+    "如何写|如何寫|应该怎么|應該怎麼|最佳实践|最佳實踐|技巧|教程))"
 )
 #: Hindi reveal verbs; ``2``/``२`` is ``दो`` ("give", as in ``दिखा दो``).
 _HI_SHOW = r"(दिखाओ|दिखाएं|दिखाइए|दिखा\s*(दो|2|२)|बताओ|बताएं|बता\s*(दो|2|२))"
@@ -76,8 +79,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(revela|mu[eé]stra|imprime|repite)(me)?\s+(tu|tus)\s+"
         r"(prompt|instrucciones)",
         r"(revela|mu[eé]stra|imprime|repite)(me)?\s+el\s+prompt\s+"
-        r"(del\s+)?sistema(?!\s+(ideal|perfecto|de\s+ejemplo|para\s+(un|una|mi|mis|"
-        r"nuestro|nuestra)\b|que\s+(escrib|hice|uso)))",
+        r"(del\s+)?sistema(?!\s+(ideal|perfecto)\b)",
         r"nuevo\s+prompt\s+del\s+sistema",
     ),
     "fr": (
@@ -90,8 +92,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(r[eé]v[eè]le|affiche|montre|r[eé]p[eè]te)[sz]?(-moi)?\s+"
         r"(ton|votre|tes|vos)\s+(prompt|instructions)",
         r"(r[eé]v[eè]le|affiche|montre)[sz]?(-moi)?\s+le\s+prompt\s+"
-        r"(du\s+)?syst[eè]me(?!\s+(id[eé]al|parfait|d['’]exemple|type|pour\s+(un|une|"
-        r"mon|ma|mes|notre|nos)\b|que\s+j))",
+        r"(du\s+)?syst[eè]me(?!\s+(id[eé]al|parfait)\b)",
     ),
     "de": (
         r"ignorier(e|en|t)?\s+(alle\s+)?(vorherigen|bisherigen|obigen)\s+"
@@ -102,10 +103,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bdu\s+bist\s+(jetzt|nun|ab\s+jetzt)\s+(ein|eine|der|die|das)\b",
         r"(zeig(e)?|verrate|gib)\s+(mir\s+)?(deinen|deine|ihren|ihre)\s+"
         r"(system-?prompt|anweisungen|instruktionen)",
-        # "den Systemprompt-Leitfaden", "... für meinen Bot": a topic
-        r"(zeig(e)?|verrate|gib)\s+(mir\s+)?den\s+system-?prompt(?!-|[a-zäöüß]|"
-        r"\s+(f[uü]r\s+(einen|eine|ein|meinen|meine|mein|unseren|unsere|unser)\b|"
-        r"als\s+beispiel|von\s+(einem|einer|meinem|meiner)\b))",
+        r"(zeig(e)?|verrate|gib)\s+(mir\s+)?den\s+system-?prompt",
     ),
     "it": (
         r"ignora\s+(tutte\s+le\s+|le\s+)?istruzioni\s+(precedenti|di\s+prima)",
@@ -115,8 +113,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(rivela|mostra(mi)?|stampa|ripeti)\s+(il\s+tuo|i\s+tuoi|le\s+tue)\s+"
         r"(prompt|istruzioni)",
         r"(rivela|mostra(mi)?|stampa)\s+il\s+prompt\s+di\s+sistema(?!\s+(ideale|"
-        r"perfetto|migliore|d['’]esempio|di\s+esempio|per\s+(un|una|uno|il\s+mio|"
-        r"la\s+mia|i\s+miei|il\s+nostro|la\s+nostra)\b|che\s+(ho|abbiamo)\b))",
+        r"perfetto|migliore)\b)",
     ),
     "pt": (
         r"ignor[ea]\s+(todas\s+)?(as\s+)?instru[cç][oõ]es\s+"
@@ -145,8 +142,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(промпт|инструкции|prompt|instructions?)",
         # "... для чат-бота", "... пример": a topic; "для этого чата" is not
         r"(покажи|раскрой|выведи)(те)?\s+(мне\s+)?(системный\s+промпт|"
-        r"system\s+prompt)(?!\s+(для\s+(?!(этого|этой|тебя|себя|меня|нас|вас)\b)|"
-        r"пример|образ|шаблон|котор|идеальн|хорош))",
+        r"system\s+prompt)",
     ),
     # Native-script languages: each pattern leads with the language's own
     # words (CJK first-character scans are what keep these cheap), and the
@@ -214,8 +210,7 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"لا\s+تلتزم\s+ب(التعليمات|الأوامر)\s+السابقة",
         r"أنت\s+الآن\s+(DAN|نموذج|مساعد\s+بدون|بدون\s+قيود)",
         r"(اكشف|أظهر|اعرض|اطبع|كرر)\s+(لي\s+)?"
-        r"(تعليماتك|موجه\s+النظام(?!\s+(المثالي|مثالي|الجيد|النموذجي|ل(روبوت|بوت|"
-        r"تطبيق|مساعد|موقع|شات)|الخاص\s+ب(ي|نا)|الذي\s+(كتبته|أستخدمه)))|"
+        r"(تعليماتك|موجه\s+النظام(?!\s+(المثالي|مثالي|الجيد|النموذجي)\b)|"
         r"التعليمات\s+الأصلية|your\s+(system\s+)?(prompt|instructions?)|"
         r"the\s+system\s+prompt)",
         # English-led
@@ -232,9 +227,9 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"अब\s+(से\s+)?(तुम|आप)\s+(DAN|एक\s+(अलग|नया|अनियंत्रित))",
         r"(अपना|अपने|अपनी)\s+(सिस्टम\s+प्रॉम्प्ट|निर्देश|प्रॉम्प्ट|system\s+prompt|"
         rf"prompt|instructions?)\s+({_HI_SHOW}|प्रकट\s+करें|(show|reveal)\s*कर)",
-        # Unqualified only: "एक/अच्छा सिस्टम प्रॉम्प्ट दिखाओ" (show one, a good
-        # one) asks for an example; "मुझे/अब ..." qualifies nothing.
-        r"सिस्टम(?<![\u0900-\u0963\u0966-\u097f]\sसिस्टम)\s+प्रॉम्प्ट\s+(को\s+)?"
+        # "एक/अच्छा सिस्टम प्रॉम्प्ट दिखाओ" (show one, a good one) asks for an
+        # example; any other qualifier ("पूरा", the whole one) is a reveal.
+        r"(?<!एक\s)(?<!अच्छा\s)(?<!अच्छे\s)(?<!अच्छी\s)(?<!बढ़िया\s)सिस्टम\s+प्रॉम्प्ट\s+(को\s+)?"
         rf"(मुझे\s+)?{_HI_SHOW}",
         r"(मुझे|कृपया|अब|अभी|तुरंत|जल्दी|please)\s+सिस्टम\s+प्रॉम्प्ट\s+(को\s+)?"
         rf"{_HI_SHOW}",

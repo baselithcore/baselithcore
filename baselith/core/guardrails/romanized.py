@@ -115,8 +115,10 @@ ROMANIZED_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"[ae][zd]h[ie]r|2[ae][zd]h[ie]r|warr?[ie]ni|wareeni|far[jg][ie]ni|[2']orr?[ie]ni|"
         r"[3']arr?[ae]fni|2oll?[iy]+)(l[iy]+)?\s+((3al[ae]|[3']an|[ae]n)\s+)?"
         rf"({_AR_YOURS}|{_AR_DEF}(system\s+)?prompt\s+(taba3|beta3|btaa?3)[ae]?k|"
-        r"[ae]l[\s-]?system\s+prompt\b(?!\s+(engineering|design|examples?|"
-        r"writing|templates?))|your\s+(system\s+)?(prompt|instructions?)|"
+        # How-to topics only; "examples", "template", "design" can be the
+        # content itself, so they do not exempt a reveal.
+        r"[ae]l[\s-]?system\s+prompt\b(?!\s+(engineering|writing)\b)|"
+        r"your\s+(system\s+)?(prompt|instructions?)|"
         r"the\s+system\s+prompt|mow?a[jg]{1,2}[ie]h\s+([ae]l[\s-]?)?"
         rf"n[ie]?[zd]h?aa?m|{_AR_DEF}t[ae]?[3'e]?l[iey]{{1,2}}ma?at\s+"
         r"([ae]l[\s-]?)?[2']?asl[iy]+[ae]?h?)",
@@ -142,10 +144,12 @@ _ZH_FILLER = (
     r"({yi_xia}|{yi_bian}|{gei wo}|{wan_zheng de}|{wan_zheng}|{quan_bu}|"
     r"{yuan_shi de}|{chu_lai}|{chu})"
 )
+#: How-to topics only (how to write, tips, best practices, a guide): a word
+#: that is itself the content (li_zi/shi_li examples, mo_ban template, ge_shi
+#: format, jie_gou structure, she_ji design) is a reveal, as in multilingual.
 _ZH_TOPIC = (
-    r"(?!\s*({de}\s*)?({xie_fa}|{li_zi}|{shi_li}|{fan_li}|{mo_ban}|{ge_shi}|"
-    r"{ji_qiao}|{zui_jia}|{she_ji}|{bian_xie}|{zen_me}|{ru_he}|{ying_gai}|"
-    r"{shi shen_me}|{jie_gou}|{yuan_ze}|{zhi_nan}|{jiao_cheng}|{fang_fa}))"
+    r"(?!\s*({de}\s*)?({xie_fa}|{bian_xie}|{zen_me}|{ru_he}|{ying_gai}|"
+    r"{ji_qiao}|{zui_jia}|{zhi_nan}|{jiao_cheng}))"
 )
 
 #: Romaji (Hepburn and kunrei-shiki spellings, long vowels with or without a
