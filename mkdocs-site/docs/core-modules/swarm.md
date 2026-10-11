@@ -195,6 +195,34 @@ colony's in-memory state (pheromones, auction history, stats) is rebuilt per
 request and is not part of the record. The `SimulationHandler` records the
 same steps per round under the run's checkpoint.
 
+### Durable colony batches
+
+`Colony.execute_batch(tasks, execute_fn)` auctions every task, then runs the
+winners concurrently. With an ambient checkpoint — a workflow
+`ColonyNodeAdapter` node binds its visit's scope, or any caller can bind one —
+the batch records under a `colony_batch` child scope
+(`baselith/core/swarm/colony_batch.py`), per task:
+
+- **the auction** — every bid (`agent_id`, `score`, `estimated_time`,
+  `confidence`) and the winner, or that nobody won. A resumed batch reinstates
+  the recorded winner (`Colony.restore_assignment`) instead of auctioning
+  again: the auction's inputs — agent load, success rates, pheromones — lived
+  in the crashed process, so a fresh auction could hand finished work to a
+  different agent;
+- **the execution** — the value `execute_fn` returned. A finished task is
+  never executed again (its result replays and `complete_task` still updates
+  the colony's bookkeeping); an unfinished one runs on its recorded winner,
+  with its own `colony_task` scope bound as the ambient checkpoint so the
+  durable work inside it (an agent's turns and tool calls, a crew) resumes too.
+
+A task that raised is not recorded and runs again, like a failed swarm
+sub-task. Results must be JSON-serialisable. Tasks are identified by their
+content (description, capabilities, priority, parameters) and position in the
+batch, never by the random `Task.id`. A recorded winner that is no longer
+registered in the resumed colony can still replay a recorded result; if its
+execution was never recorded, the task fails naming the agent rather than
+being silently re-auctioned. Without a checkpoint nothing changes.
+
 ### Scenario Simulation Mode
 
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory (when the colony has a memory manager) and used to update the "World State" for Round N+1.

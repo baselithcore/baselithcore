@@ -250,8 +250,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   stream **completes** — a stream that errors or is abandoned by the client
   records nothing. A budget breach ends the stream with
   `Request aborted: <reason>`; text still held in the output guard's holdback
-  window at that point is not flushed. Durable checkpointing stays on the
-  non-streaming path: a half-sent stream cannot be resumed by replaying it.
+  window at that point is not flushed. With a checkpoint store the stream is
+  a **checkpointed run** too — see
+  [durable streams](#durable-streams-process_stream-with-a-run-id).
 - **No streaming handler** — the query runs through the full non-streaming
   `process()` pipeline (memory, budget, checkpoint, output guard) and the
   final `response` is emitted as a single chunk: a real answer delivered late
@@ -849,7 +850,9 @@ have written, on every backend:
 
 A replayed pass re-ticks the budget for the turns it replays, on top of the
 restored counters, so a resumed run is charged conservatively (it can hit a
-cap earlier, never later).
+cap earlier, never later). Cost and tokens are not re-charged: they are
+charged by the provider call, and a replayed model turn or tool step makes
+none.
 
 **Request inputs (`checkpoint_inputs.py`).** A fresh run records a JSON-safe,
 size-bounded subset of the caller's context in `Checkpoint.inputs`
@@ -919,11 +922,13 @@ What each runner records (a step is replayed on resume, never re-executed):
 
 | Runner | Recorded step | Granularity on resume |
 |--------|---------------|-----------------------|
-| `Agent.run(checkpoint=…)` | every approved tool call | LLM turns re-run; recorded tool results replay |
+| `Agent.run(checkpoint=…)` | every model turn (the whole response: text, tool-call requests, thinking blocks) and every approved tool call | recorded turns replay without calling the model and recorded tool results without calling the tools; the run continues from the first unrecorded turn |
 | `Crew` (sequential / parallel) | each task's agent call (output, text) | finished tasks replay; the interrupted task re-runs, its tool calls replay |
 | `Crew` (hierarchical) | the manager's brief and review, the worker run, the revision — four separate steps | a crash after the review re-runs nothing recorded |
 | `GroupChat` | each round: chosen speaker + what they said | recorded rounds replay without calling the selector or a participant |
-| Workflow node | the node visit (all its retries) | finished nodes replay; an interrupted AGENT node's agent / crew / colony resumes from its own records (see [Workflows](workflows.md#durable-execution-checkpoint-replay)) |
+| Workflow node | the node visit (all its retries) | finished nodes replay; an interrupted AGENT node's agent / crew / colony and an interrupted SUBGRAPH node's inner nodes resume from their own records (see [Workflows](workflows.md#durable-execution-checkpoint-replay)) |
+| `Colony.execute_batch` (ambient checkpoint) | per task: the auction (bids + winner) and the result `execute_fn` returned | no task is re-auctioned; finished tasks replay; an unfinished one runs on its recorded winner (see [Swarm](swarm.md#durable-colony-batches)) |
+| Streamed run (`process_stream`) | whatever its handler records, plus the delivered answer and its chunk boundaries on completion | a completed stream replays its events; an interrupted one replays its steps and regenerates the answer (see [durable streams](#durable-streams-process_stream-with-a-run-id)) |
 | Swarm handler | the LLM decomposition, each sub-task result, the synthesis | a resumed swarm gets the same sub-tasks back and runs only the unfinished ones |
 | Tree-of-Thoughts / MCTS | each generation call (with its sandbox runs) and each evaluation | the search rebuilds the same tree from the record (see [Reasoning](reasoning.md)) |
 | Plugin agents | see the [coding / browser agents](agents.md) and [reasoning agent](../plugins/reasoning-agent.md) pages | |
@@ -950,6 +955,9 @@ idempotency ledger had nothing to match.
   principal id. Without the key, or anonymously, the run id is random and a
   retry starts over. `X-Request-ID` is not used: the client picks it, and
   responses, logs and error reports echo it.
+- **`POST /chat/stream`** derives the id the same way and opens the run
+  through `open_stream_run` (`stream_runs.py`) — see
+  [durable streams](#durable-streams-process_stream-with-a-run-id).
 - **RQ agent-run jobs** use the job id: every attempt of a job is the same run
   (`agent_job_run_id(job_id)`).
 
@@ -974,6 +982,61 @@ after a sweep-resumed run returns, `notify_resumed_completion`
 Kinds resolve through a registry (`register_completion_notifier`), never an
 import path read from the stored row. Delivery is at-least-once: a later RQ
 retry of the same job returns the recorded answer and notifies again.
+
+#### Durable streams (`process_stream` with a run id)
+
+`process_stream(query, context, run_id=None, resume=False)` used to have no
+checkpoint at all. With a store configured it now opens one like `process()`
+does — under the given `run_id` (or a generated one), owned by the attempt's
+lease with its heartbeat — exposes the manager as `context["checkpoint"]` and
+binds it as the ambient checkpoint while the stream handler runs, so every
+durable unit the handler starts (a typed agent's turns and tool calls, a crew,
+a search) records. The checkpoint write overlaps memory recall rather than
+adding a round trip before the first token, and the stream costs one more
+write when it completes.
+
+A token stream cannot be resumed **mid-generation**: the provider's
+generation is gone, and appending a regenerated answer to text already
+delivered would produce something no model wrote. So the granularity is:
+
+| Interrupted stream | On the next attempt under the same id |
+|--------------------|----------------------------------------|
+| completed (answer recorded with its chunk boundaries under `plugin_data["stream_chunks"]`) | the recorded chunks are re-emitted as the same events; nothing runs |
+| crashed, drained or abandoned mid-answer | `resume=True`: recorded steps replay (a model turn that had finished is not paid again), and the answer is generated again |
+| still owned by a live executor | `CheckpointLeaseHeldError` before any byte is sent (`/chat/stream` answers 409) |
+| paused `awaiting_approval` | the pause notice |
+
+A stream the client abandons is recorded like a cancelled `process()`
+(`failed` with `cancelled`, resumable by a retry); one cut by a drain stays
+`running` with the yielded marker and its lease released. The chain of stream
+generators is closed deterministically (`aclosing`), so the record and the
+lease release happen when the client leaves, not when the garbage collector
+finalises the generator. A crashed stream left `running` is also picked up by
+the recovery sweep once its lease expires: the sweep finishes it through
+`process()`, and a client retrying afterwards gets that answer replayed as one
+chunk (through the output guard, since it was recorded before it). How the SSE
+layer maps all this onto `Last-Event-ID` is in
+[REST › chat streaming](../api/rest.md).
+
+`open_stream_run(orchestrator, query, context, run_id)` (`stream_runs.py`) is
+the streaming twin of `process_with_stable_run_id`; it returns a `StreamRun`
+(`run_id`, `mode` — `fresh`, `resumed`, `replayed` or `paused` — and the chunk
+`source`).
+
+#### What is still not durable
+
+- **Work in flight at the crash.** A step records only once it finishes: the
+  model call or tool call that was running re-runs (the
+  [tool ledger](#cross-process-tool-idempotency-idempotencypy) dedupes an
+  effectful tool that already committed).
+- **A streamed answer mid-generation** is regenerated, never continued (above).
+- **A browser session mid-task.** The live page state dies with the process;
+  an interrupted task that already clicked or typed returns a failed
+  "interrupted" result instead of acting twice (see
+  [Agents › BrowserAgent](agents.md#durability-in-a-checkpointed-run)).
+- **MCP task work.** With `MCP_TASK_STORE_BACKEND=postgres` the task handle
+  and its outcome survive a restart, but the work itself is not resumed: a task
+  interrupted by a restart is failed as orphaned (see [MCP](mcp.md)).
 
 #### Concurrency: compare-and-swap writes and per-run leases
 
@@ -1261,10 +1324,27 @@ manager = await init_checkpoint(store, prompt, {"tenant_id": "acme"}, None,
 result = await agent.run(prompt, checkpoint=manager)
 ```
 
+Each **model turn** is a step too (`baselith/core/agent/_durable_turns.py`),
+named `llm_turn` and keyed by the turn's index plus digests of the conversation
+sent for it and of the agent's definition (model, system prompt, tool names,
+output schema). The record is the whole response as JSON — text, tool-call
+requests with their provider ids, stop reason, usage and the assistant message
+with its thinking blocks — so a replayed turn appends exactly the message the
+original pass appended and the next turn's key matches again. A resumed
+`Agent.run` therefore walks its recorded turns **without calling the model**,
+replays their tool calls, and calls the model for the first time at the first
+turn that was never recorded (the one in flight at the crash); everything after
+it is new. An agent redefined between the crash and the resume misses the
+records and runs afresh. A replayed turn charges no cost or tokens (the
+provider is not called) but still ticks the iteration counter, as a replayed
+tool call still counts against `max_tool_calls`; with `run_events`, a replayed
+turn's text arrives as one `TextDelta`.
+
 Each approved call is recorded through `CheckpointManager.run_step` as
 `{"observation", "is_error"}`, and the ledger claim runs inside the step under
-the same occurrence. A resumed `Agent.run` regenerates its turns and replays
-every recorded call it asks for again, in any order. `run_id` defaults to the
+the same occurrence. A turn regenerated because it was never recorded may ask
+for the recorded calls again in another order: they replay wherever they
+appear. `run_id` defaults to the
 checkpoint's, and the ledger key uses the tenant recorded on the checkpoint
 rather than the ambient one, because a recovery sweep may resume with none
 bound. With a checkpoint, a multi-tool turn runs its calls one after another,

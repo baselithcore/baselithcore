@@ -69,9 +69,12 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
         self._prompts: dict[str, MCPPrompt] = {}
 
         from baselith.core.mcp.subscriptions import SubscriptionHub
+        from baselith.core.mcp.task_persistence import resolve_task_backend
         from baselith.core.mcp.tasks import TaskStore
 
-        self._tasks_store = TaskStore()
+        self._tasks_store = TaskStore(
+            backend=resolve_task_backend(config.mcp_task_store_backend)
+        )
         self._subscriptions = SubscriptionHub()
         # Strong references to in-flight list-changed notifications: the loop
         # holds tasks weakly, so an unreferenced one can be collected mid-send.

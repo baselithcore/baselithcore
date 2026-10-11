@@ -80,6 +80,14 @@ async def handle_subgraph(
     The nested run gets its own context and ``max_steps`` budget; its final
     output becomes this node's output, and a failed nested run fails this
     node.
+
+    In durable mode the nested workflow runs under the node visit's child
+    scope of the run's checkpoint, so each of its nodes is a recorded step of
+    that scope: a subgraph interrupted half-way replays its completed inner
+    nodes on resume and re-executes only from the first unfinished one (its
+    definition is pinned under the scope, see
+    :func:`~baselith.core.workflows.versioning.pin_key`). A HUMAN gate inside
+    it pauses the whole run, as it would at the top level.
     """
     from .executor import ExecutionStatus
 
@@ -90,7 +98,13 @@ async def handle_subgraph(
         raise ValueError(
             f"Subgraph node {node.id!r} has no workflow in config['workflow']"
         )
-    result = await executor.execute(sub, initial_input=context.get_last_output())
+    checkpoint = context.__dict__.get(NODE_CHECKPOINT_KEY)
+    if checkpoint is not None:
+        result = await executor.execute(
+            sub, initial_input=context.get_last_output(), checkpoint=checkpoint
+        )
+    else:
+        result = await executor.execute(sub, initial_input=context.get_last_output())
     if result.status != ExecutionStatus.COMPLETED:
         raise RuntimeError(
             f"Subgraph {sub.name!r} failed: {result.error or result.status}"

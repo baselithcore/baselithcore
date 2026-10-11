@@ -60,6 +60,7 @@ __all__ = [
     "VersionPinning",
     "WorkflowVersion",
     "definition_fingerprint",
+    "pin_key",
     "pin_run_definition",
     "pin_version",
     "resolve_pinning_mode",
@@ -281,7 +282,21 @@ def pin_run_definition(workflow: WorkflowDefinition, checkpoint: Any) -> None:
     plugin_data = getattr(state, "plugin_data", None)
     if not isinstance(plugin_data, dict):
         return
-    pinned = WorkflowVersion.from_dict(plugin_data.get(WORKFLOW_VERSION_KEY))
-    plugin_data[WORKFLOW_VERSION_KEY] = verify_pinned_version(
-        workflow, pinned
-    ).to_dict()
+    key = pin_key(checkpoint)
+    pinned = WorkflowVersion.from_dict(plugin_data.get(key))
+    plugin_data[key] = verify_pinned_version(workflow, pinned).to_dict()
+
+
+def pin_key(checkpoint: Any) -> str:
+    """Where in ``plugin_data`` the definition run under ``checkpoint`` is pinned.
+
+    A top-level run pins under :data:`WORKFLOW_VERSION_KEY`. A nested workflow
+    — a SUBGRAPH node runs its workflow under the node visit's child scope of
+    the run's checkpoint — shares the run's ``plugin_data``, so it pins under
+    the key suffixed with its scope path: otherwise the nested definition
+    would be checked against the parent's pin and always mismatch.
+    """
+    path = getattr(checkpoint, "path", None)
+    if isinstance(path, str) and path:
+        return f"{WORKFLOW_VERSION_KEY}@{path}"
+    return WORKFLOW_VERSION_KEY

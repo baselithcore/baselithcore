@@ -177,6 +177,15 @@ class MCPConfig(BaseSettings):
     mcp_task_poll_interval_ms: int = Field(
         default=1000, alias="MCP_TASK_POLL_INTERVAL_MS", ge=1
     )
+    # Where task handles are persisted. 'memory' keeps them in the process
+    # (a restart answers "Unknown task"); 'postgres' writes every status
+    # transition to the mcp_tasks table (migration 015), so tasks/get after a
+    # restart — or on another replica — returns the stored status and result,
+    # and a task whose process died is failed as orphaned. 'auto' = postgres
+    # when POSTGRES_ENABLED, else memory.
+    mcp_task_store_backend: Literal["auto", "memory", "postgres"] = Field(
+        default="auto", alias="MCP_TASK_STORE_BACKEND"
+    )
 
     # Optional natural-language guidance returned by `server/discover`.
     mcp_server_instructions: str = Field(default="", alias="MCP_SERVER_INSTRUCTIONS")

@@ -119,7 +119,14 @@ class TestLedgerResume:
 
 class TestCheckpointResume:
     async def test_the_checkpoint_alone_replays_on_a_different_path(self) -> None:
-        """A fresh ledger per pass: only the checkpoint can be deduplicating."""
+        """A fresh ledger per pass: only the checkpoint can be deduplicating.
+
+        Model turns are recorded too now, so a resumed pass replays the same
+        turns; the different path here is that of a run whose turns were not
+        recorded (a checkpoint written before they were, or a turn that was
+        in flight at the crash): the regenerated turns ask for the same
+        effects in another order, and the tool steps still replay.
+        """
         effects = _Effects()
         store = InMemoryCheckpointStore()
         checkpoint = Checkpoint(run_id="run-cp", query="q")
@@ -132,7 +139,13 @@ class TestCheckpointResume:
         ).run("q", checkpoint=CheckpointManager(store, checkpoint))
 
         loaded = await store.load("run-cp")
-        assert loaded is not None and len(loaded.steps) == 2
+        assert loaded is not None
+        loaded.steps = {
+            key: step
+            for key, step in loaded.steps.items()
+            if step["tool_name"] != "llm_turn"
+        }
+        assert len(loaded.steps) == 2
         resumed = await Agent(
             tools=effects.tools(),
             llm_service=_resumed_pass(),

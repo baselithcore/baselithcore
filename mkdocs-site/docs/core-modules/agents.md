@@ -118,6 +118,29 @@ The individual MCP browser tools (`browser_navigate`, `browser_click`, …) are
 not recorded: each is one call the caller's own tool step already covers.
 Without a checkpoint nothing changes.
 
+This stays the granularity on purpose. Everything else in a run now resumes
+at the step — a typed agent's model turns, crew tasks, workflow subgraphs,
+colony auctions, a stream's answer — because each of those steps is fully
+described by what it returned. A browser step is not: its outcome *is* the
+page state, which no record can rebuild in a new browser.
+
+**What the operator sees** for an interrupted task that had acted:
+
+- the task's step returns `BrowserAgentResult(success=False,
+  error="the browser task was interrupted after it acted on a page (click or
+  type); it is not re-run automatically, …")`, and that failure is itself
+  recorded, so a further resume reports the same thing instead of trying
+  again;
+- the run's checkpoint trajectory shows the `attempt` step and one
+  `external_side_effect` step per `click` / `type` that started — its step
+  number, action and selector (the typed value only as a digest) — which is
+  the list to check by hand before re-submitting the task;
+- the run itself is not failed by this: the handler gets an ordinary failed
+  result and decides (the default flow reports it to the caller).
+
+An interrupted task that only navigated, scrolled or read re-runs from scratch
+without any of this.
+
 ### MCP Tools Integration
 
 ```python

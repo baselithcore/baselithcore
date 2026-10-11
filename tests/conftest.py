@@ -276,22 +276,29 @@ def _hermetic_tool_ledger():
     The ledger is also a process-wide singleton, so it is reset around every
     test: a claim left by one test must not decide another's outcome.
     ``baselith.core.orchestration.ledger_factory`` has its own tests, which set the
-    variable themselves.
+    variable themselves. MCP task handles get the same treatment for the same
+    reason (``MCP_TASK_STORE_BACKEND=auto`` would write every task to
+    Postgres); durable-store tests pass a backend to ``TaskStore`` explicitly.
     """
+    import baselith.core.config.mcp as mcp_config
     from baselith.core.orchestration.ledger_factory import reset_tool_ledger
 
-    saved = os.environ.get("ORCHESTRATOR_TOOL_LEDGER")
-    os.environ["ORCHESTRATOR_TOOL_LEDGER"] = "memory"
+    keys = ("ORCHESTRATOR_TOOL_LEDGER", "MCP_TASK_STORE_BACKEND")
+    saved = {key: os.environ.get(key) for key in keys}
+    os.environ.update(dict.fromkeys(keys, "memory"))
     _reset_orchestration_config()
+    mcp_config._mcp_config = None
     reset_tool_ledger()
     try:
         yield
     finally:
-        if saved is None:
-            os.environ.pop("ORCHESTRATOR_TOOL_LEDGER", None)
-        else:
-            os.environ["ORCHESTRATOR_TOOL_LEDGER"] = saved
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         _reset_orchestration_config()
+        mcp_config._mcp_config = None
         reset_tool_ledger()
 
 

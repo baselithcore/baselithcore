@@ -39,10 +39,11 @@ from baselith.core.orchestration.mixins._flow_events import (
     build_flow_completed,
     emit_staged_flow_completed,
 )
+from baselith.core.orchestration.mixins._streaming import (
+    # Re-exported: callers import the stream's failure line from here.
+    STREAM_ERROR_MESSAGE as STREAM_ERROR_MESSAGE,
+)
 from baselith.core.orchestration.run_events import EventType, publish_run_event
-
-#: What a stream says when its handler fails mid-answer.
-STREAM_ERROR_MESSAGE = "[ERROR] The answer could not be completed. Please retry."
 
 try:
     from baselith.core.events import EventNames, get_event_bus
@@ -419,6 +420,8 @@ class ExecutionMixin:
         query: str,
         context: dict[str, Any] | None = None,
         intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Process a user query with streaming response.
@@ -427,61 +430,23 @@ class ExecutionMixin:
             query: User query text
             context: Optional context
             intent: Optional forced intent string
+            run_id: Optional stable id of the streamed run. With a
+                ``checkpoint_store`` the stream is a checkpointed run (an id
+                is generated when omitted): its durable steps record, and the
+                delivered answer is recorded when the stream completes.
+            resume: With ``run_id``, claim the run's checkpoint and continue
+                it — recorded steps replay, the answer is regenerated (see
+                :mod:`baselith.core.orchestration.mixins._streaming`).
 
         Yields:
             Response tokens/chunks
         """
-        from baselith.core.orchestration.guard_pipeline import guard_input_async
-        from baselith.core.orchestration.mixins._streaming import (
-            stream_with_loop_controls,
-        )
+        from contextlib import aclosing
 
-        # Input guardrails (regex + optional content moderation) run before
-        # any classification/LLM spend, same as the non-streaming path.
-        blocked = await guard_input_async(query)
-        if blocked is not None:
-            yield blocked["response"]
-            return
+        from baselith.core.orchestration.mixins._streaming import run_stream
 
-        context = context or {}
-
-        # Classify intent if not provided (rag_only pins the default intent)
-        intent = intent or rag_only_intent(self, context)
-        if not intent:
-            intent = await self.classify_intent_async(query)
-        context["intent"] = intent
-
-        # Get stream handler for intent
-        handler = self._stream_handlers.get(intent)
-
-        if not handler:
-            # No streaming handler: run the full non-streaming pipeline
-            # (memory, budget, checkpoint, output guard) and emit its final
-            # response as one chunk — a real answer delivered late instead of
-            # a placeholder delivered never.
-            logger.debug(
-                f"No stream handler for intent: {intent}, "
-                "falling back to non-streaming process()"
-            )
-            result = await self.process(query, context, intent)
-            response = result.get("response", "")
-            if response:
-                yield response
-            return
-
-        # Execute streaming handler under the same per-request controls as
-        # process() — budget, tenant guard, memory recall and write — bound to
-        # its owning plugin, with chunks through the streaming output guard and
-        # the opt-in moderation layer (baselith.core.orchestration.mixins._streaming).
-        try:
-            async for chunk in stream_with_loop_controls(
-                self, query, context, intent, handler
-            ):
+        async with aclosing(
+            run_stream(self, query, context, intent, run_id, resume)
+        ) as stream:
+            async for chunk in stream:
                 yield chunk
-        except Exception as e:
-            # The client gets a generic line: the exception text can carry
-            # provider URLs, SQL or file paths, and the log already has it.
-            logger.error(
-                f"Stream handler error for intent {intent}: {e}", exc_info=True
-            )
-            yield STREAM_ERROR_MESSAGE

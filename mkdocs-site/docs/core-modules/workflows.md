@@ -288,10 +288,14 @@ fixed task pipeline, a **colony** node when the executing agent should be
 chosen by the auction per task. In [durable mode](#durable-execution-checkpoint-replay)
 either node's output replays once it completes. Inside a running node, a
 **crew** resumes task by task (above); a **colony** node binds the visit's
-scope as the ambient checkpoint while `execute_fn` runs, so work it does
-through a durable runner (an `Agent`, a `Crew`) is recorded under the node,
-but the auction itself is recomputed and an `execute_fn` that calls effects
-directly is only as idempotent as the code it calls.
+scope as the ambient checkpoint for the batch, which records the auction
+outcome (every bid and the winner) and the task's result under it
+([Swarm › durable colony batches](swarm.md#durable-colony-batches)): a node
+interrupted after the auction reinstates the recorded winner instead of
+re-auctioning, and `execute_fn` runs with the task's own scope bound, so work
+it does through a durable runner (an `Agent`, a `Crew`) records there. An
+`execute_fn` that calls effects directly is still only as idempotent as the
+code it calls.
 
 ### Execution Features
 
@@ -300,7 +304,7 @@ directly is only as idempotent as the code it calls.
 | **Timeouts**            | Per-node `timeout` field (`asyncio.wait_for`); a timeout fails the node |
 | **Per-node retry**      | `retries` + `retry_backoff` fields: extra attempts with exponential backoff; timeouts are never retried |
 | **Parallel + fan-in**   | `PARALLEL` nodes fan out to all outgoing edges with `asyncio.gather`; branches halt at their convergence `MERGE` node, which then executes **once** with the list of branch outputs and the chain continues past it. Branches must converge on the same `MERGE` (or none). In [durable mode](#durable-execution-checkpoint-replay) branches run sequentially in edge order |
-| **Subgraphs**           | `SUBGRAPH` nodes run a nested `WorkflowDefinition` (own context and `max_steps` budget); the nested output becomes the node output and a failed nested run fails the node |
+| **Subgraphs**           | `SUBGRAPH` nodes run a nested `WorkflowDefinition` (own context and `max_steps` budget); the nested output becomes the node output and a failed nested run fails the node. In [durable mode](#durable-execution-checkpoint-replay) the nested workflow runs under the node visit's scope, so its finished inner nodes replay |
 | **Condition branching** | Safe AST-based expression evaluation (`baselith/core/workflows/conditions.py`); edges are chosen by their `condition_label` (`"true"`/`"false"`) |
 | **Cycles / evaluation loops** | Traversal is iterative, so a CONDITION edge looping back to an earlier node (generate → evaluate → refine) executes correctly; `WorkflowExecutor(max_steps=...)` (default 1000) fails a loop that never converges |
 | **Fail-fast**           | A failed node (after its retries) is recorded then re-raised, halting the run (status `FAILED`) |
@@ -340,9 +344,16 @@ Semantics to know:
   `ColonyNodeAdapter` — so a node interrupted half-way replays the tool calls
   or crew tasks it had finished, and the scope is bound as the ambient
   checkpoint for custom handlers. Agents whose `run` takes no `checkpoint`
-  re-run whole, as before. SUBGRAPH nodes still run their nested workflow
-  without a checkpoint: the subgraph replays as one recorded step once it
-  completes.
+  re-run whole, as before.
+- **Subgraphs resume inside.** A SUBGRAPH node executes its nested workflow
+  with the visit's scope as that workflow's `checkpoint`, so every inner node
+  is a recorded step of the scope: a subgraph interrupted half-way replays the
+  inner nodes it had finished and re-executes from the first unfinished one,
+  and once it completes the whole node replays as one step. The nested
+  definition is version-pinned under its own key
+  (`workflow_version@<scope path>`, see `pin_key` in `versioning.py`) — sharing
+  the run's pin would always mismatch the parent graph. A HUMAN gate inside a
+  subgraph pauses the whole run, exactly as one at the top level.
 - **JSON-serializable outputs.** Durable runs require node outputs to be
   JSON-serializable — that is the persistent checkpoint store's contract.
 - **Sequential `PARALLEL` branches.** In durable mode fan-out branches

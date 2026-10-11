@@ -7,8 +7,10 @@ The `baselith/core/services` module provides domain-agnostic services. The chat 
 (`baselith/core/services/chat/`: request handling, streaming and per-conversation history)
 is documented in [Chat & RAG](chat.md), in particular
 [Conversation History](chat.md#conversation-history) and its
-[entry points](chat.md#entry-points) — `handle_chat_async` takes a stable
-`run_id` so a retried request resumes its durable run.
+[entry points](chat.md#entry-points) — `handle_chat_async` and
+`handle_chat_stream_async` take a stable `run_id` so a retried request resumes
+its durable run (a retried stream replays a completed answer, or resumes an
+interrupted run, through `services/chat/stream_session.py`).
 
 ## Overview
 

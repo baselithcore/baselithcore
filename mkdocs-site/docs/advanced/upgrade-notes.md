@@ -640,8 +640,67 @@ Durability now reaches the entry points and runners that had none
   the same across a whole in-memory or Postgres store. MCP tasks end `failed`
   when their driver ends without a result or after
   `TaskStore(max_working_seconds=3600.0)` of work. Raise either timeout above
-  your longest legitimate background job. MCP task handles stay process-local:
-  after a restart the client gets "Unknown task".
+  your longest legitimate background job. MCP task handles now survive a
+  restart with a Postgres task store (below).
+
+### Model turns, streams, subgraphs and colony auctions are recorded too
+
+The units the previous change left re-running on resume are now steps of the
+run's checkpoint
+([Orchestration › Composite runners](../core-modules/orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **Every model turn of a checkpointed `Agent.run`** (an `llm_turn` step:
+  the full response, tool-call requests and thinking blocks included). A
+  resumed agent no longer calls the model for the turns it already had: it
+  continues from the first unrecorded turn, so a crash after nine turns of a
+  ten-turn run costs one model call, not ten. A replayed turn charges no cost
+  or tokens to the budget but still counts as an iteration. Under a
+  checkpoint a run's step count grows by one per turn, and each turn's
+  response is persisted (JSON) in the checkpoint row. A resumed run whose
+  agent changed its model, system prompt, tools or output schema runs afresh.
+- **Streams are checkpointed runs.** With a checkpoint store,
+  `process_stream` creates (or with `resume=True` claims) a checkpoint, binds
+  it for the handler and records the delivered answer when the stream
+  completes; a disconnected stream is recorded `failed`/`cancelled` (a drained
+  one `running`, yielded). `POST /chat/stream` names the run from an
+  authenticated caller's `Idempotency-Key` like `POST /chat`: a retry replays
+  a completed answer — honouring `Last-Event-ID`, which used to be ignored —
+  or resumes an interrupted run behind a new `event: reset` frame, and answers
+  **409** while the first attempt still streams. A client that sends
+  `Last-Event-ID` must handle `event: reset` (discard its partial text). A
+  streamed run now costs the same checkpoint writes as a non-streamed one (one
+  at the start, overlapped with memory recall, one at completion), and the
+  recovery sweep finishes a crashed stream through `process()`.
+  `ChatService.handle_chat_stream_async` takes a keyword-only `run_id`, and
+  `Orchestrator.process_stream` takes `run_id` and `resume`.
+- **SUBGRAPH nodes resume inside.** The nested workflow runs under the node
+  visit's scope, so its finished inner nodes replay; the nested definition is
+  pinned under `workflow_version@<scope path>` in the run's `plugin_data`.
+- **Colony auctions are recorded.** Under an ambient checkpoint (a
+  `ColonyNodeAdapter` workflow node), `Colony.execute_batch` records each
+  task's bids, winner and result: a resumed batch reinstates the recorded
+  winner instead of re-auctioning and never re-executes a finished task. The
+  batch body moved to `baselith/core/swarm/colony_batch.py`; results must be
+  JSON-serialisable under a checkpoint.
+
+A browser task interrupted after it clicked or typed still returns a failed
+"interrupted" result instead of resuming — the live page cannot be rebuilt
+([Agents › BrowserAgent](../core-modules/agents.md#durability-in-a-checkpointed-run)).
+
+### MCP task handles survive a restart
+
+`MCP_TASK_STORE_BACKEND` (default `auto` = `postgres` when `POSTGRES_ENABLED`,
+else `memory`) writes every `io.modelcontextprotocol/tasks` status transition
+to the new `mcp_tasks` table (migration `015_mcp_tasks`; run migrations before
+deploying). After a restart, or on another replica, `tasks/get` returns the
+stored status and result instead of `Unknown task`. A task that was still
+`working`/`input_required` when its process died is failed with
+`Task orphaned: its worker ended without a result.` once its 60 s lease
+lapses; the work itself is not re-run. `tasks/update` and `tasks/cancel` on a
+task still running on another instance now answer `-32602` ("running on
+another server instance"), so route a session's follow-ups to the instance
+that created its tasks. Set `MCP_TASK_STORE_BACKEND=memory` to keep the
+previous process-local behaviour.
 
 ### Production refuses to start on a stale schema (`DB_SCHEMA_CHECK`)
 

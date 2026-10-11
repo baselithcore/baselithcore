@@ -186,10 +186,10 @@ elided):
 │          │                     │                                │ postgres                       │
 │ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
 │ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
-│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 014_checkpoint_leases     │
-│          │                     │                                │ . For predictable startup,     │
-│          │                     │                                │ prefer false and run: baselith │
-│          │                     │                                │ db migrate                     │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 015_mcp_tasks. For        │
+│          │                     │                                │ predictable startup, prefer    │
+│          │                     │                                │ false and run: baselith db     │
+│          │                     │                                │ migrate                        │
 │ ✅ PASS  │ Plugins             │ 10 plugin(s) found             │                                │
 │ ❌ FAIL  │ Plugin Dependencies │ 15 missing plugin dependency   │ Run: baselith plugin deps      │
 │          │                     │ declaration(s)                 │ install <plugin>. Missing: …   │

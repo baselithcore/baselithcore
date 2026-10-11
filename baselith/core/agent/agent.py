@@ -320,11 +320,16 @@ class Agent[OutputT]:
                 replays them. Defaults to ``checkpoint.run_id``.
             checkpoint: Optional
                 :class:`~baselith.core.orchestration.checkpoint.CheckpointManager`
-                (e.g. from ``init_checkpoint(..., resume=True)``). Each
-                approved tool call is recorded through its ``run_step``, so a
-                resumed run replays recorded observations instead of calling
-                the tools again, even without a durable ledger. Turns then run
-                their calls sequentially. ``None`` changes nothing.
+                (e.g. from ``init_checkpoint(..., resume=True)``), or a scope
+                of one. Each model turn and each approved tool call is
+                recorded through its ``run_step``, so a resumed run replays
+                the recorded turns without calling the model and the recorded
+                observations without calling the tools — even without a
+                durable ledger — and continues from the first turn that was
+                never recorded (see :mod:`baselith.core.agent._durable_turns`).
+                A replayed turn charges no cost or tokens; it still counts as
+                an iteration. Turns then run their calls sequentially.
+                ``None`` changes nothing.
 
         Raises:
             ValueError: ``history`` ends on an unanswered ``tool_use``.

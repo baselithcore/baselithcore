@@ -160,11 +160,13 @@ orchestrated request is subject to exactly the same caps as any other path.
 !!! tip "Resume from a checkpoint: `agent.run(prompt, checkpoint=manager)`"
     Hand `run` a
     [`CheckpointManager`](orchestration.md#durable-resume-of-the-typed-agent)
-    and each approved tool call is recorded through `run_step`; a resumed run
-    replays the recorded observations without calling the tools, even with no
-    durable ledger configured. `run_id` defaults to the checkpoint's. Turns run
-    their calls sequentially in this mode. Without a checkpoint nothing
-    changes.
+    and each model turn and each approved tool call is recorded through
+    `run_step`; a resumed run replays the recorded turns without calling the
+    model and the recorded observations without calling the tools — even with
+    no durable ledger configured — and continues from the first turn that was
+    never recorded. A replayed turn charges no cost or tokens (it still counts
+    as an iteration). `run_id` defaults to the checkpoint's. Turns run their
+    calls sequentially in this mode. Without a checkpoint nothing changes.
 
 ## Safe defaults for a standalone run
 

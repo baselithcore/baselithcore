@@ -26,12 +26,10 @@ from baselith.core.services.chat.utils.conversation import (
     is_recordable,
     load_history,
     record_turn,
-    recording_stream,
 )
 from baselith.core.services.chat.utils.guard import validate_input
 from baselith.core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
 from baselith.core.services.chat.utils.metrics import record_chat_metric
-from baselith.core.services.chat.utils.streaming import on_stream_end
 from baselith.core.utils.concurrency import drain_async_iterator
 
 if TYPE_CHECKING:
@@ -426,64 +424,32 @@ class ChatService:
                 value=time.perf_counter() - start,
             )
 
-    async def handle_chat_stream_async(self, req: ChatRequest) -> AsyncIterator[str]:
+    async def handle_chat_stream_async(
+        self, req: ChatRequest, *, run_id: str | None = None
+    ) -> AsyncIterator[str]:
         """
         Process a conversational request as an asynchronous stream.
 
         Uses the orchestrator's native async stream to avoid per-chunk
         executor hops on the hot path.
+
+        Args:
+            req: Chat request payload.
+            run_id: Stable id of the streamed run this request is an attempt
+                at (see :func:`~baselith.core.orchestration.run_ids.derive_run_id`).
+                With one, a completed run replays its recorded answer, an
+                interrupted one resumes (recorded steps replay, the answer is
+                regenerated), and the returned stream is a
+                :class:`~baselith.core.services.chat.stream_session.ChatStream`
+                naming the attempt's ``mode``. ``None`` streams a run nobody
+                can resume by id.
+
+        Raises:
+            CheckpointLeaseHeldError: ``run_id`` is still streaming elsewhere.
         """
-        start = time.perf_counter()
-        try:
-            self._record_metric("chat_requests_total", route="stream")
+        from baselith.core.services.chat.stream_session import open_chat_stream
 
-            if not self.config.streaming_enabled:
-                response = await self.handle_chat_async(req)
-
-                async def _single_response() -> AsyncIterator[str]:
-                    yield response.answer
-
-                return _single_response()
-
-            history_key = self._history_key(req)
-            turns, history_text = await load_history(self.history_manager, history_key)
-            context = {
-                "conversation_id": req.conversation_id,
-                "rag_only": req.rag_only,
-                "kb_label": req.kb_label,
-                HISTORY_TEXT_KEY: history_text,
-            }
-
-            # Latency on success is the whole generation, observed when the
-            # consumer finishes the stream — not when it was merely built.
-            return on_stream_end(
-                recording_stream(
-                    self.agent.process_stream(req.query, context),
-                    self.history_manager,
-                    history_key,
-                    turns,
-                    req.query,
-                ),
-                lambda: self._record_metric(
-                    "chat_request_latency",
-                    route="stream",
-                    value=time.perf_counter() - start,
-                ),
-            )
-
-        except Exception:
-            self._record_metric("chat_request_errors_total", route="stream")
-            self._record_metric(
-                "chat_request_latency",
-                route="stream",
-                value=time.perf_counter() - start,
-            )
-            logger.exception("Async chat streaming pipeline failed")
-
-            async def _error_stream() -> AsyncIterator[str]:
-                yield "❌ Critical internal error during generation."
-
-            return _error_stream()
+        return await open_chat_stream(self, req, run_id)
 
     def _record_metric(
         self, name: str, route: str = "", value: float | None = None

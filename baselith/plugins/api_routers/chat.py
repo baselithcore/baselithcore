@@ -14,9 +14,26 @@ whole response is bounded by ``CHAT_STREAM_TIMEOUT_SECONDS``.
 
 Every event carries a monotonically increasing ``id:`` (per response, from
 ``1``) and a quiet stream sends a ``: keepalive`` comment every
-``SSE_HEARTBEAT_SECONDS``. There is no replay: a chat completion is not
-re-playable from an event index, so ``Last-Event-ID`` is ignored and a client
-that lost the connection re-sends the request.
+``SSE_HEARTBEAT_SECONDS``.
+
+**Resuming a stream.** A client that lost the connection re-sends the request.
+From an authenticated caller with the same ``Idempotency-Key`` it names the
+same durable run (see :func:`chat_run_id`), and what comes back depends on
+where that run is:
+
+* **completed** — the recorded answer, replayed in the chunks it was first
+  sent in and without running anything. ``Last-Event-ID: n`` skips the events
+  the client already holds: the response continues at event ``n + 1``;
+* **interrupted** (crash, shutdown, disconnect) — the run resumes: every
+  recorded step (model turns, tool calls) replays, and the answer is
+  generated again, since a token stream cannot be continued mid-generation.
+  When the client sent ``Last-Event-ID``, the stream opens with an
+  ``event: reset`` frame (no ``id:``) telling it to discard the partial text
+  it holds; events then count from ``1`` again;
+* **still running elsewhere** — **409**, before any byte is streamed.
+
+Without a key, or from an anonymous caller, every request is a fresh run and
+a ``Last-Event-ID`` only earns the ``reset`` frame.
 """
 
 from __future__ import annotations
@@ -72,6 +89,21 @@ SSE_DONE_EVENT = "event: done\ndata: [DONE]\n\n"
 # and it is already in the log, keyed by that request id.
 SSE_ERROR_CODE = "stream_failed"
 SSE_ERROR_DETAIL = "stream failed"
+
+
+# Opens a stream whose earlier partial text (held by a reconnecting client)
+# will not be continued: the client discards it and renders what follows.
+SSE_RESET_EVENT = 'event: reset\ndata: {"reason":"regenerated"}\n\n'
+
+
+def last_event_id(request: Request) -> int:
+    """The ``Last-Event-ID`` a reconnecting client sent, ``0`` when none/invalid."""
+    raw = request.headers.get("last-event-id", "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 0
+    return value if value > 0 else 0
 
 
 def sse_error_payload(request_id: str | None = None) -> str:
@@ -150,13 +182,23 @@ def chat_run_id(request: Request) -> str:
     service) is one principal: its holders share its keys, as with any
     idempotency scheme keyed per credential.
     """
+    return stable_chat_run_id(request) or f"chat-{uuid.uuid4().hex}"
+
+
+def stable_chat_run_id(request: Request) -> str | None:
+    """The replayable run id :func:`chat_run_id` derives, or ``None``.
+
+    ``None`` whenever the request names no stable run (no key, or a caller
+    that is not authenticated); the stream route then skips the lookup of a
+    run that cannot exist.
+    """
     from baselith.core.auth.types import AuthUser
     from baselith.core.orchestration.run_ids import derive_run_id
 
     key = request.headers.get("idempotency-key")
     user = getattr(request.state, "user", None)
     if not key or not isinstance(user, AuthUser) or not user.is_authenticated:
-        return f"chat-{uuid.uuid4().hex}"
+        return None
     return derive_run_id(
         "chat",
         f"idempotency:{key}",
@@ -280,6 +322,9 @@ async def sse_stream(
     source: AsyncIterator[str],
     timeout_seconds: float,
     heartbeat_interval: float = DEFAULT_HEARTBEAT_SECONDS,
+    *,
+    skip_events: int = 0,
+    reset: bool = False,
 ) -> AsyncIterator[str]:
     """Frame a chat stream as SSE, bounded by the client and by the clock.
 
@@ -298,6 +343,10 @@ async def sse_stream(
         source: The chunk stream, already byte-capped by ``bounded_stream``.
         timeout_seconds: Wall-clock budget for the whole response.
         heartbeat_interval: Silence budget before a keepalive comment.
+        skip_events: Chunk events the client already holds (a replayed run
+            resumed with ``Last-Event-ID``): consumed and numbered, not sent.
+        reset: Open with the ``event: reset`` frame (the client's partial
+            text from an earlier attempt is superseded).
 
     Yields:
         SSE-framed events numbered with ``id:`` from 1, always ending with the
@@ -307,6 +356,8 @@ async def sse_stream(
     deadline = time.monotonic() + timeout_seconds
     reader = HeartbeatSource(source, heartbeat_interval)
     event_id = 0
+    if reset:
+        yield SSE_RESET_EVENT
     try:
         while True:
             if await request.is_disconnected():
@@ -328,7 +379,8 @@ async def sse_stream(
                     yield KEEPALIVE_FRAME
                 continue
             event_id += 1
-            yield sse_frame(chunk, event_id)
+            if event_id > skip_events:
+                yield sse_frame(chunk, event_id)
     except Exception:
         # Broad on purpose: whatever the provider, the retry wrapper or
         # bounded_stream raises, the client is already receiving a 200 and the
@@ -347,15 +399,38 @@ async def sse_stream(
     yield sse_done_event(event_id + 1)
 
 
-@router.post("/chat/stream", response_class=SSEResponse)
+@router.post(
+    "/chat/stream",
+    response_class=SSEResponse,
+    responses=problem_responses(409),
+)
 async def chat_stream(req: ChatRequest, request: Request) -> SSEResponse:
     """Stream the agent response as Server-Sent Events.
 
     Emits one ``data:`` frame per model chunk and a final ``event: done``.
     The response is cut short — cleanly — when the client disconnects or when
     ``CHAT_STREAM_TIMEOUT_SECONDS`` elapses.
+
+    An authenticated caller's ``Idempotency-Key`` names the run: a retry
+    replays a completed answer (honouring ``Last-Event-ID``) or resumes an
+    interrupted run, and answers **409** while the first attempt still
+    streams elsewhere (see the module docstring).
     """
-    stream = await chat_service.handle_chat_stream_async(req)
+    from baselith.core.orchestration.checkpoint_errors import (
+        CheckpointLeaseHeldError,
+    )
+
+    try:
+        stream = await chat_service.handle_chat_stream_async(
+            req, run_id=stable_chat_run_id(request)
+        )
+    except CheckpointLeaseHeldError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This request is still being processed; retry later.",
+        ) from exc
+    resumed_from = last_event_id(request)
+    replayed = getattr(stream, "mode", None) == "replayed"
     headers = {
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",  # Disable nginx buffering
@@ -379,6 +454,8 @@ async def chat_stream(req: ChatRequest, request: Request) -> SSEResponse:
             bounded_stream(stream, STREAM_MAX_BYTES, STREAM_MAX_CHUNK_BYTES),
             timeout_seconds,
             heartbeat_seconds(),
+            skip_events=resumed_from if replayed else 0,
+            reset=resumed_from > 0 and not replayed,
         ),
         headers=headers,
     )

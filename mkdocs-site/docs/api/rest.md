@@ -501,9 +501,21 @@ data: [DONE]
 
 ```
 
-There is no replay: a completion cannot be resumed from an event index, so a
-`Last-Event-ID` is ignored and a client that lost the connection re-sends the
-request. The ids exist so a client can tell exactly which events it received.
+The ids tell a client exactly which events it received. A client that lost
+the connection re-sends the request — same body, same `Idempotency-Key`, plus
+`Last-Event-ID: <last id it holds>`. For an authenticated caller the key names
+a durable run, and the answer depends on where that run is:
+
+| Run state | Response |
+| --- | --- |
+| completed | The recorded answer, re-emitted as the **same events** without running anything; with `Last-Event-ID: n` the response starts at `id: n+1` |
+| interrupted (crash, shutdown, disconnect) | The run resumes: recorded model turns and tool calls replay, the answer is generated again. A token stream cannot be continued mid-generation, so when `Last-Event-ID` was sent the response opens with `event: reset` (`data: {"reason":"regenerated"}`, no `id:`): discard the partial text, then render the events that follow, numbered from `1` |
+| still streaming on another worker | **409** problem document, before any event |
+| awaiting human approval | One event with the pause notice |
+
+Without the key, or from an anonymous caller, every request is a fresh run,
+and a `Last-Event-ID` only earns the `event: reset` frame. `X-Request-ID` is
+never a replay key.
 
 If the stream fails mid-flight, an `event: error` frame goes out before the
 terminal event. Its `data:` is a JSON object with a stable `code`, a fixed

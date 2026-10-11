@@ -321,10 +321,12 @@ and creates a `tenant_isolation` policy on every tenant-scoped table;
 `009_tool_invocations.py` adds the same policy to the table it creates, and
 `010_system_tenant_rls_exemption.py` widens the predicate across all seven.
 `011_webhooks.py` creates `webhook_endpoints` and `webhook_deliveries` with the
-widened policy (system-tenant escape included) from the start. The current
-list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
-`a2a_tasks`, `agent_checkpoints`, `tool_invocations`, `webhook_deliveries`,
-`webhook_endpoints` — lives in `baselith.core.db.ddl.RLS_PROTECTED_TABLES`.
+widened policy (system-tenant escape included) from the start, as do
+`013_online_eval_results.py` and `015_mcp_tasks.py` for their tables. The
+current list — `interactions`, `feedback`, `chat_feedback`, `agent_patterns`,
+`a2a_tasks`, `agent_checkpoints`, `mcp_tasks`, `online_eval_results`,
+`tool_invocations`, `webhook_deliveries`, `webhook_endpoints` — lives in
+`baselith.core.db.ddl.RLS_PROTECTED_TABLES`.
 
 The policy is symmetric: for an ordinary tenant a row is visible, **and may be
 written**, only when its `tenant_id` equals the session's. So a cross-tenant

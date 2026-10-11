@@ -576,8 +576,8 @@ server.register_tool(
 | `failed` | `error` holds the JSON-RPC error |
 | `cancelled` | `tasks/cancel` was honoured |
 
-Cancellation is cooperative: the ack is an intent, not a guarantee. Handles are
-process-local and expire after `MCP_TASK_TTL_MS`.
+Cancellation is cooperative: the ack is an intent, not a guarantee. Handles
+expire after `MCP_TASK_TTL_MS`.
 
 **Abandoned and runaway tasks.** A `working` task never stays `working` for
 good. When a task is read (`tasks/get`, `tasks/update`, `tasks/cancel`, or the
@@ -591,11 +591,43 @@ pruning pass every new task triggers):
   bound restarts when an `input_required` task resumes.
 
 `input_required` tasks wait on the client and are never swept, and a client
-`tasks/cancel` still ends in `cancelled`. There is no durable MCP task store:
-after a restart the handle is gone and `tasks/get` answers `Unknown task`
-(`-32602`) — a terminal error, so a client stops polling instead of waiting
-forever. Work that must survive a restart belongs in a durable runner (a
-checkpointed orchestrator run or a queued job) that the tool starts and polls.
+`tasks/cancel` still ends in `cancelled`.
+
+**Handles across a restart.** `MCP_TASK_STORE_BACKEND` decides where a handle
+lives:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | `postgres` when `POSTGRES_ENABLED`, else `memory` |
+| `postgres` | every status transition (created, `input_required`, back to `working`, and the terminal one) is written through to the `mcp_tasks` table (migration `015_mcp_tasks`), tenant-scoped |
+| `memory` | handles live in the process; after a restart `tasks/get` answers `Unknown task` (`-32602`) — a terminal error, so a client stops polling |
+
+With the Postgres store, a handle outlives the process that issued it:
+
+- a task that **finished** answers `tasks/get` with its stored status and
+  result after a restart, or on another replica. `tasks/update` and
+  `tasks/cancel` on it are accepted and do nothing;
+- a task still `working` or `input_required` carries its process's `owner` id
+  and a 60 s lease that the running driver renews every 20 s. When the lease
+  has run out — the process died, the work died with it — the next process
+  that reads the handle fails it with
+  `Task orphaned: its worker ended without a result.`, through a conditional
+  update, so two replicas reading it at once write it once;
+- a task whose lease is still live is **running on another instance**:
+  `tasks/get` returns its stored state (refreshed at every transition, so a
+  `working` task reads as `working` until it finishes), while `tasks/update`
+  and `tasks/cancel` answer `-32602` *"Task … is running on another server
+  instance"* — only the process driving a task can resume or cancel it. Route
+  a session's follow-up requests to the instance that created its tasks
+  (session affinity), or poll `tasks/get` until the task finishes.
+
+The work itself is not resumed: the driver coroutine exists only in the
+process that started it, so a restart fails the task rather than re-running
+the tool. Work that must survive a restart *and finish* belongs in a durable
+runner (a checkpointed orchestrator run or a queued job) that the tool starts
+and polls. Writes are best effort — a failed write is logged
+(`mcp_task_persist_failed`) and the task carries on in its process — and
+expired rows are pruned at most every five minutes per server.
 
 ### Change notifications: `subscriptions/listen`
 
@@ -734,7 +766,10 @@ baselith/core/mcp/
 ├── registration.py             # tools / resources / templates / prompts registry API
 ├── modern.py                   # 2026-07-28 era: per-request _meta, resultType, cache hints
 ├── mrtr.py                     # multi round-trip requests + sealed requestState
-├── tasks.py                    # io.modelcontextprotocol/tasks extension
+├── tasks.py                    # io.modelcontextprotocol/tasks: Task + TaskStore
+├── task_handlers.py            # tasks/get, tasks/update, tasks/cancel + the driver
+├── task_persistence.py         # durable task rows, leases, backend selection
+├── task_store_postgres.py      # mcp_tasks backend (MCP_TASK_STORE_BACKEND=postgres)
 ├── subscriptions.py            # subscriptions/listen + change notifications
 ├── sse.py                      # SSE response streams
 ├── http_headers.py             # Mcp-Method / Mcp-Name / Mcp-Param-* validation
@@ -1581,6 +1616,7 @@ MCP_REQUEST_STATE_SECRET=                # REQUIRED for multi-replica MRTR
 MCP_REQUEST_STATE_TTL_SECONDS=300
 MCP_TASK_TTL_MS=3600000
 MCP_TASK_POLL_INTERVAL_MS=1000
+MCP_TASK_STORE_BACKEND=auto              # postgres (mcp_tasks) when POSTGRES_ENABLED, else memory
 MCP_ALLOWED_COMMANDS=python,python3,node,npx,uvx,uv,deno,bun,bunx   # exact names; see Command Allowlist
 MCP_STDIO_ALLOWED_DIRS=                  # absolute dirs whose scripts may run; empty = no stdio script allowed
 MCP_STDIO_TRUSTED_BIN_DIRS=              # where command names resolve (default: system dirs + venv/conda bin)

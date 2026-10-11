@@ -93,10 +93,12 @@ class ColonyNodeAdapter:
         """Auction and execute one swarm task built from ``prompt``.
 
         ``checkpoint`` (the node visit's scope in durable mode) is bound as the
-        ambient checkpoint while ``execute_fn`` runs, so the work it does
-        through a durable runner (an agent, a crew) records under this node.
-        The auction itself is recomputed on resume; only the node's output is
-        replayed as a whole.
+        ambient checkpoint for the batch, which records the auction outcome
+        and the task's result under it (see
+        :mod:`baselith.core.swarm.colony_batch`): a node interrupted after the
+        auction reinstates the recorded winner instead of re-auctioning, and
+        ``execute_fn`` runs with the task's own scope bound, so the work it
+        does through a durable runner (an agent, a crew) records there.
         """
         from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
         from baselith.core.swarm.types import Task

@@ -76,7 +76,9 @@ declarative `MCP_SERVERS` registry and the `MCP_CLIENT_*` / `MCP_POOL_*` /
 stdio script runs until an operator approves a directory -,
 `MCP_STDIO_TRUSTED_BIN_DIRS`, `MCP_STDIO_ALLOWED_MODULES`,
 `MCP_STDIO_ALLOWED_ENV_KEYS`) under
-[MCP › Command Allowlist](mcp.md#command-allowlist) and sandbox metering
+[MCP › Command Allowlist](mcp.md#command-allowlist), the durable MCP task
+store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
+[MCP](mcp.md), and sandbox metering
 (`SANDBOX_COST_PER_COMPUTE_SECOND`) under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under

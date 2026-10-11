@@ -25,7 +25,7 @@ from baselith.core.mcp.mrtr import (
     request_state,
 )
 from baselith.core.mcp.pagination import page_registry, with_cursor
-from baselith.core.mcp.tasks import TaskHandlerMixin
+from baselith.core.mcp.task_handlers import TaskHandlerMixin
 from baselith.core.observability.logging import get_logger
 
 logger = get_logger(__name__)

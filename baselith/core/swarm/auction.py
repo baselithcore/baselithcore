@@ -46,6 +46,9 @@ class TaskAuction:
         self._tasks: dict[str, Task] = {}
         # Task ID -> Winner
         self._resolved: dict[str, str] = {}
+        # Task ID -> the bids of its last resolution (durable batches record
+        # them alongside the winner).
+        self._last_bids: dict[str, list[Bid]] = {}
 
     def _default_scoring(self, agent: AgentProfile, task: Task) -> float:
         """Default bid scoring based on capability match and load."""
@@ -86,6 +89,7 @@ class TaskAuction:
         self._tasks.pop(task_id, None)
         self._pending_auctions.pop(task_id, None)
         self._resolved.pop(task_id, None)
+        self._last_bids.pop(task_id, None)
 
     def submit_bid(self, bid: Bid) -> bool:
         """
@@ -194,8 +198,8 @@ class TaskAuction:
             f"Auction resolved: task={task_id}, winner={winner.agent_id}, score={winner.combined_score:.2f}"
         )
 
-        # Cleanup
-        del self._pending_auctions[task_id]
+        # Cleanup (the bids stay readable through last_bids)
+        self._last_bids[task_id] = self._pending_auctions.pop(task_id)
 
         return winner.agent_id
 
@@ -214,6 +218,12 @@ class TaskAuction:
     def get_pending_auctions(self) -> list[str]:
         """Get list of pending auction task IDs."""
         return list(self._pending_auctions.keys())
+
+    def last_bids(self, task_id: str) -> list[Bid]:
+        """The bids of ``task_id``'s auction: resolved, or still pending."""
+        if task_id in self._pending_auctions:
+            return list(self._pending_auctions[task_id])
+        return list(self._last_bids.get(task_id, []))
 
     def get_bids(self, task_id: str) -> list[Bid]:
         """Get all bids for a task."""

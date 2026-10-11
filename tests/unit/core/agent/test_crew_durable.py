@@ -61,6 +61,11 @@ async def _reloaded(store: InMemoryCheckpointStore, run_id: str) -> CheckpointMa
     return CheckpointManager(store, loaded)
 
 
+def _crew_steps(checkpoint: Checkpoint) -> int:
+    """Recorded crew calls; each agent call also records its model turns."""
+    return sum(1 for step in checkpoint.steps.values() if step["category"] == "crew")
+
+
 def _three_task_crew(agent: Agent, process: str = "sequential") -> Crew:
     return Crew(
         agents=[agent],
@@ -109,7 +114,7 @@ async def test_parallel_crew_records_concurrently_and_resumes() -> None:
             {"topic": "x"}, checkpoint=mgr
         )
     stored = await store.load("crew-par")
-    assert stored is not None and len(stored.steps) == 2  # no CAS conflict
+    assert stored is not None and _crew_steps(stored) == 2  # no CAS conflict
 
     second = _service(_text("Z"))
     result = await _three_task_crew(Agent(llm_service=second), "parallel").run(
@@ -148,15 +153,16 @@ async def test_interrupted_task_replays_its_tool_calls_and_scopes_do_not_collide
         )
     assert ran == ["1", "1"]  # same call, two tasks: both really ran
 
-    # Pass 2: task one replays whole; task two's call replays from ITS scope.
-    second = _service(_tool_turn("lookup", {"q": "1"}), _text("B"))
+    # Pass 2: task one replays whole; task two's model turn and its call
+    # replay from ITS scope, and only the interrupted turn reaches the model.
+    second = _service(_text("B"))
     agent = Agent(llm_service=second, tools=[tool])
     result = await Crew(agents=[agent], tasks=[Task("one"), Task("two")]).run(
         checkpoint=await _reloaded(store, "crew-tools")
     )
     assert ran == ["1", "1"]
     assert result.final == "B"
-    assert second.generate.await_count == 2
+    assert second.generate.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -215,7 +221,7 @@ async def test_ambient_checkpoint_is_used_when_none_is_passed() -> None:
             Agent(llm_service=_service(_text("A"), _text("B"), _text("C")))
         ).run({"topic": "x"})
     stored = await store.load("crew-ambient")
-    assert stored is not None and len(stored.steps) == 3
+    assert stored is not None and _crew_steps(stored) == 3
 
 
 @pytest.mark.asyncio

@@ -414,6 +414,7 @@ Declared in `baselith.core.config.mcp`.
 | `MCP_STDIO_TRANSPORT_ENABLED` | `bool` | `True` | Deprecated, no effect: nothing reads it; stdio runs when the server is launched as a process |
 | `MCP_STDIO_TRUSTED_BIN_DIRS` | `str` | *empty* | Comma-separated absolute directories a command name is resolved in. Empty (default): /usr/bin, /bin, /usr/local/bin, /opt/homebrew/bin, the active venv/conda bin. The running interpreter's own directory is always trusted. A non-empty value replaces the system list. |
 | `MCP_TASK_POLL_INTERVAL_MS` | `int` | `1000` |  |
+| `MCP_TASK_STORE_BACKEND` | `Literal['auto', 'memory', 'postgres']` | `auto` | Where task handles are persisted. 'memory' keeps them in the process (a restart answers "Unknown task"); 'postgres' writes every status transition to the mcp_tasks table (migration 015), so tasks/get after a restart — or on another replica — returns the stored status and result, and a task whose process died is failed as orphaned. 'auto' = postgres when POSTGRES_ENABLED, else memory. |
 | `MCP_TASK_TTL_MS` | `int` | `3600000` | How long a task handle stays resolvable, and how often the client should poll it. Both are hints carried in the CreateTaskResult. |
 | `MCP_TOOL_CALL_TIMEOUT_SECONDS` | `float` | `60.0` | Server-side deadline on one `tools/call` handler. Without it a hung tool holds the request (and, on HTTP, the connection) indefinitely. 0 disables the deadline. |
 
@@ -1054,4 +1055,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-713 settings documented.
+714 settings documented.

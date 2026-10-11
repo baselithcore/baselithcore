@@ -84,11 +84,17 @@ async def recording_stream(
     answer stored as the assistant's turn would be replayed to the model as
     something it said.
     """
+    from baselith.core.services.chat.utils.streaming import aclose_quietly
+
     chunks: list[str] = []
-    async for chunk in source:
-        if isinstance(chunk, str):
-            chunks.append(chunk)
-        yield chunk
+    try:
+        async for chunk in source:
+            if isinstance(chunk, str):
+                chunks.append(chunk)
+            yield chunk
+    finally:
+        # Closing this wrapper closes the source as well (see on_stream_end).
+        await aclose_quietly(source)
     await record_turn(manager, key, turns, query, "".join(chunks))
 
 

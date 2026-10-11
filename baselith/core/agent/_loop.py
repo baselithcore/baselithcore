@@ -10,12 +10,13 @@ could drift. Behaviour is unchanged: the loop still raises — only
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from baselith.core.agent._durable_turns import durable_turn, turn_identity
 from baselith.core.agent._repeat_guard import (
     AgentIterationLimitError,
     RepeatedToolCallError,
@@ -73,13 +74,7 @@ def validate_history(history: Sequence[Message] | None) -> list[Message]:
 
 
 async def _turn_events(
-    agent: Agent[Any],
-    service: Any,
-    messages: list[Message],
-    *,
-    specs: list[LLMToolSpec] | None,
-    response_format: ResponseFormat | None,
-    system: str | None,
+    call: Callable[[Callable[[str], None] | None], Awaitable[LLMResult]],
 ) -> AsyncGenerator[str | LLMResult, None]:
     """One model turn as it happens: text chunks, then the whole result.
 
@@ -87,6 +82,11 @@ async def _turn_events(
     delivers text through a callback while the loop is a generator: this is the
     bridge, and the only place the two meet. A turn on a provider that cannot
     stream simply yields the result with no chunks before it.
+
+    ``call(on_text)`` makes the turn's model call. Under a checkpoint it is the
+    recorded step (:mod:`baselith.core.agent._durable_turns`): a replayed turn
+    never calls ``on_text``, so it yields its result with no chunks before it,
+    like a provider that cannot stream.
 
     Whoever stops iterating (client disconnect, ``aclose``, cancellation) also
     stops the model call: the task is cancelled and awaited here, which closes
@@ -97,16 +97,7 @@ async def _turn_events(
         A failed call re-raises its exception after the chunks that preceded it.
     """
     queue: asyncio.Queue[str | None] = asyncio.Queue()
-    task = asyncio.ensure_future(
-        agent._generate(
-            service,
-            messages,
-            specs=specs,
-            response_format=response_format,
-            system=system,
-            on_text=queue.put_nowait,
-        )
-    )
+    task = asyncio.ensure_future(call(queue.put_nowait))
     # FIFO behind every chunk: the sentinel can only follow the last one.
     task.add_done_callback(lambda _done: queue.put_nowait(None))
     try:
@@ -119,6 +110,55 @@ async def _turn_events(
         await asyncio.wait({task})
         if not task.cancelled():
             task.exception()  # mark retrieved: the consumer already left
+
+
+def _turn_call(
+    agent: Agent[Any],
+    service: Any,
+    messages: list[Message],
+    *,
+    checkpoint: Any | None,
+    turn: int,
+    specs: list[LLMToolSpec] | None,
+    response_format: ResponseFormat | None,
+    system: str | None,
+) -> Callable[[Callable[[str], None] | None], Awaitable[LLMResult]]:
+    """The model call for one turn: direct, or a recorded checkpoint step.
+
+    ``messages`` is a snapshot of the conversation sent for this turn; under
+    a checkpoint it is also what the step key digests.
+    """
+
+    def _generate(on_text: Callable[[str], None] | None) -> Awaitable[LLMResult]:
+        return agent._generate(
+            service,
+            messages,
+            specs=specs,
+            response_format=response_format,
+            system=system,
+            **({"on_text": on_text} if on_text is not None else {}),
+        )
+
+    if checkpoint is None:
+        return _generate
+    identity = turn_identity(
+        turn,
+        messages,
+        model=agent.model,
+        system=system,
+        specs=specs,
+        response_format=response_format,
+    )
+
+    def _durable(on_text: Callable[[str], None] | None) -> Awaitable[LLMResult]:
+        return durable_turn(
+            checkpoint,
+            identity,
+            lambda: _generate(on_text),
+            message_from_result,
+        )
+
+    return _durable
 
 
 async def drive(
@@ -170,20 +210,22 @@ async def drive(
     for iteration in range(1, agent.max_iterations + 1):
         # Charges the ambient request budget for this round trip (a no-op
         # outside an orchestrated request); raises when the cap is hit.
+        # A replayed turn ticks it too: the resumed pass walks the same loop.
         enforce_iteration(context)
         streamed = False
         result: LLMResult | None = None
+        model_call = _turn_call(
+            agent,
+            service,
+            list(messages),
+            checkpoint=checkpoint,
+            turn=iteration - 1,
+            specs=specs,
+            response_format=response_format,
+            system=system,
+        )
         if stream_text and plain_text:
-            async with aclosing(
-                _turn_events(
-                    agent,
-                    service,
-                    messages,
-                    specs=specs,
-                    response_format=response_format,
-                    system=system,
-                )
-            ) as turn:
+            async with aclosing(_turn_events(model_call)) as turn:
                 async for item in turn:
                     if isinstance(item, str):
                         streamed = True
@@ -192,13 +234,7 @@ async def drive(
                         result = item
             assert result is not None
         else:
-            result = await agent._generate(
-                service,
-                messages,
-                specs=specs,
-                response_format=response_format,
-                system=system,
-            )
+            result = await model_call(None)
         # Verbatim, before anything else: the API requires the turn that
         # requested the tools — thinking blocks included — to come back
         # unchanged alongside their results.

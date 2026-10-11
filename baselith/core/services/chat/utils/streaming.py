@@ -7,6 +7,11 @@ Provides functions for building and managing streaming response generators.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from typing import Any
+
+from baselith.core.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 StreamFunction = Callable[[str], Iterable[str]]
 FinalizeFunction = Callable[[str], str]
@@ -107,7 +112,10 @@ def on_stream_end(
             reason (exhaustion, an exception, or the consumer closing it).
 
     Returns:
-        An async iterator yielding the same chunks as ``stream``.
+        An async iterator yielding the same chunks as ``stream``; closing it
+        closes ``stream`` too (an async generator's close never reaches the
+        one it iterates, and a durable run behind it records its interruption
+        and releases its lease on that close).
     """
 
     async def wrapped() -> AsyncIterator[str]:
@@ -115,13 +123,28 @@ def on_stream_end(
             async for chunk in stream:
                 yield chunk
         finally:
-            callback()
+            try:
+                await aclose_quietly(stream)
+            finally:
+                callback()
 
     return wrapped()
 
 
+async def aclose_quietly(stream: Any) -> None:
+    """Close ``stream`` when it can be closed; a failing close is logged only."""
+    aclose = getattr(stream, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await aclose()
+    except Exception as exc:
+        logger.debug("chat_stream_source_close_failed error=%s", exc)
+
+
 __all__ = [
     "FinalizeCallback",
+    "aclose_quietly",
     "FinalizeFunction",
     "StreamFunction",
     "build_cached_stream",

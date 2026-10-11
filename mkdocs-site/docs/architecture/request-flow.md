@@ -574,9 +574,11 @@ handler, `process_stream` runs it under the same per-request loop controls as
 `process()` — `LoopBudget` (token/USD caps, `max_seconds` deadline), tenant
 guard, memory recall (when long-term memory is enabled), capability injection,
 output guard — and schedules the memory write only once the stream completes; a budget breach ends the stream
-with `Request aborted: <reason>`. Durable checkpointing applies to the
-non-streaming path only. See
-[Orchestration › Streaming pipeline](../core-modules/orchestration.md#streaming-pipeline).
+with `Request aborted: <reason>`. With a checkpoint store the stream is a
+checkpointed run: its durable steps record, and the delivered answer is
+recorded when it completes, so a retry under the same `Idempotency-Key`
+replays it or resumes the run. See
+[Orchestration › Durable streams](../core-modules/orchestration.md#durable-streams-process_stream-with-a-run-id).
 
 | Frame | When | Payload |
 | --- | --- | --- |
@@ -585,9 +587,12 @@ non-streaming path only. See
 | `event: done` | **always**, last | `data: [DONE]`, matching the convention every OpenAI-compatible SSE client already implements. |
 | `: keepalive` | every `SSE_HEARTBEAT_SECONDS` (default 15) of silence | An SSE comment: no event, ignored by every client, but traffic that keeps proxy idle timeouts from dropping a stream waiting on a slow model. |
 
-Every event (not the comments) carries an `id:` numbered from `1`. There is no
-replay — `Last-Event-ID` is ignored; a client that lost the stream re-sends the
-request.
+Every event (not the comments) carries an `id:` numbered from `1`. A client
+that lost the stream re-sends the request; with the same `Idempotency-Key`
+(authenticated callers) a completed run is replayed from event
+`Last-Event-ID + 1`, and an interrupted one is resumed behind an
+`event: reset` frame that tells the client to discard its partial text (see
+[REST › chat streaming](../api/rest.md)).
 
 The terminal event is the point: it used to answer `text/plain` with the tokens
 simply concatenated, which gave a client no frame boundaries and no way to tell a

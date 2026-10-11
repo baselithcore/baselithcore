@@ -6,7 +6,6 @@ Coordinates decentralized task allocation, pheromone-based signaling,
 and dynamic team formation to achieve emergent complex behaviors.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
@@ -413,6 +412,10 @@ class Colony(ColonyOpsMixin):
 
         Orchestrates a multi-stage pipeline: batch auction allocation
         followed by concurrent execution using a provided callback function.
+        Under an ambient checkpoint every auction outcome and every finished
+        task's result is a recorded step, so a resumed batch neither
+        re-auctions nor re-executes finished work (see
+        :mod:`baselith.core.swarm.colony_batch`).
 
         Args:
             tasks: A list of tasks to be distributed and run.
@@ -429,71 +432,20 @@ class Colony(ColonyOpsMixin):
     async def _execute_batch(
         self, tasks: list[Task], execute_fn: "Colony.ExecuteFn"
     ) -> "Colony.BatchResult":
-        result = Colony.BatchResult()
+        # Body in colony_batch (module size cap), durable under a checkpoint.
+        from baselith.core.swarm.colony_batch import run_batch
 
-        # 1. Allocate all tasks via auction
-        allocations: list[tuple[Task, AgentProfile]] = []
-        for task in tasks:
-            winner_id = await self.submit_task(task)
-            if winner_id and winner_id in self._agents:
-                task.assigned_to = winner_id
-                allocations.append((task, self._agents[winner_id]))
-            else:
-                result.unassigned.append(task.id)
+        return await run_batch(self, tasks, execute_fn)
 
-        if not allocations:
-            return result
+    def restore_assignment(self, task: Task, winner_id: str) -> None:
+        """Reinstate an auction outcome recorded by an earlier pass.
 
-        # A per-request LoopBudget breach is fatal to the whole batch: the
-        # sub-agents share the ambient budget (inherited via the ContextVar in
-        # baselith.core.orchestration.budget_context when each task is created), so once
-        # it's exhausted no sibling can make progress. Let that (and cancellation)
-        # propagate out of _run to abort the group; record ordinary per-task
-        # failures instead of tearing down the batch.
-        from baselith.core.orchestration.limits import BudgetExceededError
-
-        # 2. Execute all allocated tasks concurrently under a TaskGroup so a
-        #    fatal error deterministically cancels the siblings (structured
-        #    concurrency), rather than leaving orphaned tasks running as
-        #    ``gather`` could.
-        async def _run(t: Task, agent: AgentProfile) -> tuple[str, bool, Any]:
-            try:
-                out = await execute_fn(t, agent)
-                self.complete_task(t.id, success=True, result=out)
-                return t.id, True, out
-            except (asyncio.CancelledError, BudgetExceededError):
-                self.complete_task(t.id, success=False)
-                raise  # fatal → propagate to cancel the whole group
-            except Exception as exc:
-                self.complete_task(t.id, success=False)
-                return t.id, False, str(exc)
-
-        running: list[asyncio.Task[tuple[str, bool, Any]]] = []
-        budget_error: BudgetExceededError | None = None
-        try:
-            async with asyncio.TaskGroup() as tg:
-                running = [tg.create_task(_run(t, a)) for t, a in allocations]
-        except* BudgetExceededError as eg:
-            # The shared budget was exhausted mid-batch; siblings were cancelled
-            # by the group. Capture the breach to re-raise after harvesting the
-            # tasks that already finished.
-            budget_error = eg.exceptions[0]  # type: ignore[assignment]
-
-        for tt, (t, _agent) in zip(running, allocations, strict=True):
-            if tt.cancelled():
-                # Cancelled by the group when the budget breached — surface it
-                # so the caller sees the task didn't complete.
-                result.failed.setdefault(t.id, "cancelled: batch budget exceeded")
-                continue
-            if tt.exception() is not None:
-                continue  # the fatal error is handled via budget_error
-            task_id, ok, payload = tt.result()
-            if ok:
-                result.completed[task_id] = payload
-            else:
-                result.failed[task_id] = payload
-
-        if budget_error is not None:
-            raise budget_error
-
-        return result
+        A resumed durable batch replays the recorded winner instead of running
+        the auction again (see :mod:`baselith.core.swarm.colony_batch`); this
+        puts the colony in the state :meth:`submit_task` would have left.
+        """
+        self._tasks[task.id] = task
+        task.assigned_to = winner_id
+        task.status = "assigned"
+        if winner_id in self._agents:
+            self._agents[winner_id].status = AgentStatus.BUSY

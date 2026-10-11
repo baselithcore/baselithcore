@@ -128,6 +128,19 @@ from its job id. `extra_context` adds entries to
 the orchestration context — the queued job uses it to register its completion
 notifier. Both default to `None`: no stable id, nothing added.
 
+`handle_chat_stream_async(req, *, run_id=None)` takes the same stable id
+(`POST /chat/stream` derives it from an authenticated caller's
+`Idempotency-Key`). With one, the stream is opened through
+`open_stream_run` (`baselith/core/services/chat/stream_session.py`): a completed
+run replays its recorded chunks, an interrupted one resumes (recorded steps
+replay, the answer is regenerated), a run still streaming elsewhere raises
+`CheckpointLeaseHeldError` before any chunk exists, and the returned
+`ChatStream` carries the attempt's `run_id` and `mode` so the SSE layer can
+honour `Last-Event-ID` (see
+[durable streams](orchestration.md#durable-streams-process_stream-with-a-run-id)).
+Without one the stream is still a checkpointed run when a store is configured,
+under a generated id nobody can resume by request.
+
 `handle_chat_stream` delegates to `handle_chat_stream_async` and drains it
 through `baselith.core.utils.concurrency.drain_async_iterator`, so the guardrails, the
 metrics, the streaming-disabled fallback and the error stream have one
