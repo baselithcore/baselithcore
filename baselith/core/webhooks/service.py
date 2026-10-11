@@ -19,10 +19,10 @@ from pydantic import SecretStr
 
 from baselith.core.config.webhooks import WebhookConfig, get_webhook_config
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.ssrf import SsrfPolicy, assert_url_safe
 from baselith.core.tenancy.guard import tenants_match
 from baselith.core.webhooks.dispatcher import WebhookDispatcher
 from baselith.core.webhooks.signing import reserved_header_names
-from baselith.core.webhooks.ssrf import validate_webhook_url
 from baselith.core.webhooks.store import InMemoryWebhookStore, WebhookStore
 from baselith.core.webhooks.types import (
     WebhookDelivery,
@@ -63,11 +63,11 @@ class WebhookService:
         """Register a new endpoint after validating the URL and the tenant cap.
 
         Raises:
-            WebhookSSRFError: If the URL is unsafe (and internal is not allowed).
+            SsrfError: If the URL is unsafe (and internal is not allowed).
             ValueError: If the tenant's endpoint cap is exceeded, or ``headers``
                 names one the dispatcher reserves (signature, Host, framing).
         """
-        validate_webhook_url(url, allow_internal=self._config.allow_internal)
+        assert_url_safe(url, SsrfPolicy(allow_internal=self._config.allow_internal))
         reserved = reserved_header_names(headers or {})
         if reserved:
             raise ValueError(

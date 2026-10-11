@@ -184,7 +184,8 @@ through `assert_url_safe`/`assert_url_safe_async` or
 
 | Call site | Module | Internal hosts |
 |---|---|---|
-| Webhook dispatch | `baselith.core.webhooks.dispatcher` (via the `baselith.core.webhooks.ssrf` shim) | Rejected by default; `WEBHOOK_ALLOW_INTERNAL=true` to allow. |
+| Webhook registration + dispatch | `baselith.core.webhooks.service` (`assert_url_safe`), `baselith.core.webhooks.dispatcher` (`resolve_pinned_target`) | Rejected by default; `WEBHOOK_ALLOW_INTERNAL=true` to allow. |
+| Marketplace registry URL | `baselith.core.marketplace.registry` | Rejected by default; loopback (local testing) or `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true` for a trusted internal registry. |
 | OIDC discovery + JWKS | `baselith.core.auth.oidc` | Always rejected — issuer and the JWKS URI read back from the discovery document (attacker-influenced if the issuer/its DNS is compromised) are both screened before any HTTP call. No opt-out. |
 | A2A client | `baselith.core.a2a.client.A2AClient` | **Environment-aware default** for `A2AClientConfig.allow_internal_endpoints`: allowed outside production (A2A meshes commonly run peer agents on private networks), **denied in production** — the same deny-by-default as the MCP transport and the webhook guard. Setting `A2A_ALLOW_INTERNAL_ENDPOINTS` explicitly (`1`/`true`/`yes`/`on` is truthy, anything else falsy) overrides in both directions, so a private-mesh production deployment opts back in with `A2A_ALLOW_INTERNAL_ENDPOINTS=true`. Production is resolved by the [runtime-environment resolver](config.md#runtime-environment). See [A2A Protocol](a2a.md). |
 | MCP Streamable HTTP transport | `baselith.core.mcp.http_client_transport` | Rejected by default; `MCP_ALLOW_INTERNAL_ENDPOINTS=true` for a local/internal MCP server. See [MCP Integration](mcp.md#ssrf-guard-streamable-http-transport). |
@@ -216,13 +217,23 @@ loopback/private/link-local screening and the IP pinning described above.
 ### Deprecated shims
 
 `baselith/core/webhooks/ssrf.py` is a thin backward-compatible shim over
-`baselith.core.security.ssrf`: `WebhookSSRFError` is now an alias of `SsrfError`, and
-`resolve_pinned_target`/`validate_webhook_url` delegate to the new module
-with a `SsrfPolicy(allow_internal=...)` built from their `allow_internal`
-kwarg. It is kept only so existing imports keep working (`baselith.core.webhooks.dispatcher`,
-`baselith.core.webhooks.service`, the marketplace registry, and third-party plugins)
-and will be removed in a future major release — new code should import
-`baselith.core.security.ssrf` directly. `baselith.core.scraper.utils` and
+`baselith.core.security.ssrf`, **deprecated since 1.0 and removed in 2.0**.
+No framework module imports it any more — the webhook service and dispatcher,
+the marketplace registry and the webhook management router all call
+`baselith.core.security.ssrf` directly; it exists only for third-party code.
+
+| Deprecated (`baselith.core.webhooks.ssrf`, also re-exported by `baselith.core.webhooks`) | Replacement (`baselith.core.security.ssrf`) |
+| --- | --- |
+| `validate_webhook_url(url, allow_internal=x)` | `assert_url_safe(url, SsrfPolicy(allow_internal=x))` |
+| `resolve_pinned_target(url, allow_internal=x)` | `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` |
+| `WebhookSSRFError` | `SsrfError` |
+
+The two functions are wrapped in `@deprecated(since="1.0", removed_in="2.0", …)`
+and emit a `DeprecationWarning` on every call. `WebhookSSRFError` is an
+**alias**, not a wrapper — the same class object as `SsrfError` — so
+`except WebhookSSRFError` keeps catching what the new API raises; for the same
+reason it cannot warn (a warning on the class would fire for every `SsrfError`
+the framework raises), and it is deprecated by documentation only. `baselith.core.scraper.utils` and
 `baselith.plugins.web_scraper.utils.is_private_ip`/`resolve_safe_ips` are similar
 compatibility re-exports (see [Web Scraper](scraper.md#security-ssrf-protection)).
 

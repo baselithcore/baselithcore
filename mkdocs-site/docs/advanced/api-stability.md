@@ -26,8 +26,8 @@ The current split:
 
 | Tier | Packages |
 | --- | --- |
-| `stable` | `baselith`, `baselith.core.agent`, `baselith.core.api`, `baselith.core.auth`, `baselith.core.config`, `baselith.core.events`, `baselith.core.guardrails`, `baselith.core.lifecycle`, `baselith.core.middleware`, `baselith.core.models`, `baselith.core.observability`, `baselith.core.plugins`, `baselith.core.security` |
-| `beta` | 32 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.task_queue`, `baselith.core.services`, … |
+| `stable` | `baselith`, `baselith.core.agent`, `baselith.core.api`, `baselith.core.auth`, `baselith.core.cache`, `baselith.core.config`, `baselith.core.db`, `baselith.core.events`, `baselith.core.guardrails`, `baselith.core.lifecycle`, `baselith.core.middleware`, `baselith.core.models`, `baselith.core.observability`, `baselith.core.plugins`, `baselith.core.resilience`, `baselith.core.security` |
+| `beta` | 29 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.task_queue`, `baselith.core.services`, … |
 | `experimental` | 19 packages — the cognitive and research surface: `baselith.core.swarm`, `baselith.core.meta`, `baselith.core.planning`, `baselith.core.skill_evolution`, … |
 | `deprecated` | `baselith.core.doc_sources`, `baselith.core.routers`, `baselith.core.scraper` — the domain shims frozen by the Sacred Core rule |
 
@@ -93,13 +93,25 @@ Promotion is a deliberate line in a diff, and it is earned: a package is
 promoted when its shape has held across releases, it is documented, and it is
 covered by tests.
 
-1.0 promoted eight packages on that evidence: `auth`, `events`, `guardrails`,
-`lifecycle`, `middleware`, `models`, `observability` and `security`. Each
-removed no public symbol in the releases since mid-September 2026, each has
-its own reference page, each is at or above 85% branch coverage, and together
-they are most of what the bundled plugins import. The packages that 1.0 work
-is still reshaping (`orchestration` and `task_queue` around durable execution,
-`mcp` with its specification) or that sit below the coverage bar stay `beta`.
+1.0 promoted eleven packages on that evidence: `auth`, `cache`, `db`,
+`events`, `guardrails`, `lifecycle`, `middleware`, `models`, `observability`,
+`resilience` and `security`. Each removed no public symbol in the releases
+since mid-September 2026, each has its own reference page, each is at or above
+85% branch coverage, and together they are most of what the bundled plugins
+import. Three of them — `cache`, `db` and `resilience` — were below the bar
+until behaviour tests for their error paths and branches brought them to
+94–99%; that work also fixed the defects it surfaced (a shutdown signal
+received before anyone waited was lost, a one-shot `sources` iterable skipped
+the feedback graph counters, and `LLMServiceProtocol.generate_response_stream`
+was declared as a coroutine instead of an async generator).
+
+Still `beta`: the packages 1.0 work is reshaping (`orchestration` and
+`task_queue` around durable execution, `mcp` with its specification);
+`interfaces`, whose protocols are fully covered but have no reference page of
+their own; and `chat`, now at 97% branch coverage but with a known defect in
+the RAG workflow handler's result shape still open. The stable tier is also
+kept to at most a quarter of all packages (a test enforces it), so the next
+promotion has to be worth one of the remaining slots.
 
 ## Announcing a deprecation
 

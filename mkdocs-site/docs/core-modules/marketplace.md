@@ -340,9 +340,12 @@ See [Plugins › PluginLoader](plugins.md#pluginloader).
     `BASELITH_MARKETPLACE_ALLOW_HTTP=true` opts in on trusted networks only.
     **SSRF**: the registry host must not resolve to a loopback/private/
     link-local/cloud-metadata address (e.g. `https://169.254.169.254/…`),
-    which would pivot the server into the internal network. Internal
-    registries (on-prem/air-gapped) opt in via
-    `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
+    which would pivot the server into the internal network. The check is
+    the framework's shared guard, `assert_url_safe` from
+    [`baselith.core.security.ssrf`](security.md#ssrf-protection) (it used to
+    go through the now-deprecated `baselith.core.webhooks.ssrf` shim; the
+    behaviour is unchanged). Internal registries (on-prem/air-gapped) opt in
+    via `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
 
 !!! tip "Publish credentials"
     `baselith plugin marketplace publish` resolves its admin key in this

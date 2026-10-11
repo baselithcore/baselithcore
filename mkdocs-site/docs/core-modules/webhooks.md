@@ -204,7 +204,33 @@ rebinding: `resolve_pinned_target()` resolves the host once and returns a
 `(pinned_url, host)` pair, and the dispatcher POSTs to the pinned IP with `Host`
 and TLS `sni_hostname` set to the original hostname. Redirects are not followed
 (`follow_redirects=False`), so a `3xx` cannot bounce the delivery to an internal
-host. `validate_webhook_url()` remains the (registration-time) check.
+host.
+
+Both checks come from the shared guard in
+[`baselith.core.security.ssrf`](security.md#ssrf-protection):
+`WebhookService.register_endpoint()` runs `assert_url_safe()` at registration
+time (so an unsafe URL is refused before it is stored), and the dispatcher runs
+`resolve_pinned_target()` before every delivery (so a host that has since been
+re-pointed at an internal address fails closed). Both raise `SsrfError`.
+
+!!! warning "Deprecated: `baselith.core.webhooks.ssrf`"
+    `validate_webhook_url()`, `resolve_pinned_target(url, allow_internal=...)`
+    and `WebhookSSRFError` — importable from `baselith.core.webhooks.ssrf` and
+    re-exported by `baselith.core.webhooks` — are a compatibility shim,
+    **deprecated since 1.0 and removed in 2.0**. Nothing in the framework calls
+    them any more.
+
+| Deprecated | Use instead |
+| --- | --- |
+| `validate_webhook_url(url, allow_internal=x)` | `assert_url_safe(url, SsrfPolicy(allow_internal=x))` |
+| `resolve_pinned_target(url, allow_internal=x)` | `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` from `baselith.core.security.ssrf` |
+| `WebhookSSRFError` | `SsrfError` |
+
+The two functions emit a `DeprecationWarning` on every call.
+`WebhookSSRFError` does not: it is an alias — the same class object as
+`SsrfError`, which is why `except WebhookSSRFError` still catches what the
+new API raises — and a warning on the class would fire for every
+`SsrfError` the framework raises. Replace the name before 2.0 anyway.
 
 The management API never echoes the guard's reason: a rejected registration
 answers a fixed `400 Webhook URL is not an allowed destination.` and the

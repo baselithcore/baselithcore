@@ -42,12 +42,16 @@ logger = get_logger(__name__)
 
 # Temporary, documented opt-out restoring the pre-namespace behaviour (denylist
 # only) for a deployment whose plugins still publish out-of-namespace keys to
-# ``os.environ`` and cannot be updated yet. Deprecated on introduction: the
-# refusal warnings name every key that has to move, and this escape hatch is
-# scheduled for removal once those are migrated. Protected keys stay refused
-# even with the flag on — it widens the allowlist, it never disables the
-# denylist.
+# ``os.environ`` and cannot be updated yet. Deprecated on introduction and
+# removed in 2.0 (``LEGACY_DENYLIST_REMOVED_IN``): from then on the flag is
+# ignored. The refusal warnings name every key that has to move, and setting
+# the flag logs the removal version once per process. Protected keys stay
+# refused even with the flag on — it widens the allowlist, it never disables
+# the denylist.
 LEGACY_DENYLIST_ONLY_FLAG = "BASELITH_PLUGIN_ENV_LEGACY_DENYLIST"
+#: The release that removes :data:`LEGACY_DENYLIST_ONLY_FLAG`.
+LEGACY_DENYLIST_REMOVED_IN = "2.0"
+_legacy_flag_warned = False
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 # Framework-global controls a plugin's own ``.env`` must never set. A tampered
@@ -234,8 +238,27 @@ def classify_plugin_env_key(
 
 
 def _legacy_denylist_only() -> bool:
-    """Whether the deprecated denylist-only opt-out is enabled."""
-    return os.getenv(LEGACY_DENYLIST_ONLY_FLAG, "").strip().lower() in _TRUTHY
+    """Whether the deprecated denylist-only opt-out is enabled.
+
+    Logs the deprecation (with its removal version) the first time the flag is
+    seen set in this process — whether or not any plugin actually relies on
+    it, so an operator learns about the removal before the upgrade that
+    performs it, not from a plugin that stopped working.
+    """
+    global _legacy_flag_warned
+    enabled = os.getenv(LEGACY_DENYLIST_ONLY_FLAG, "").strip().lower() in _TRUTHY
+    if enabled and not _legacy_flag_warned:
+        _legacy_flag_warned = True
+        logger.warning(
+            "%s is deprecated and will be removed in %s: from %s on it is "
+            "ignored and every plugin .env key outside the plugin namespace "
+            "stays out of os.environ. Rename the keys the plugin-env warnings "
+            "list, or declare them in the manifest 'environment_variables' list.",
+            LEGACY_DENYLIST_ONLY_FLAG,
+            LEGACY_DENYLIST_REMOVED_IN,
+            LEGACY_DENYLIST_REMOVED_IN,
+        )
+    return enabled
 
 
 def apply_plugin_env(
@@ -336,7 +359,8 @@ def apply_plugin_env(
             ", ".join(prefixes) or "<none>",
             (
                 f"{LEGACY_DENYLIST_ONLY_FLAG} is set, so they were still exported "
-                "to os.environ; this opt-out is deprecated and will be removed."
+                "to os.environ; this opt-out is deprecated and will be removed "
+                f"in {LEGACY_DENYLIST_REMOVED_IN}."
                 if legacy_mode
                 else "They were merged into the plugin config but NOT exported to "
                 "os.environ."

@@ -246,14 +246,20 @@ class LLMServiceProtocol(Protocol):
         """Generate a response."""
         ...
 
-    async def generate_response_stream(
+    def generate_response_stream(
         self,
         prompt: str,
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        """Generate in streaming mode."""
+        """Generate in streaming mode (implement as an async generator)."""
         ...
 ```
+
+`generate_response_stream` is declared as a plain `def` returning an
+`AsyncIterator`: that is the type of an async generator function
+(`async def` with `yield`), which is how every implementation writes it. An
+`async def` in the protocol would declare a coroutine that *returns* an
+iterator, and a type checker would reject every real implementation.
 
 The protocol is re-exported from `baselith.core.interfaces`, so import it with
 `from baselith.core.interfaces import LLMServiceProtocol`.

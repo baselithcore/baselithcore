@@ -150,11 +150,17 @@ class LLMServiceProtocol(Protocol):
         """
         ...
 
-    async def generate_response_stream(
+    def generate_response_stream(
         self, prompt: str, model: str | None = None
     ) -> AsyncIterator[str]:
         """
         Generate a streaming response from the LLM.
+
+        Implement it as an async generator (``async def`` with ``yield``).
+        The protocol declares a plain ``def`` returning ``AsyncIterator[str]``
+        because that is the type of an async generator function; an
+        ``async def`` here would declare a coroutine that *returns* an
+        iterator, which no async generator satisfies.
 
         Args:
             prompt: Input prompt

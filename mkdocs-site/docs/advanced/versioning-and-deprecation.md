@@ -32,7 +32,7 @@ change would surprise an operator who only read the commit subject.
 
 Scaled by the [stability tier](api-stability.md) of the package involved: the
 list below describes the `stable` tier, which is what `baselith` and the
-twelve `stable` packages behind it carry. A `beta` package stages the same change through a
+fifteen `stable` packages behind it carry. A `beta` package stages the same change through a
 MINOR, an `experimental` one promises nothing.
 
 - Removing or renaming a public symbol exported from a `core.*` package

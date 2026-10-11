@@ -9,6 +9,14 @@ required).
 Writes are compare-and-swap on the ``version`` column and the per-run lease
 lives in the ``owner`` / ``lease_expires_at`` columns (migration 013); the SQL
 is in :mod:`baselith.core.orchestration.checkpoint_postgres_sql`.
+
+Lease expiries are kept on the **database clock**, so replicas whose clocks
+disagree still agree on whether a lease is live. ``Checkpoint.lease_expires_at``
+stays on the local clock in process; this store converts at the boundary by
+way of durations, which no clock offset affects: a write sends the seconds left
+(``lease_expires_at - time.time()``) and the server adds its own ``now()``; a
+read returns the seconds left by the server clock and the store adds
+``time.time()``.
 """
 
 from __future__ import annotations
@@ -71,11 +79,35 @@ CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_resumable
 """
 
 
+def _lease_remaining(checkpoint: Checkpoint) -> float | None:
+    """Seconds left on the in-process (local-clock) lease; None if unleased."""
+    expires = checkpoint.lease_expires_at
+    return None if expires is None else float(expires) - time.time()
+
+
+def _local_expiry(remaining: Any) -> float | None:
+    """A ``lease_remaining`` read from the server, as a local-clock expiry."""
+    return None if remaining is None else time.time() + float(remaining)
+
+
+def _clock_shift(now: float | None) -> float:
+    """Offset of a caller-supplied ``now`` from the local clock (0 when unset).
+
+    The lease methods keep their injectable ``now`` (tests drive expiry with
+    it); it is applied to the database clock as a shift, never as an absolute
+    time, so production calls (``now=None``) use the server clock unaltered.
+    """
+    return 0.0 if now is None else now - time.time()
+
+
 def _row_to_checkpoint(row: dict[str, Any]) -> Checkpoint:
     """The JSONB document with the authoritative columns laid over it.
 
     Lease statements update only the columns, so the document's copies of
-    ``version`` / ``owner`` / ``lease_expires_at`` may lag behind.
+    ``version`` / ``owner`` / ``lease_expires_at`` may lag behind. The lease
+    column arrives as ``lease_remaining`` (server-clock seconds left) and is
+    converted to a local-clock expiry; a row carrying the absolute
+    ``lease_expires_at`` instead is taken as is.
     """
     data = row["data"]
     # psycopg returns JSONB as a parsed object; tolerate a raw string too.
@@ -84,6 +116,8 @@ def _row_to_checkpoint(row: dict[str, Any]) -> Checkpoint:
     for column in ("version", "owner", "lease_expires_at"):
         if column in row:
             data[column] = row[column]
+    if "lease_remaining" in row:
+        data["lease_expires_at"] = _local_expiry(row["lease_remaining"])
     return Checkpoint.from_dict(data)
 
 
@@ -191,7 +225,7 @@ class PostgresCheckpointStore:
                     payload,
                     checkpoint.version,
                     checkpoint.owner,
-                    checkpoint.lease_expires_at,
+                    _lease_remaining(checkpoint),
                     expected,
                 ),
             )
@@ -243,7 +277,7 @@ class PostgresCheckpointStore:
             checkpoint.status,
             new_version,
             checkpoint.owner,
-            checkpoint.lease_expires_at,
+            _lease_remaining(checkpoint),
             checkpoint.run_id,
             expected,
         )
@@ -285,14 +319,17 @@ class PostgresCheckpointStore:
         claimants matches. Only a refused claim pays the second round trip
         that tells "held" from "absent".
 
+        Expiry and the "has it expired" test both use the database clock, so
+        a replica with a skewed clock cannot take over a live lease.
+
         Raises:
             CheckpointLeaseHeldError: Another owner's lease is still live.
         """
-        current = time.time() if now is None else now
+        shift = _clock_shift(now)
         async with get_async_cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 _CLAIM,
-                (owner, owner, current + lease_seconds, run_id, owner, current),
+                (owner, owner, shift + lease_seconds, run_id, owner, shift),
             )
             row = await cur.fetchone()
             if not row or not isinstance(row, dict):
@@ -301,7 +338,9 @@ class PostgresCheckpointStore:
                 if not held or not isinstance(held, dict):
                     return None
                 raise CheckpointLeaseHeldError(
-                    run_id, held.get("owner"), held.get("lease_expires_at")
+                    run_id,
+                    held.get("owner"),
+                    _local_expiry(held.get("lease_remaining")),
                 )
         return _row_to_checkpoint(row)
 
@@ -313,10 +352,14 @@ class PostgresCheckpointStore:
         *,
         now: float | None = None,
     ) -> bool:
-        """Extend ``owner``'s lease; False when the run is no longer theirs."""
-        expires = (time.time() if now is None else now) + lease_seconds
+        """Extend ``owner``'s lease; False when the run is no longer theirs.
+
+        The new expiry is the database clock plus ``lease_seconds``.
+        """
         async with get_async_cursor() as cur:
-            await cur.execute(_RENEW, (expires, run_id, owner))
+            await cur.execute(
+                _RENEW, (_clock_shift(now) + lease_seconds, run_id, owner)
+            )
             return bool(cur.rowcount)
 
     async def release_lease(self, run_id: str, owner: str) -> None:

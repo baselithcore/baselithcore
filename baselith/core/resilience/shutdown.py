@@ -79,8 +79,15 @@ class GracefulShutdown:
             self._shutdown_event.set()
 
     async def wait_for_shutdown(self) -> None:
-        """Wait for shutdown signal."""
-        self._shutdown_event = asyncio.Event()
+        """Wait for shutdown signal, then run the callbacks.
+
+        A signal that arrived before this call is not lost: the wait returns
+        at once (the handler only flags the shutdown when nobody waits yet).
+        """
+        if self._shutdown_event is None:
+            self._shutdown_event = asyncio.Event()
+        if self._is_shutting_down:
+            self._shutdown_event.set()
         await self._shutdown_event.wait()
         await self._execute_callbacks()
 

@@ -1001,9 +1001,31 @@ that was still executing. Now each attempt has a unique `owner` id and holds
 
 Renewal never touches `updated_at`, so the [stale-run
 sweep](#stale-run-sweep-sweep_stale_runs) still sees a wedged loop as silent.
-Expiry is compared against each replica's clock, so replica clocks must agree
-to well within the lease length (NTP is enough). A store without the three
-optional lease methods (`claim` / `renew_lease` / `release_lease`) keeps
+
+**Whose clock decides expiry** depends on the backend:
+
+- **Postgres — the database clock.** Every lease statement anchors time on the
+  server's `now()`: a claim, a renewal and a step save send the lease *length*
+  (or the seconds still left on it), never a timestamp from the replica, and
+  a claim tests "has it expired" against the server clock too. Reads return
+  the seconds left and the store turns them into a local-clock
+  `lease_expires_at`, so the manager's own checks (`ensure_lease`, the
+  recovery sweep's liveness test) stay consistent on a skewed replica. A
+  replica whose clock is minutes off can therefore neither take over a live
+  run (its clock would call the lease expired) nor write a lease that is
+  already expired for everyone else. No skew margin is needed or offered: the
+  only cross-host comparison happens on one clock. The `now=` argument of
+  `claim` / `renew_lease` survives for tests, applied as a shift of the
+  server clock.
+- **SQLite and in-memory — the process clock.** Both compare against
+  `time.time()` of the process that runs the statement. That is safe because
+  they are single-host by construction: the in-memory store lives in one
+  process, and an SQLite file is shared at most by processes on the host that
+  holds it, which all read the same clock. Do not share an SQLite checkpoint
+  file across hosts (a network filesystem) — use Postgres for multi-replica
+  deployments.
+
+A store without the three optional lease methods (`claim` / `renew_lease` / `release_lease`) keeps
 working without leases. On Postgres the lease lives in the `owner` /
 `lease_expires_at` columns that [migration 013](db.md) adds; an SQLite file
 created by an older release gains its columns on open.

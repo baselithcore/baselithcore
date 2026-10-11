@@ -1072,7 +1072,7 @@ jobs:
           pytest -n auto --cov=baselith/core --cov-report=xml:coverage.xml --cov-report=term -q
       - name: Upload coverage reports to Codecov
         if: matrix.python-version == '3.12'
-        # Reporting, not gating: the 83% floor is enforced by pytest in the
+        # Reporting, not gating: the 85% floor is enforced by pytest in the
         # step above. `fail_ci_if_error: false` covers Codecov's own API
         # answers, not the action crashing on the network — a `read
         # ECONNRESET` while fetching the uploader failed this job on PR #104
@@ -1086,11 +1086,15 @@ jobs:
 
   integration_test:
     # The suite under tests/integration/ against REAL backends: the Postgres
-    # stores (tool ledger, webhooks, skill-evolution patterns), row-level
-    # security under a least-privilege role, pgvector, the Redis event
-    # stream, the Qdrant provider, and the migration upgrade path from every
-    # earlier revision with rows in the tables. python_test runs the same
-    # files with psycopg mocked, where every one of these cases skips.
+    # stores (tool ledger, webhooks, skill-evolution patterns, online eval
+    # results), row-level security under a least-privilege role, pgvector,
+    # the Redis event stream, the Qdrant provider, and the migration upgrade
+    # path from every earlier revision with rows in the tables, down to base
+    # and back. Plus the durable-checkpoint store contract (compare-and-swap,
+    # leases, lease expiry on the database clock), which lives under
+    # tests/unit/ because its memory and SQLite cases need no service.
+    # python_test runs the same files with psycopg mocked, where every one of
+    # these Postgres cases skips.
     #
     # BASELITH_TEST_INTEGRATION_STRICT turns a skip under tests/integration/
     # into a failure (tests/integration/conftest.py): with every backend
@@ -1189,11 +1193,15 @@ jobs:
         # test creates for itself.
         run: python -m baselith.core.db.migrate
       - name: Run integration suite
-        # tests/core/skill_evolution/test_store_postgres.py is the one
-        # real-database module outside tests/integration/. --no-cov: the
-        # coverage floor belongs to python_test's full run.
+        # The three real-database modules outside tests/integration/ are
+        # named explicitly; they fail rather than skip under
+        # BASELITH_TEST_INTEGRATION_STRICT. --no-cov: the coverage floor
+        # belongs to python_test's full run.
         run: |
-          pytest tests/integration tests/core/skill_evolution/test_store_postgres.py \
+          pytest tests/integration \
+            tests/core/skill_evolution/test_store_postgres.py \
+            tests/unit/core/orchestration/test_checkpoint_store_contract.py \
+            tests/unit/core/orchestration/test_checkpoint_lease_clock.py \
             -m "not slow" --no-cov -q -rs
 
   # ============================================================

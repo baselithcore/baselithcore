@@ -1564,7 +1564,10 @@ consequences when upgrading:
 - **`baselith/core/webhooks/ssrf.py` is now a deprecated shim** over
   `baselith.core.security.ssrf` (see [Security & Encryption §Deprecated
   shims](../core-modules/security.md#deprecated-shims)); existing imports
-  keep working unchanged.
+  keep working, but it is deprecated since 1.0 and removed in 2.0, and its
+  functions warn on call. Every framework caller (webhook service and
+  dispatcher, marketplace registry, webhook router) uses
+  `baselith.core.security.ssrf` directly.
 - **Hardened clients no longer honor `HTTP_PROXY`/`HTTPS_PROXY` from the
   environment.** `create_hardened_async_client` always builds (or receives) an
   explicit `transport`, and httpx only auto-reads env proxies (`trust_env`)

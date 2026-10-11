@@ -432,6 +432,11 @@ await shutdown.wait_for_shutdown()
 
 A process-wide singleton is available via `get_shutdown_handler()`.
 
+A signal that arrives *before* `wait_for_shutdown()` is called is not lost:
+the handler flags the shutdown, and the next `wait_for_shutdown()` returns at
+once and runs the callbacks. (Before 1.0 such a signal left the wait blocked
+forever, with every later signal ignored as "already shutting down".)
+
 !!! note "Library helper — not wired into the FastAPI runtime"
     `GracefulShutdown` is not part of the API server's shutdown path: the
     app's real teardown is the FastAPI lifespan plus uvicorn's

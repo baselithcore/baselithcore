@@ -73,6 +73,10 @@ async def insert_feedback(
 
     sanitized_comment = comment.strip() if isinstance(comment, str) else None
     tenant_id = get_current_tenant_id()
+    # ``sources`` is read twice (serialized into the row, then walked for the
+    # graph counters); materialize it so a generator is not exhausted by the
+    # first read and the counters silently skipped.
+    sources = list(sources) if sources is not None else None
 
     async with get_async_connection() as conn:
         async with conn.cursor() as cursor:

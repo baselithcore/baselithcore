@@ -172,7 +172,7 @@ pre-commit run --all-files
 ### Testing
 
 - **Pytest** for unit and integration tests
-- Minimum enforced **branch**-coverage gate: **83%** (`--cov-fail-under` in
+- Minimum enforced **branch**-coverage gate: **85%** (`--cov-fail-under` in
   [`pytest.ini`](pytest.ini)). It is a ratchet — raise it as coverage grows,
   never lower it to make a branch pass.
 - Strict `mypy` gate on hardened core resilience modules

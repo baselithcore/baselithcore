@@ -10,11 +10,28 @@ a writer holding a stale copy changes nothing and the store raises
 ``CheckpointConflictError``. ``version``, ``owner`` and ``lease_expires_at``
 columns are authoritative over the copies inside ``data``: the lease
 statements update only the columns.
+
+**Lease times are on the database clock.** ``lease_expires_at`` is written as
+``now()`` on the server plus a *duration* and read back as the duration still
+left, never as an absolute time taken from a replica. Every replica therefore
+measures every lease against the same clock, and a replica whose own clock is
+off by more than a lease length can neither steal a live run (its "now" would
+say the lease had expired) nor keep a dead one locked. In-process values stay
+on the local clock: the store converts at the boundary (see
+``checkpoint_postgres``), and durations are clock-independent.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+# The database clock below is spelled out in every statement, as
+# ``EXTRACT(EPOCH FROM now())::float8`` (Unix seconds; ``EXTRACT`` returns
+# ``numeric`` on PostgreSQL 14+ and the cast keeps the arithmetic in the
+# column's ``double precision``), rather than spliced in: the statements stay
+# literals, which is what the SQL-injection lint can verify. Reads return
+# ``lease_remaining`` — the seconds left on the lease by that clock, negative
+# once expired, NULL when unowned — in place of the absolute expiry.
 
 _HISTORY_INSERT = """
 INSERT INTO agent_checkpoint_history (run_id, version, status, step, data)
@@ -56,10 +73,12 @@ SELECT data FROM agent_checkpoint_history WHERE run_id = %s AND version = %s
 
 # Insert a new run, or overwrite it while the stored version is the expected
 # one. ``DO UPDATE ... WHERE`` leaves a conflicting row untouched (rowcount 0).
+# The lease parameter is the seconds LEFT on it (NULL keeps it NULL).
 _UPSERT = """
 INSERT INTO agent_checkpoints
     (run_id, tenant_id, status, data, version, owner, lease_expires_at, updated_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+VALUES (%s, %s, %s, %s, %s, %s,
+        EXTRACT(EPOCH FROM now())::float8 + %s::float8, NOW())
 ON CONFLICT (run_id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     status = EXCLUDED.status,
@@ -91,32 +110,38 @@ UPDATE agent_checkpoints SET
     status = %s,
     version = %s,
     owner = %s,
-    lease_expires_at = %s,
+    lease_expires_at = EXTRACT(EPOCH FROM now())::float8 + %s::float8,
     updated_at = NOW()
 WHERE run_id = %s AND version = %s
 """
 
 _LOAD = """
-SELECT data, version, owner, lease_expires_at
+SELECT data, version, owner,
+       lease_expires_at - EXTRACT(EPOCH FROM now())::float8 AS lease_remaining
 FROM agent_checkpoints WHERE run_id = %s
 """
 
 # Take the lease when the run is unowned, expired, or already ours. Taking
 # over from another owner bumps the version (fencing); in a SET list the
-# right-hand ``owner`` is the row's old value.
+# right-hand ``owner`` is the row's old value. Both the new expiry and the
+# "has it expired" test read the database clock; the two float parameters are
+# the lease length and a clock shift that is 0 outside tests (``now=``).
 _CLAIM = """
 UPDATE agent_checkpoints SET
     version = CASE WHEN owner IS DISTINCT FROM %s THEN version + 1 ELSE version END,
     owner = %s,
-    lease_expires_at = %s
+    lease_expires_at = EXTRACT(EPOCH FROM now())::float8 + %s::float8
 WHERE run_id = %s
   AND (owner IS NULL OR owner = %s
-       OR lease_expires_at IS NULL OR lease_expires_at <= %s)
-RETURNING data, version, owner, lease_expires_at
+       OR lease_expires_at IS NULL
+       OR lease_expires_at <= EXTRACT(EPOCH FROM now())::float8 + %s::float8)
+RETURNING data, version, owner,
+          lease_expires_at - EXTRACT(EPOCH FROM now())::float8 AS lease_remaining
 """
 
 _RENEW = """
-UPDATE agent_checkpoints SET lease_expires_at = %s
+UPDATE agent_checkpoints
+SET lease_expires_at = EXTRACT(EPOCH FROM now())::float8 + %s::float8
 WHERE run_id = %s AND owner = %s
 """
 

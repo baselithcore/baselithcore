@@ -558,7 +558,7 @@ class MyAgent(LifecycleMixin, AgentProtocol):
     allowlist to that exact key. See
     [Plugin-Specific Environment Variables](../core-modules/plugins.md#plugin-specific-environment-variables-env)
     for the full policy and the deprecated `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`
-    opt-out.
+    opt-out, which is **removed in 2.0** — do not ship a plugin that needs it.
 
     Every key the `.env` exports is recorded as yours, so the startup
     environment drift check never flags it as a misspelled core setting. If

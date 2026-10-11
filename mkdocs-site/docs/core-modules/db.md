@@ -383,6 +383,10 @@ await insert_feedback(
     comment="Very helpful!",
 )
 
+# `sources` may be any iterable, a generator included: it is materialized
+# once, serialized into the row, and its `document_id`s bump the graph's
+# per-document feedback counters.
+
 # List feedback, optionally filtered and limited
 positives = await get_feedbacks("positive", limit=50)
 

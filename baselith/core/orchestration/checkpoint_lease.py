@@ -26,6 +26,15 @@ The manager-side half lives here as :class:`LeaseHolder`, mixed into
 half is three optional methods (``claim`` / ``renew_lease`` /
 ``release_lease``) that every shipped backend implements. A store without them
 keeps working, without leases.
+
+**Clocks.** In process, ``Checkpoint.lease_expires_at`` is always on the local
+clock, and everything here (``ensure_lease``, :func:`lease_is_live`) compares
+it with ``time.time()``. Whether that is enough across replicas is the store's
+business: the Postgres store anchors every expiry and every "has it expired"
+test on the database's ``now()`` and exchanges only durations with the replica,
+so clock skew between replicas cannot hand a live run to a second executor.
+The SQLite and in-memory stores use the process clock, which is sound because
+both are single-host — never share an SQLite checkpoint file across hosts.
 """
 
 from __future__ import annotations

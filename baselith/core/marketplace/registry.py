@@ -21,11 +21,11 @@ from baselith.core.marketplace.models import (
     RegistryData,
 )
 
-# The SSRF guard lives in baselith.core.webhooks.ssrf (its first consumer) but is generic:
-# it resolves the host and fails closed on any loopback/private/link-local/
-# metadata address. The registry URL feeds the plugin installer (fetch → pip),
-# so an internal-resolving URL here is a high-blast-radius SSRF.
-from baselith.core.webhooks.ssrf import WebhookSSRFError, validate_webhook_url
+# The shared SSRF guard resolves the host and fails closed on any loopback/
+# private/link-local/metadata address. The registry URL feeds the plugin
+# installer (fetch → pip), so an internal-resolving URL here is a
+# high-blast-radius SSRF.
+from baselith.core.security.ssrf import SsrfError, SsrfPolicy, assert_url_safe
 
 
 def _env_true(name: str) -> bool:
@@ -184,8 +184,8 @@ class PluginRegistry:
         # testing) and explicit BASELITH_MARKETPLACE_ALLOW_INTERNAL bypass it.
         allow_internal = is_loopback or _env_true("BASELITH_MARKETPLACE_ALLOW_INTERNAL")
         try:
-            validate_webhook_url(url, allow_internal=allow_internal)
-        except WebhookSSRFError as e:
+            assert_url_safe(url, SsrfPolicy(allow_internal=allow_internal))
+        except SsrfError as e:
             raise ValueError(
                 f"Refusing marketplace registry {url!r} (SSRF guard): {e}. Set "
                 "BASELITH_MARKETPLACE_ALLOW_INTERNAL=true for a trusted internal "

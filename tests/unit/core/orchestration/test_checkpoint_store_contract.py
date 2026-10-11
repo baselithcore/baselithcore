@@ -17,13 +17,18 @@ opt-in (see ``tests/integration/test_tool_ledger_postgres.py``)::
     BASELITH_TEST_REAL_DB=1 python -m pytest tests/unit/core/orchestration/test_checkpoint_store_contract.py
 
 It builds the pre-upgrade table in a throwaway schema and applies migration
-013 to it, so the migration and the store are tested together.
+013 to it, so the migration and the store are tested together. The CI
+``integration_test`` job runs it with a Postgres service and
+``BASELITH_TEST_INTEGRATION_STRICT=1``, under which a missing database fails
+the case instead of skipping it (this module sits outside
+``tests/integration/``, whose conftest does the same for its own files).
 """
 
 from __future__ import annotations
 
 import contextlib
 import importlib.util
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -76,6 +81,14 @@ class _Op:
         self._cur.execute(sql)
 
 
+def _skip_unless_strict(reason: str) -> None:
+    """Skip — or fail, in the integration job, where Postgres must be there."""
+    strict = os.environ.get("BASELITH_TEST_INTEGRATION_STRICT", "").strip().lower()
+    if strict in {"1", "true", "yes"}:
+        pytest.fail(f"skipped under BASELITH_TEST_INTEGRATION_STRICT=1: {reason}")
+    pytest.skip(reason)
+
+
 @contextlib.contextmanager
 def _postgres_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[], Any]]:
     from tests.integration.test_tool_ledger_postgres import (
@@ -85,9 +98,11 @@ def _postgres_backend(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[], 
     )
 
     if not _real_db_enabled():
-        pytest.skip("set BASELITH_TEST_REAL_DB=1 to run against a real Postgres")
+        _skip_unless_strict(
+            "set BASELITH_TEST_REAL_DB=1 to run against a real Postgres"
+        )
     if not _pg_available():
-        pytest.skip("PostgreSQL not reachable (docker compose up -d postgres)")
+        _skip_unless_strict("PostgreSQL not reachable (docker compose up -d postgres)")
 
     import psycopg
 

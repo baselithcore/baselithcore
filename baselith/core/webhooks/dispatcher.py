@@ -20,12 +20,12 @@ import orjson
 
 from baselith.core.config.webhooks import WebhookConfig, get_webhook_config
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.ssrf import SsrfError, SsrfPolicy, resolve_pinned_target
 from baselith.core.webhooks.signing import (
     RESERVED_DELIVERY_HEADERS,
     SIGNATURE_HEADER,
     build_signature_header,
 )
-from baselith.core.webhooks.ssrf import WebhookSSRFError, resolve_pinned_target
 from baselith.core.webhooks.store import WebhookStore
 from baselith.core.webhooks.types import (
     DeliveryStatus,
@@ -105,9 +105,9 @@ class WebhookDispatcher:
             pinned_url, pin_host = await asyncio.to_thread(
                 resolve_pinned_target,
                 endpoint.url,
-                allow_internal=self._config.allow_internal,
+                SsrfPolicy(allow_internal=self._config.allow_internal),
             )
-        except WebhookSSRFError as e:
+        except SsrfError as e:
             return await self._finalize_failure(delivery, error=f"ssrf_blocked: {e}")
 
         last_error: str | None = None

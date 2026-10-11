@@ -2515,7 +2515,8 @@ class LLMServiceProtocol(Protocol):
         self, prompt: str, model: str | None = None, json: bool = False
     ) -> str: ...
 
-    async def generate_response_stream(
+    # A plain ``def``: the type of an async generator function.
+    def generate_response_stream(
         self, prompt: str, model: str | None = None
     ) -> AsyncIterator[str]: ...
 

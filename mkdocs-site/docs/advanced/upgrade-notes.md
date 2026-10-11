@@ -68,6 +68,27 @@ them:
   and `baselith.core.evaluation.metrics.FaithfulnessEvaluator` /
   `AnswerRelevancyEvaluator`.
 
+### Deprecations announced in 1.0 (removed in 2.0)
+
+Both keep working through 1.x; both name their removal version when used.
+
+- **`baselith.core.webhooks.ssrf`** — `validate_webhook_url()`,
+  `resolve_pinned_target(url, allow_internal=...)` and `WebhookSSRFError`, also
+  re-exported by `baselith.core.webhooks`. No framework module uses them any
+  more; the two functions warn (`DeprecationWarning`) on every call. Import
+  from `baselith.core.security.ssrf` instead:
+  `assert_url_safe(url, SsrfPolicy(allow_internal=x))`,
+  `resolve_pinned_target(url, SsrfPolicy(allow_internal=x))` and `SsrfError`.
+  `WebhookSSRFError` is the same class as `SsrfError` (so existing `except`
+  clauses keep working) and cannot warn — search for the name. See
+  [Security › Deprecated shims](../core-modules/security.md#deprecated-shims).
+- **`BASELITH_PLUGIN_ENV_LEGACY_DENYLIST`** — the opt-out that exports a plugin
+  `.env`'s out-of-namespace keys to `os.environ`. Setting it now logs a
+  deprecation warning naming 2.0, once per process; from 2.0 it is ignored.
+  Rename each key the plugin-env warnings list into the plugin namespace, or
+  declare it in the manifest's `environment_variables`. See
+  [Plugins › Plugin-specific environment variables](../core-modules/plugins.md#plugin-specific-environment-variables-env).
+
 ---
 
 ## Security postures that are now fail-closed
@@ -542,7 +563,9 @@ Four changes to checkpointed runs an operator will notice
   about one lease length plus one sweep interval later. A long LLM or tool call
   is no longer mistaken for a dead worker. `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`
   now only applies to runs without a lease (in flight across the upgrade).
-  Replica clocks must agree to well within the lease length.
+  On Postgres lease expiry is computed and checked with the database clock
+  (`now()` in the SQL), so replica clock skew does not affect ownership;
+  SQLite and in-memory stores are single-host and use the process clock.
 - **Migration 013** adds the nullable `owner` and `lease_expires_at` columns to
   `agent_checkpoints` (catalog-only, no rewrite). Run it before the new code
   serves traffic; with `DB_SCHEMA_CHECK` at its production default a stale

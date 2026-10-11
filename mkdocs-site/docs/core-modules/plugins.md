@@ -1222,9 +1222,15 @@ Some keys are named by a third party, not by the plugin — `SLACK_SIGNING_SECRE
     Setting `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST=true` restores the old
     denylist-only behaviour (out-of-namespace keys are exported to `os.environ`
     again) for a deployment whose plugins cannot be updated yet. It widens the
-    allowlist only — protected keys stay refused. It is deprecated on
-    introduction and scheduled for removal; the refusal warnings in the log name
-    every key that has to move first.
+    allowlist only — protected keys stay refused.
+    **Timeline:** deprecated on introduction (0.x), **removed in 2.0** — from
+    2.0 the variable is ignored and out-of-namespace keys stay out of
+    `os.environ` unconditionally. Through 1.x it keeps working, and setting it
+    logs a deprecation warning naming the removal version once per process,
+    whether or not any plugin relies on it. The per-plugin refusal warnings in
+    the log name every key that has to move first: rename it into the
+    plugin's `<DIRNAME>_` namespace, or declare it in the manifest's
+    `environment_variables` list.
 
 The denylist (`is_protected_env_key`) covers:
 

@@ -22,9 +22,9 @@ from baselith.core.auth.types import AuthUser
 from baselith.core.context import get_current_tenant_id
 from baselith.core.middleware import require_user
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.ssrf import SsrfError
 from baselith.core.webhooks.service import get_webhook_service
 from baselith.core.webhooks.signing import reserved_header_names
-from baselith.core.webhooks.ssrf import WebhookSSRFError
 from baselith.plugins.api_routers.schemas import (
     WebhookDeleted,
     WebhookDeliveryPage,
@@ -121,7 +121,7 @@ async def create_webhook(
             description=payload.description,
             headers=payload.headers,
         )
-    except WebhookSSRFError as e:
+    except SsrfError as e:
         # The guard's message names what the host resolved to ("resolves to a
         # blocked address (10.0.0.5)", "could not resolve host"). Echoing it
         # hands any webhooks:write holder a DNS/IP oracle for the internal
