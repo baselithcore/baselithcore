@@ -46,6 +46,8 @@ for _r in reversed({roots!r}):
 """
 
 
+#: The "other" bits below are the point, not an oversight: the sandbox runs as another
+#: user, so it reads a workspace through them. Scanners flag every chmod that sets them.
 #: Owner rwx, others r-x: the sandbox user lists and reads a workspace, never writes it.
 _DIR_MODE = 0o705
 #: Owner rw, others r.
@@ -76,6 +78,7 @@ def _private_parent() -> str:
         or found.st_uid != os.getuid()
     ):
         raise ValueError(f"unsafe staging directory {parent!r}")
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
     os.chmod(parent, _PARENT_MODE)
     return parent
 
@@ -110,12 +113,14 @@ def stage(files: Mapping[str, str]) -> str:
     # The sandbox runs as another user (uid 65534) and a Linux bind mount keeps host modes:
     # it may enter, list and read the workspace (others r-x / r--), never write it, and the
     # parent above it cannot be listed, so nobody else finds the random name.
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
     os.chmod(root, _DIR_MODE)
     for path, text in checked.items():
         target = os.path.join(root, *path.parts)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         for parent in path.parents:
             if str(parent) != ".":
+                # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
                 os.chmod(os.path.join(root, *parent.parts), _DIR_MODE)
         with open(target, "w", encoding="utf-8") as handle:
             handle.write(text)

@@ -43,3 +43,10 @@ ce05817f025e1f05dc8e12dce18302224bb51c53:baselith/core/plugins/manifest_rewrite.
 # commit that added it. Reworded going forward (no more quoted literal); this
 # one historical commit stays allowlisted since it is already pushed.
 9fa7fed3de1b681046b02294bbf31867180c9802:.gitleaksignore:generic-api-key:30
+
+# The namespace move rewrote the two entries above from core/ to
+# baselith/core/, but a fingerprint names the path as it was in that commit,
+# so those rewritten entries no longer match. Same two false positives, under
+# their historical paths.
+ce05817f025e1f05dc8e12dce18302224bb51c53:core/plugins/manifest_rewrite.py:generic-api-key:30
+595298f00a8725442ef4f6aff05bd9a85a291ea4:core/world_model/mandates.py:generic-api-key:130

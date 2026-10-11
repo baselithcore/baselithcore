@@ -2008,8 +2008,8 @@ TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
 
 ElevenLabs is not OpenAI-compatible, so `VOICE_PROVIDER=elevenlabs` has its own adapter in
 `baselith/core/services/voice/_elevenlabs*.py`. It serves **both directions**: text-to-speech
-(`POST /v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
-(`POST /v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
+(ElevenLabs' `/v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
+(ElevenLabs' `/v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
 
 | Variable | Default | Meaning |
 |---|---|---|

@@ -67,6 +67,9 @@ EXCLUDED_GLOBS: Final[tuple[str, ...]] = (
     "*.min.js",
     "*.map",
     "*/openapi.json",
+    # Gitleaks fingerprints name a path as it was in the fingerprinted commit;
+    # rewriting core/ to baselith/core/ there silently unignored two findings.
+    ".gitleaksignore",
 )
 
 #: Suffixes of files read as text. Anything else is skipped as binary.
