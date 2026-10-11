@@ -180,7 +180,13 @@ async def test_schema_init_skips_disabled_bundled(
     schema_init = importlib.import_module(
         "baselith.core.cli.commands.plugin.schema_init"
     )
+    import baselith.core.config.plugins as config_mod
+
     monkeypatch.chdir(tmp_path)
+    # A wheel install: no ``plugins`` under the cwd, so the configured root
+    # resolves to the installed package, as the app's own discovery does.
+    monkeypatch.setattr(config_mod, "installed_plugins_dir", lambda: bundle)
+    monkeypatch.setattr(config_mod, "get_plugin_config", config_mod.PluginConfig)
     seen: list[str] = []
 
     async def _cold(_loader: object, plugin_dir: Path) -> object:

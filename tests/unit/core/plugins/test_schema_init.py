@@ -172,3 +172,39 @@ async def test_overlay_registration_failure_does_not_stop_schema_init(
         "baselith.core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
     )
     assert await module._load_enabled(None) == []
+
+
+async def test_discovery_scans_the_configured_root_not_the_cwd(
+    monkeypatch, tmp_path
+) -> None:
+    """schema-init reads the plugins where the app reads them.
+
+    Since 1.0 a checkout holds its plugins under ``baselith/plugins``, so a
+    bare ``plugins`` taken against the cwd names nothing: the command found no
+    plugin and reported "No enabled plugin matching '<name>'" on a host
+    whose server was serving it.
+    """
+    import baselith.core.config.plugins as config_mod
+    import baselith.core.plugins.loader as loader_mod
+    from baselith.core.cli.commands.plugin import schema_init as module
+
+    root = tmp_path / "configured"
+    root.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        config_mod,
+        "get_plugin_config",
+        lambda: config_mod.PluginConfig(plugins_path=root),
+    )
+    scanned: list[Any] = []
+
+    def _discover(self: Any) -> list[Any]:
+        scanned.append(self.plugins_dir)
+        return []
+
+    monkeypatch.setattr(loader_mod.PluginLoader, "discover_plugins", _discover)
+    monkeypatch.setattr(
+        "baselith.core.plugins.config_file.read_plugin_configs", lambda *a, **k: {}
+    )
+    assert await module._load_enabled(None) == []
+    assert scanned == [root]

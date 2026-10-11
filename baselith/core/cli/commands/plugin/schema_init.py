@@ -95,6 +95,7 @@ async def _load_enabled(
     plugin's runtime resources are never opened, so a schema run cannot be
     derailed by a client it would have connected to.
     """
+    from baselith.core.config.plugins import get_plugin_config
     from baselith.core.plugins.config_file import (
         match_config_key,
         plugin_enabled,
@@ -114,7 +115,9 @@ async def _load_enabled(
     except Exception as exc:  # the bundled plugins still get their schema
         print_warning(f"plugin overlay registration failed: {type(exc).__name__}")
 
-    loader = PluginLoader(Path("plugins"), PluginRegistry())
+    # The root the app scans (already resolved), never a cwd-relative ``plugins``:
+    # a checkout keeps its plugins under ``baselith/plugins`` since 1.0.
+    loader = PluginLoader(Path(get_plugin_config().plugins_path), PluginRegistry())
     configs = read_plugin_configs()
     found: list[tuple[str, Any, dict[str, Any]]] = []
     for plugin_dir in loader.discover_plugins():
