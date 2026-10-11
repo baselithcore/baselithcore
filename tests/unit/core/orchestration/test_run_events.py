@@ -215,8 +215,9 @@ class _LeakyHandler:
 
 @pytest.mark.asyncio
 class TestGuardedAnswerIsWhatLeaves:
-    """The answer was recorded and published before the output guard ran, so
-    /runs/{id}/events subscribers and the checkpoint history got it raw."""
+    """The answer was stored and published before the output guard ran, so
+    /runs/{id}/events subscribers, the checkpoint history and memory got it
+    raw."""
 
     async def test_final_event_carries_the_guarded_answer(self):
         orch = _orchestrator(store=InMemoryCheckpointStore(), handler=_LeakyHandler())
@@ -232,6 +233,14 @@ class TestGuardedAnswerIsWhatLeaves:
         assert "mario.rossi@example.com" not in recorded.answer
         assert recorded.answer == result["response"]
         assert "_output_guarded" not in result
+
+    async def test_memory_stores_the_guarded_answer(self):
+        orch = _orchestrator(store=None, handler=_LeakyHandler())
+        written = []
+        orch.memory_manager = object()
+        orch._schedule_memory_write = lambda q, text, intent: written.append(text)
+        await orch.process("hello", run_id="r-mem")
+        assert written and "mario.rossi@example.com" not in written[0]
 
     async def test_the_answer_is_guarded_once(self, monkeypatch):
         from baselith.core.orchestration import guard_pipeline

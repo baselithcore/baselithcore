@@ -145,7 +145,8 @@ break the tool path. See
     `_memory_writes_dropped` and in the Prometheus counter
     `mas_memory_writes_dropped_total`, with a WARNING at most once a minute
     per process — memory is best-effort and the request path is not, but a
-    lost turn must be visible.
+    lost turn must be visible. The answer written is the output-guarded one
+    (PII already redacted), as on the streaming path.
 
 !!! note "Draining memory writes at shutdown — `Orchestrator.aclose()`"
     Those background writes are awaited by nobody on the request path, so an
@@ -1720,9 +1721,9 @@ fans out `AgentEvent`s (`baselith/core/api/events.py`) per `run_id`: `run_starte
 including replays flagged `replayed: true`), `final`, `error`, and `human`
 (durable approval pause). `final` carries the answer after the output guard
 (PII redaction, harmful-content filter, opt-in moderation): `process()` guards
-a handler's answer once, before it records it in the checkpoint and publishes
-it, so subscribers, the checkpoint history and replays see the text the
-caller received. Publishing with zero subscribers is a no-op, so the
+a handler's answer once, before it writes it to memory, records it in the
+checkpoint and publishes it, so memory, subscribers, the checkpoint history
+and replays all hold the text the caller received. Publishing with zero subscribers is a no-op, so the
 loop pays nothing when nobody listens.
 
 Library-level consumption — run a query and iterate its events:

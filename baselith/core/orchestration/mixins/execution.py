@@ -344,6 +344,13 @@ class ExecutionMixin:
             result["intent"] = intent
             result["budget"] = budget.snapshot().__dict__
 
+            # Guard the answer before it is stored or published: memory, replays
+            # and /runs history keep it, /runs events RESPONSE_FINAL carries it.
+            from baselith.core.orchestration.guard_pipeline import guard_output_async
+
+            result = await guard_output_async(result)
+            result[_OUTPUT_GUARDED_KEY] = True
+
             # 3. Save Interaction to Memory — in the background. Each write
             #    is an embedding + vector upsert; awaiting them here adds two
             #    round trips of latency AFTER the answer is already computed.
@@ -363,13 +370,6 @@ class ExecutionMixin:
                     budget=budget,
                     success=not result.get("error", False),
                 )
-
-            # Guard the answer before it is recorded or published: replays and
-            # /runs history serve the checkpoint answer, /runs events RESPONSE_FINAL.
-            from baselith.core.orchestration.guard_pipeline import guard_output_async
-
-            result = await guard_output_async(result)
-            result[_OUTPUT_GUARDED_KEY] = True
 
             # Persist final budget + mark the checkpoint completed.
             if checkpoint_mgr is not None:
