@@ -47,11 +47,13 @@ async def run_workspace_tests(
     """
     refused = screen_texts([*ws.files.values(), code, tests])
     if refused is not None:
-        return TestReport(problem=f"refused before running: {refused}")
+        return TestReport(
+            problem=f"refused before running: {refused}", reason="refused"
+        )
     try:
         host = stage({**ws.files, ws.target: code, ws.test_path: tests})
     except ValueError as exc:
-        return TestReport(problem=str(exc))
+        return TestReport(problem=str(exc), reason="refused")
     try:
         key = new_run_key()
         run = await agent._execute_code(
@@ -93,11 +95,14 @@ async def workspace_result(
         return await unverified(ask, ws, problem, lang, "too_large")
     if getattr(await agent._get_sandbox(), "provider", "docker") == "sbx":
         return await unverified(ask, ws, problem, lang, "sandbox_unavailable")
+    target = module_path(ws.target, ws.roots)
+    # The probe asserts something: a passing test that checks nothing is never verified.
     probe = await run_workspace_tests(
         agent,
         ws,
         ws.files[ws.target],
-        f"import {module_path(ws.target, ws.roots)}\n\n\ndef test_imports():\n    pass\n",
+        f"import {target} as _target\n\n\ndef test_imports():\n"
+        f"    assert _target.__name__ == {target!r}\n",
     )
     if missing_module(probe, ws) is not None:
         return await unverified(ask, ws, problem, lang, "missing_dependency")

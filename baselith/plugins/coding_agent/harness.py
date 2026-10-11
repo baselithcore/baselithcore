@@ -18,15 +18,20 @@ is ignored, two reports with it are tampering, and a report followed by a non-ze
 line, so :func:`~baselith.plugins.coding_agent.screening.screen` refuses code that could read it, reach the
 reporter or plug into pytest before anything runs; the report line is written with functions bound
 before any test code is imported, and a skipped test or a session pytest ended early is never
-green. This raises the bar; it is not a proof against deliberate tampering by code that runs
-inside the sandbox, which is why the security review still reads every result.
+green. A green report must also add up (every collected test accounted for, at least one
+passed) and every passing test must have executed an assertion; otherwise the run is not
+verified, with the reason. This raises the bar; it is not a proof against deliberate tampering
+by code that runs inside the sandbox, which is why the security review still reads every result.
+
+"Verified" means the code passed the model's own tests under this screen, nothing more: the
+model writes both, so it is not proof the code is correct.
 """
 
 from __future__ import annotations
 
 import json
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from baselith.plugins.coding_agent.screening import screen, screen_texts
 
@@ -35,19 +40,27 @@ MARKER = "@@CODING_AGENT_REPORT@@"
 FAILURE_CHARS = 700
 #: Failures carried back in full; the rest are counted.
 MAX_FAILURES = 5
+#: The ini override that makes pytest call ``pytest_assertion_pass`` for every passing ``assert``
+#: in a rewritten test module: how the reporter counts the checks a test executed.
+ASSERTION_HOOK_OPTION = "enable_assertion_pass_hook=true"
 
 #: The reporter and the entry point both harness scripts end with. ``{args}`` is pytest's argv.
 #: Everything the report line is made with is bound to a local before pytest imports any test
 #: code, and the counts are formatted as integers, never through ``json``: a test that patches
 #: ``print``, ``json``, ``int`` or ``sys.stdout`` changes nothing the line says. A skipped test,
 #: and a session pytest ended early (``KeyboardInterrupt``, ``pytest.exit``), are counted too.
+#: Each test gets one outcome (the worst of its phases) and a count of the checks it executed:
+#: ``assert`` statements through pytest's assertion-pass hook (``enable_assertion_pass_hook``,
+#: set on the command line) plus calls to ``pytest.raises``/``pytest.warns``, wrapped before any
+#: test code is imported. :func:`parse_report` holds a green run to those counts.
 RUNNER = """\
 class _Report:
     def __init__(self):
-        self.passed = 0
-        self.failed = 0
-        self.errors = 0
-        self.skipped = 0
+        self.outcomes = {{}}
+        self.checks = {{}}
+        self.current = None
+        self.collected = 0
+        self.skipped_files = 0
         self.collection_error = False
         self.failures = []
 
@@ -55,40 +68,75 @@ class _Report:
         if len(self.failures) < {max_failures}:
             self.failures.append([name, str(longrepr)[-{failure_chars}:]])
 
+    def check(self, nodeid):
+        if nodeid is not None:
+            self.checks[nodeid] = self.checks.get(nodeid, 0) + 1
+
+    def pytest_collection_finish(self, session):
+        self.collected = len(session.items)
+
+    def pytest_runtest_logstart(self, nodeid):
+        self.current = nodeid
+
+    def pytest_runtest_logfinish(self, nodeid):
+        self.current = None
+
+    def pytest_assertion_pass(self, item):
+        self.check(item.nodeid)
+
     def pytest_runtest_logreport(self, report):
+        # One outcome per test, the worst of its phases: a test that passes and then fails
+        # its teardown is an error, an xpass proves nothing like a skip.
+        name = report.nodeid.split("::")[-1]
         if report.failed:
-            if report.when == "call":
-                self.failed += 1
-            else:
-                self.errors += 1
-            self._keep(report.nodeid.split("::")[-1], report.longrepr)
-        elif report.skipped:
-            self.skipped += 1
-            self._keep(report.nodeid.split("::")[-1], "skipped")
+            kind = 2 if report.when == "call" else 3
+            self._keep(name, report.longrepr)
+        elif report.skipped or (report.when == "call" and hasattr(report, "wasxfail")):
+            kind = 1
+            self._keep(name, "skipped" if report.skipped else "xpassed")
         elif report.when == "call" and report.passed:
-            self.passed += 1
+            kind = 0
+        else:
+            return
+        if kind > self.outcomes.get(report.nodeid, -1):
+            self.outcomes[report.nodeid] = kind
 
     def pytest_collectreport(self, report):
         if report.failed:
             self.collection_error = True
             self._keep("collection", report.longrepr)
         elif report.skipped:
-            self.skipped += 1
+            self.skipped_files += 1
             self._keep("collection", "skipped")
 
 def _main():
     # Locals only: the code under test finds no module global to rewrite.
-    write, dumps, num, out = os.write, json.dumps, int, os.dup(1)
+    write, dumps, num, size, add_up = os.write, json.dumps, int, len, sum
+    out = os.dup(1)
     report = _Report()
+    # pytest.raises and pytest.warns are checks too: counted for the running test.
+    def _counted(check):
+        def counted(*args, **kwargs):
+            report.check(report.current)
+            return check(*args, **kwargs)
+        return counted
+    pytest.raises, pytest.warns = _counted(pytest.raises), _counted(pytest.warns)
     code = pytest.main({args}, plugins=[report])
     sys.stdout.flush()
+    kinds = [k for k in report.outcomes.values()]
+    passed = [n for n, k in report.outcomes.items() if k == 0]
+    asserted = [n for n in passed if report.checks.get(n, 0) > 0]
+    checks = add_up(report.checks.get(n, 0) for n in passed)
     ce = "true" if report.collection_error is True else "false"
     # The failures come first: a later duplicate key wins, so a forged fragment cannot
     # override the counts.
     line = (
         {marker!r} + '{{"failures": ' + dumps(report.failures)
-        + f', "passed": {{num(report.passed):d}}, "failed": {{num(report.failed):d}}'
-        + f', "errors": {{num(report.errors):d}}, "skipped": {{num(report.skipped):d}}'
+        + f', "passed": {{num(size(passed)):d}}, "failed": {{num(kinds.count(2)):d}}'
+        + f', "errors": {{num(kinds.count(3)):d}}, "skipped": {{num(kinds.count(1)):d}}'
+        + f', "skipped_files": {{num(report.skipped_files):d}}'
+        + f', "collected": {{num(report.collected):d}}, "assertions": {{num(checks):d}}'
+        + f', "unasserted": {{num(size(passed) - size(asserted)):d}}'
         + f', "collection_error": {{ce}}, "exit": {{num(code):d}}' + "}}\\n"
     )
     write(out, line.encode("utf-8"))
@@ -122,12 +170,21 @@ class TestReport:
         errors: Tests whose setup or teardown failed.
         collection_error: The test file (or the code it imports) could not be collected.
         failures: ``(test name, traceback tail)`` for the first failures.
-        skipped: Tests (or a test file) pytest skipped or marked xfail: a skip proves nothing,
-            so a run with one is never green.
+        skipped: Tests (or a test file) pytest skipped, marked xfail or that xpassed: a skip
+            proves nothing, so a run with one is never green.
         exit_status: pytest's exit status; anything but 0 with every test passing means the
             session ended early (``KeyboardInterrupt``, ``pytest.exit``).
-        problem: Why there is no report at all (timeout, crash), or "".
+        problem: Why the run is not verified whatever its counts (timeout, crash, tampering, an
+            inconsistent report, passing tests that checked nothing), or "".
         seconds: Wall-clock time of the sandbox run.
+        collected: Tests pytest collected; a green run accounts for every one of them.
+        assertions: Checks (``assert`` statements, ``pytest.raises``/``pytest.warns``) the
+            passing tests executed.
+        unasserted: Passing tests that executed no check at all.
+        reason: A short code for ``problem``: ``timeout``, ``crash``, ``no_report``,
+            ``multiple_reports``, ``exit_after_report``, ``inconsistent_report``,
+            ``no_assertions``, ``refused`` (the screen or the workspace stager refused the
+            files), or "".
     """
 
     __test__ = False  # not a pytest test class, whatever its name
@@ -141,6 +198,10 @@ class TestReport:
     exit_status: int = 0
     problem: str = ""
     seconds: float = 0.0
+    collected: int = 0
+    assertions: int = 0
+    unasserted: int = 0
+    reason: str = ""
 
     @property
     def total(self) -> int:
@@ -194,7 +255,7 @@ def build_test_script(code: str, tests: str, *, key: str) -> str:
     """The ``python -c`` script that runs ``tests`` against ``code`` (as ``solution.py``)."""
     return _TEMPLATE.format(code=code, tests=tests) + runner_source(
         '["-q", "-p", "no:cacheprovider", "--no-header", "-o", '
-        '"console_output_style=classic", "test_solution.py"]',
+        f'"console_output_style=classic", "-o", {ASSERTION_HOOK_OPTION!r}, "test_solution.py"]',
         key=key,
     )
 
@@ -213,16 +274,68 @@ def _tail(text: str, chars: int = FAILURE_CHARS) -> str:
     return text.strip()[-chars:]
 
 
+def _verified(report: TestReport, item_skipped: int) -> TestReport:
+    """``report`` when its counts hold together, else the same counts marked not verified.
+
+    Only a green run is checked: anything else is already not verified, with its own evidence.
+    A green run accounts for every collected test (passed + failed + errors + skipped), at least
+    one test passed, and every passing test executed at least one check.
+    """
+    if not report.green:
+        return report
+    counts = (
+        report.passed,
+        report.failed,
+        report.errors,
+        item_skipped,
+        report.collected,
+    )
+    ran = report.passed + report.failed + report.errors + item_skipped
+    if (
+        min(counts) < 0
+        or report.collected != ran
+        or report.passed < 1
+        or not 0 <= report.unasserted <= report.passed
+        or report.assertions < report.passed - report.unasserted
+    ):
+        return replace(
+            report,
+            problem=(
+                f"the report does not add up ({report.collected} collected, "
+                f"{report.passed} passed, {report.failed} failed, {report.errors} errors, "
+                f"{item_skipped} skipped, {report.assertions} checks): the run is not "
+                "verified, the report was tampered with or is invalid"
+            ),
+            reason="inconsistent_report",
+        )
+    if report.unasserted:
+        return replace(
+            report,
+            problem=(
+                f"{report.unasserted} of {report.passed} passing tests executed no assertion "
+                "(no assert, pytest.raises or pytest.warns ran): a test that checks nothing "
+                "proves nothing; every test must assert the behaviour it pins"
+            ),
+            reason="no_assertions",
+        )
+    return report
+
+
 def parse_report(
     stdout: str, stderr: str, exit_code: int, seconds: float = 0.0, *, key: str
 ) -> TestReport:
-    """The report the run keyed ``key`` printed, or an error report saying why there is none."""
+    """The report the run keyed ``key`` printed, or an error report saying why there is none.
+
+    A green report is also held to its own counts (:func:`_verified`): one that does not add up,
+    or whose passing tests executed no assertion, comes back not verified with the reason.
+    """
     marker = report_marker(key)
     lines = [line for line in (stdout or "").splitlines() if line.startswith(marker)]
     if len(lines) > 1:
         return TestReport(
             problem="the run printed more than one report: the code under test tampered with it",
             seconds=seconds,
+            reason="multiple_reports",
         )
     if lines and exit_code != 0:
         # The harness ends normally after its report: a process killed or exited with another
@@ -231,32 +344,41 @@ def parse_report(
             problem=f"the run exited with code {exit_code} after its report: the code under "
             "test ended the process",
             seconds=seconds,
+            reason="exit_after_report",
         )
     for line in lines:
         try:
             data = json.loads(line[len(marker) :])
-            return TestReport(
+            item_skipped = int(data.get("skipped", 0))
+            report = TestReport(
                 passed=int(data["passed"]),
                 failed=int(data["failed"]),
                 errors=int(data["errors"]),
                 collection_error=bool(data["collection_error"]),
                 failures=tuple((str(n), str(t)) for n, t in data["failures"]),
-                skipped=int(data.get("skipped", 0)),
+                skipped=item_skipped + int(data.get("skipped_files", 0)),
                 exit_status=int(data.get("exit", 0)),
                 seconds=seconds,
+                # A report without these is never verified: -1 cannot add up.
+                collected=int(data.get("collected", -1)),
+                assertions=int(data.get("assertions", -1)),
+                unasserted=int(data.get("unasserted", -1)),
             )
         except (ValueError, KeyError, TypeError, AttributeError):
             break
+        return _verified(report, item_skipped)
     if exit_code == 124:
-        problem = "the run ran out of time in the sandbox"
+        problem, reason = "the run ran out of time in the sandbox", "timeout"
     elif stderr and stderr.strip():
-        problem = f"the run crashed before reporting:\n{_tail(stderr)}"
+        problem, reason = f"the run crashed before reporting:\n{_tail(stderr)}", "crash"
     else:
         problem = f"the run produced no report (exit code {exit_code})"
-    return TestReport(problem=problem, seconds=seconds)
+        reason = "no_report"
+    return TestReport(problem=problem, seconds=seconds, reason=reason)
 
 
 __all__ = [
+    "ASSERTION_HOOK_OPTION",
     "FAILURE_CHARS",
     "MARKER",
     "MAX_FAILURES",

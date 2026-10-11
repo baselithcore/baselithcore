@@ -4,10 +4,15 @@ Each flow talks to the model only through ``kit.ask`` (typed answers) and to the
 through ``kit.run_tests``, so it is testable with a scripted model and a local runner. Tests are
 written once and then frozen: later attempts may change only the code, except when the test file
 itself cannot be collected. Success always means a green test run.
+
+A first test file that checks nothing (no ``assert``, no ``pytest.raises``/``warns``/``approx``)
+is never frozen: the model is asked again, since every later attempt would be held to it.
 """
 
 from __future__ import annotations
 
+import ast
+from collections.abc import Callable
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -24,6 +29,39 @@ M = TypeVar("M", bound=BaseModel)
 
 #: Attempts at a characterization test file that passes on the code a refactor starts from.
 CHARACTERIZATION_ATTEMPTS = 3
+#: Extra asks for a first test file that checks nothing, before it runs (unfrozen) as it is.
+CHECKLESS_RETRIES = 2
+#: What the model is told when its test file checks nothing.
+NO_CHECKS = (
+    "the test file checks nothing: it has no assert statement and no pytest.raises, "
+    "pytest.warns or pytest.approx, so it cannot fail and proves nothing; every test must "
+    "assert the behaviour it pins"
+)
+_CHECK_NAMES = frozenset({"raises", "warns", "approx"})
+
+
+def checks_something(tests: str) -> bool:
+    """Whether ``tests`` holds an ``assert`` or uses ``pytest.raises``/``warns``/``approx``.
+
+    A static look at the file; a file that does not parse counts as checking (the run reports it
+    as a collection error, which is the better evidence).
+    """
+    try:
+        tree = ast.parse(tests)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return True
+    return any(
+        isinstance(node, ast.Assert)
+        or (isinstance(node, ast.Attribute) and node.attr in _CHECK_NAMES)
+        or (isinstance(node, ast.Name) and node.id in _CHECK_NAMES)
+        or (isinstance(node, ast.alias) and node.name in _CHECK_NAMES)
+        for node in ast.walk(tree)
+    )
+
+
+def with_note(evidence: str, note: str) -> str:
+    """``evidence`` followed by ``note``, either of them possibly empty."""
+    return "\n".join(part for part in (evidence, note) if part)
 
 
 class Kit(Protocol):
@@ -66,14 +104,24 @@ def _result(
 
 
 async def _code_or_both(
-    kit: Kit, prompt: str, tests: str | None
-) -> tuple[str, str, str, tuple[str, ...]]:
-    """Code (and, without frozen ``tests``, new tests) for ``prompt``."""
-    if tests is None:
-        both = await kit.ask(prompt, CodeWithTests)
-        return both.code, both.tests, both.explanation, tuple(both.changes)
-    one = await kit.ask(prompt, CodeAnswer)
-    return one.code, tests, one.explanation, tuple(one.changes)
+    kit: Kit, prompt: Callable[[str], str], evidence: str, tests: str | None
+) -> tuple[str, str, str, tuple[str, ...], bool]:
+    """Code (and, without frozen ``tests``, new tests), and whether the tests may be frozen.
+
+    ``prompt`` builds the request for a given evidence. New tests that check nothing are asked
+    for again (:data:`CHECKLESS_RETRIES` times) with :data:`NO_CHECKS` as evidence; if they still
+    check nothing they run as they are, unfrozen, and the next attempt writes new ones.
+    """
+    if tests is not None:
+        one = await kit.ask(prompt(evidence), CodeAnswer)
+        return one.code, tests, one.explanation, tuple(one.changes), False
+    note = evidence
+    for _ in range(CHECKLESS_RETRIES + 1):
+        both = await kit.ask(prompt(note), CodeWithTests)
+        if checks_something(both.tests):
+            return both.code, both.tests, both.explanation, tuple(both.changes), True
+        note = with_note(evidence, NO_CHECKS)
+    return both.code, both.tests, both.explanation, tuple(both.changes), False
 
 
 async def fix(kit: Kit, code: str, error: str, context: str = "") -> CodingResult:
@@ -86,18 +134,23 @@ async def fix(kit: Kit, code: str, error: str, context: str = "") -> CodingResul
         if _needs_new_tests(report):
             frozen.clear()
         tests = frozen[0] if frozen else None
-        prompt = fix_prompt(
-            kit.language,
-            code,
-            error,
-            context,
-            current=last.code if last else None,
-            tests=tests,
-            lessons=ctx.lessons,
-            evidence=ctx.last_evidence,
+
+        def prompt(evidence: str) -> str:
+            return fix_prompt(
+                kit.language,
+                code,
+                error,
+                context,
+                current=last.code if last else None,
+                tests=tests,
+                lessons=ctx.lessons,
+                evidence=evidence,
+            )
+
+        new_code, new_tests, why, changes, freeze = await _code_or_both(
+            kit, prompt, ctx.last_evidence, tests
         )
-        new_code, new_tests, why, changes = await _code_or_both(kit, prompt, tests)
-        if not frozen:
+        if freeze:
             frozen.append(new_tests)
         return Candidate(new_code, new_tests, why, changes)
 
@@ -127,17 +180,22 @@ async def write(
         if _needs_new_tests(report):
             frozen.clear()
         tests = frozen[0] if frozen else None
-        prompt = write_prompt(
-            kit.language,
-            description,
-            examples,
-            current=last.code if last else None,
-            tests=tests,
-            lessons=ctx.lessons,
-            evidence=ctx.last_evidence,
+
+        def prompt(evidence: str) -> str:
+            return write_prompt(
+                kit.language,
+                description,
+                examples,
+                current=last.code if last else None,
+                tests=tests,
+                lessons=ctx.lessons,
+                evidence=evidence,
+            )
+
+        new_code, new_tests, why, changes, freeze = await _code_or_both(
+            kit, prompt, ctx.last_evidence, tests
         )
-        new_code, new_tests, why, changes = await _code_or_both(kit, prompt, tests)
-        if not frozen:
+        if freeze:
             frozen.append(new_tests)
         return Candidate(new_code, new_tests, why, changes)
 
@@ -243,4 +301,15 @@ async def write_tests(kit: Kit, code: str) -> CodingResult:
     )
 
 
-__all__ = ["Kit", "characterize", "fix", "refactor", "write", "write_tests"]
+__all__ = [
+    "CHECKLESS_RETRIES",
+    "NO_CHECKS",
+    "Kit",
+    "characterize",
+    "checks_something",
+    "fix",
+    "refactor",
+    "with_note",
+    "write",
+    "write_tests",
+]

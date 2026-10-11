@@ -35,6 +35,24 @@ The plugin preserves backward compatibility through shims under
 `baselith/core/agents/coding*`. The full reference is the CodingAgent section of
 `mkdocs-site/docs/core-modules/agents.md`.
 
+## What "verified" means
+
+A verified run is a sandbox run whose single keyed report adds up (every
+collected test passed, failed, errored or was skipped, at least one passed)
+and in which every passing test executed at least one check: an `assert`
+(counted through pytest's assertion-pass hook) or a `pytest.raises` /
+`pytest.warns` call. A green run that fails either condition is not verified
+(`inconsistent_report`, `no_assertions`). For `fix` and `write`, a first test
+file with no `assert`, `pytest.raises`, `pytest.warns` or `pytest.approx` at
+all is never frozen: the model is asked again.
+
+The limits: the model writes both the code and the tests, so "verified" shows
+the code passes the model's own tests, under a best-effort tamper screen,
+inside the sandbox. It is not proof that the code is correct (a weak or
+trivial assertion still counts), nor a guarantee against code written
+deliberately to defeat the checks. The sandbox and the deterministic security
+review are the boundary.
+
 ## Execution boundary
 
 Every verified task (fix, write, refactor, tests) executes model-written code

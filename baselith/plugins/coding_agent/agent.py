@@ -179,7 +179,9 @@ class CodingAgent:
         """Run ``tests`` against ``code`` in the sandbox and read the report back."""
         refused = screen(code, tests)
         if refused is not None:
-            return TestReport(problem=f"refused before running: {refused}")
+            return TestReport(
+                problem=f"refused before running: {refused}", reason="refused"
+            )
         key = new_run_key()
         run = await self._execute_code(build_test_script(code, tests, key=key))
         exit_code = (

@@ -4,7 +4,10 @@ The files are written to a private host directory, mounted read-only at ``/work`
 a fresh directory under ``/tmp`` before anything runs, so the code under test never writes back
 to the host. A mount, not the script, carries them: Linux caps one argument at 128 KiB, and a
 repository file alone can come close. The reporter and the keyed report line are the ones of
-:mod:`baselith.plugins.coding_agent.harness` (:func:`~baselith.plugins.coding_agent.harness.runner_source`).
+:mod:`baselith.plugins.coding_agent.harness`
+(:func:`~baselith.plugins.coding_agent.harness.runner_source`), and so is the assertion count:
+pytest's assertion-pass hook is enabled on the command line (``-c`` points pytest at an empty
+config), and the test file is an initial path, so pytest rewrites its asserts whatever its name.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 
-from baselith.plugins.coding_agent.harness import runner_source
+from baselith.plugins.coding_agent.harness import ASSERTION_HOOK_OPTION, runner_source
 
 #: Where the staged workspace is mounted inside the sandbox.
 WORK_DIR = "/work"
@@ -130,7 +133,7 @@ def build_workspace_script(test_path: str, roots: Sequence[str], *, key: str) ->
     pytest_args = (
         '["-q", "-p", "no:cacheprovider", "--noconftest", "-c", os.devnull, "--no-header", '
         '"-o", "console_output_style=classic", "--rootdir", _root, '
-        f"{str(_safe(test_path))!r}]"
+        f'"-o", {ASSERTION_HOOK_OPTION!r}, {str(_safe(test_path))!r}]'
     )
     return _TEMPLATE.format(work=WORK_DIR, roots=list(roots)) + runner_source(
         pytest_args, key=key

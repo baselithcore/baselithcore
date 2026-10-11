@@ -237,6 +237,39 @@ This raises the bar; it is not a proof against code written deliberately to
 evade it (a value computed at run time is out of a screen's reach), so the
 sandbox isolation and the security review below apply to every result.
 
+### What "verified" means
+
+A green run counts only when the tests demonstrably checked something:
+
+- **The report adds up.** Exactly one keyed report; every collected test is
+  accounted for (`collected == passed + failed + errors + skipped`, each test
+  counted once by the worst of its phases, an xpass counted as a skip); at
+  least one test passed. Otherwise the run is not verified with
+  `reason="inconsistent_report"` (also `multiple_reports`,
+  `exit_after_report`, `no_report`, `timeout`, `crash`, `refused`).
+- **Assertions executed.** pytest's assertion-pass hook is enabled
+  (`-o enable_assertion_pass_hook=true`) and counted by the reporter, which is
+  bound before any model code is imported, together with calls to
+  `pytest.raises` and `pytest.warns`. Every passing test must execute at least
+  one check; a test that passes without one makes the run not verified with
+  `reason="no_assertions"`. An `assert` inside the code under test is not a
+  check: only the test file is rewritten.
+- **Frozen tests check something.** For `fix_code`, `generate_code` and
+  `fix_in_workspace`, a first test file with no `assert` and no
+  `pytest.raises`/`warns`/`approx` (a static AST check) is never frozen: the
+  model is asked again.
+
+`TestReport.reason`, `collected`, `assertions` and `unasserted` carry the
+verdict and the counts.
+
+!!! warning "Limits of verification"
+    The model writes both the code and the tests. A verified result shows the
+    code passes the model's own tests under a best-effort tamper screen inside
+    the sandbox. It is **not** proof of correctness (a trivial assertion still
+    counts) and **not** a guarantee against code written deliberately to defeat
+    the checks. The sandbox and the deterministic security review are the
+    boundary.
+
 ### Input is data
 
 Code, error messages, instructions, the test reports and the lessons from

@@ -7,6 +7,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from baselith.core.loops import AttemptContext
+from baselith.plugins.coding_agent.flows import (
+    CHECKLESS_RETRIES,
+    NO_CHECKS,
+    checks_something,
+    with_note,
+)
 from baselith.plugins.coding_agent.harness import TestReport
 from baselith.plugins.coding_agent.loop import Candidate, verified_loop
 from baselith.plugins.coding_agent.schemas import WorkspaceCode, WorkspaceFix
@@ -91,25 +97,34 @@ async def verified(
         if report is not None and report.collection_error:
             frozen.clear()
         tests = frozen[0] if frozen else None
-        prompt = workspace_fix_prompt(
-            language,
-            ws.target,
-            ws.files,
-            problem,
-            ws.roots,
-            ws.test_path,
-            current=last.code if last else None,
-            tests=tests,
-            lessons=ctx.lessons,
-            evidence=ctx.last_evidence,
-        )
+
+        def prompt(evidence: str) -> str:
+            return workspace_fix_prompt(
+                language,
+                ws.target,
+                ws.files,
+                problem,
+                ws.roots,
+                ws.test_path,
+                current=last.code if last else None,
+                tests=tests,
+                lessons=ctx.lessons,
+                evidence=evidence,
+            )
+
         if tests is None:
-            both: WorkspaceFix = await ask(prompt, WorkspaceFix)
-            frozen.append(both.tests)
+            # A first test file that checks nothing is asked for again, never frozen.
+            note = ctx.last_evidence
+            for _ in range(CHECKLESS_RETRIES + 1):
+                both: WorkspaceFix = await ask(prompt(note), WorkspaceFix)
+                if checks_something(both.tests):
+                    frozen.append(both.tests)
+                    break
+                note = with_note(ctx.last_evidence, NO_CHECKS)
             return Candidate(
                 both.code, both.tests, both.explanation, tuple(both.changes)
             )
-        one: WorkspaceCode = await ask(prompt, WorkspaceCode)
+        one: WorkspaceCode = await ask(prompt(ctx.last_evidence), WorkspaceCode)
         return Candidate(one.code, tests, one.explanation, tuple(one.changes))
 
     run = await verified_loop(

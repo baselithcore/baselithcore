@@ -157,7 +157,8 @@ async def test_a_forged_report_followed_by_a_kill_is_never_green():
 
 def test_a_report_then_a_non_zero_exit_is_tampering():
     line = report_marker(KEY) + (
-        '{"passed": 2, "failed": 0, "errors": 0, "skipped": 0, '
+        '{"passed": 2, "failed": 0, "errors": 0, "skipped": 0, "collected": 2, '
+        '"assertions": 2, "unasserted": 0, '
         '"collection_error": false, "failures": [], "exit": 0}'
     )
     assert parse_report(line, "", 0, key=KEY).green

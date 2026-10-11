@@ -1,5 +1,5 @@
 name: coding-agent
-version: 1.4.0
+version: 1.4.1
 description: Coding agent that writes, fixes, tests and refactors code and proves it
   with pytest tests run in the sandbox, exposed as MCP tools
 author: Baselith
@@ -23,5 +23,5 @@ permissions:
   - '*'
   secrets: []
   filesystem: []
-integrity_sha256: efb4e62d573ac8d6659546839fbea8a5b2aedd51501a6fb88a0c43e029a7b155
+integrity_sha256: e79eccbe40a18e543ca5a8c082f9eb276ab77f0c5733e25dbef0edd8a6144a5b
 hash_surface_version: 5
