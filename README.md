@@ -33,6 +33,15 @@ OpenTelemetry spans and Prometheus metrics with real cost attached — the audit
 trail a regulated deployment has to produce is written while the system runs,
 not reconstructed from logs afterwards.
 
+> **1.0 is the stable line.** The public `baselith` API follows Semantic
+> Versioning: a breaking change waits for a major release and goes through a
+> deprecation cycle first. Coming from 0.x? The top-level `core` and `plugins`
+> packages moved under `baselith`, the long-deprecated shims are gone, and
+> several security postures now fail closed — [Migrating to
+> 1.0](https://docs.baselithcore.xyz/advanced/migrating-to-1-0/) has the
+> checklist and [upgrade notes](https://docs.baselithcore.xyz/advanced/upgrade-notes/)
+> the details.
+
 <div align="center">
 
 [**Quick start**](#quick-start) · [**Plugins**](#plugins) · [**Docs**](https://docs.baselithcore.xyz) · [**Website**](https://baselithcore.xyz) · [**Marketplace**](https://marketplace.baselithcore.xyz) · [**Architecture**](#architecture-at-a-glance) · [**Changelog**](https://github.com/baselithcore/baselithcore/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/baselithcore/baselithcore/blob/main/CONTRIBUTING.md)
@@ -94,8 +103,8 @@ tools, structured output and a checkpoint store.
 
 `baselith` is the public API and the only surface that carries a
 compatibility promise; `import baselith` costs ~3 ms because names resolve
-lazily. The framework's own packages live under `core.*` and each declares
-what it promises — see [API stability
+lazily. The framework's own packages live under `baselith.core.*` and each
+declares what it promises — see [API stability
 tiers](https://docs.baselithcore.xyz/advanced/api-stability/).
 
 Or the whole runtime — API, PostgreSQL, FalkorDB and Qdrant, plus two Hugging
@@ -165,6 +174,11 @@ baselith plugin marketplace install <plugin-id>
 
 `baselith plugin list`, `status` and `logs` cover day-to-day work; `sign` writes
 the integrity hash a hardened deployment verifies before it imports anything.
+
+The distribution ships official plugins under `baselith.plugins`, each signed
+and strictly typed: `api_routers`, `browser_agent`, `coding_agent`,
+`document_sources`, `goals`, `payments` (a reference AP2 adapter),
+`reasoning_agent` and `web_scraper`.
 
 The [first-plugin tutorial](https://docs.baselithcore.xyz/getting-started/first-plugin/)
 walks one end to end · [creating
