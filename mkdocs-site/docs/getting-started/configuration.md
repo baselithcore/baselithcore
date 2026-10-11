@@ -232,6 +232,24 @@ Declared in `baselith.core.config.evaluation`.
 | `EVAL_JUDGE_MAX_PARALLEL` | `int` | `4` | Maximum judge calls in flight at once across the suite. |
 | `EVAL_JUDGE_SAMPLES` | `int` | `3` | Judge evaluations per case; the median score gates. |
 | `EVAL_MODEL` | `str` | `gpt-4-turbo-preview` |  |
+| `EVAL_ONLINE_DEGRADATION_THRESHOLD` | `float` | `0.15` | Drop of the windowed mean below the reference mean that marks an intent degraded. |
+| `EVAL_ONLINE_ENABLED` | `bool` | `False` | Start online evaluation of production flows at boot (also needs EVAL_ENABLED). |
+| `EVAL_ONLINE_INTENT_SAMPLE_RATES` | `dict[str, float]` | *computed* | Per-intent sample-rate overrides, as JSON (e.g. {"qa_docs": 0.2}). |
+| `EVAL_ONLINE_JUDGE_RATE` | `float` | `0.0` | Fraction of all flows also scored by the LLM judge, capped at the sample rate. 0 keeps the judge off. |
+| `EVAL_ONLINE_MAX_INTENTS` | `int` | `50` | Distinct intent label values on the online metrics; further intents are reported as 'other'. |
+| `EVAL_ONLINE_MIN_ANSWER_CHARS` | `int` | `20` | Answers shorter than this fail the too-short check. |
+| `EVAL_ONLINE_MIN_SAMPLES` | `int` | `20` | Scores a window needs before the monitor judges it, and between two state changes. |
+| `EVAL_ONLINE_QUALITY_FLOOR` | `float \| None` | *empty* | Absolute floor for the windowed mean score; unset compares against the reference window only. |
+| `EVAL_ONLINE_QUEUE_SIZE` | `int` | `256` | Sampled flows waiting for evaluation; beyond it new samples are dropped and counted, never awaited. |
+| `EVAL_ONLINE_RECOVERY_MARGIN` | `float` | `0.05` | Hysteresis: a degraded intent recovers only this far inside the degradation boundary. |
+| `EVAL_ONLINE_REFERENCE_WINDOW` | `int` | `500` | Scores per intent in the trailing reference window (must exceed EVAL_ONLINE_WINDOW to be used). |
+| `EVAL_ONLINE_RETENTION_DAYS` | `int` | `30` | Stored online results older than this are swept; 0 keeps them forever. |
+| `EVAL_ONLINE_SAMPLE_RATE` | `float` | `0.05` | Fraction of successful flows sampled for the deterministic online checks; the decision is a stable hash of the run id. |
+| `EVAL_ONLINE_STORE` | `Literal['none', 'memory', 'postgres']` | `none` | Where online evaluation results are persisted. |
+| `EVAL_ONLINE_STORE_MAX_RECORDS` | `int` | `10000` | Records kept by the in-memory store (oldest evicted). |
+| `EVAL_ONLINE_STORE_RAW_TEXT` | `bool` | `False` | Also store the redacted query and response text. |
+| `EVAL_ONLINE_WINDOW` | `int` | `50` | Recent scores per intent in the quality monitor's window. |
+| `EVAL_ONLINE_WORKERS` | `int` | `2` | Concurrent online evaluations (and judge calls) in flight. |
 | `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
 
 ## Events configuration
@@ -1032,4 +1050,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-691 settings documented.
+709 settings documented.

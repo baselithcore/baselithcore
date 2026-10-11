@@ -89,15 +89,17 @@ class TestEvaluationService:
 
 
 @pytest.mark.asyncio
-async def test_service_stop_unsubscribes_from_bus(monkeypatch):
+async def test_service_stop_unsubscribes_from_bus():
     """stop() releases the FLOW_COMPLETED subscription taken by start()."""
+    from baselith.core.config.evaluation import EvaluationConfig
     from baselith.core.events import EventBus
 
-    monkeypatch.setattr(
-        "baselith.core.config.evaluation.evaluation_config.enabled", True, raising=False
-    )
     bus = EventBus()
-    service = EvaluationService(event_bus=bus, evaluator=CompositeEvaluator([]))
+    service = EvaluationService(
+        event_bus=bus,
+        evaluator=CompositeEvaluator([]),
+        config=EvaluationConfig(enabled=True),
+    )
 
     service.start()
     assert len(bus._get_handlers(EventNames.FLOW_COMPLETED)) == 1

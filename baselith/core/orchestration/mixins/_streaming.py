@@ -14,6 +14,7 @@ resumed by replaying it, so there is nothing a checkpoint could restore.
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -35,6 +36,10 @@ from baselith.core.orchestration.mixins._context_assembly import (
     inject_memory_context,
 )
 from baselith.core.orchestration.mixins._failure_paths import handle_budget_exceeded
+from baselith.core.orchestration.mixins._flow_events import (
+    build_flow_completed,
+    emit_flow_completed,
+)
 
 logger = get_logger(__name__)
 
@@ -63,6 +68,7 @@ async def stream_with_loop_controls(
     budget = LoopBudget(limits=getattr(orchestrator, "loop_limits", LoopLimits()))
     context["loop_budget"] = budget
     token = activate_budget(budget)
+    start_time = time.time()
     chunks: list[str] = []
     completed = False
     try:
@@ -90,8 +96,27 @@ async def stream_with_loop_controls(
             # with the context that set it.
             pass
 
-    if completed and getattr(orchestrator, "memory_manager", None):
-        orchestrator._schedule_memory_write(query, "".join(chunks), intent)
+    if not completed:
+        return
+    answer = "".join(chunks)
+    if getattr(orchestrator, "memory_manager", None):
+        orchestrator._schedule_memory_write(query, answer, intent)
+    # The streamed answer completes a flow like any other: without the event
+    # online evaluation never saw streamed traffic. Chunks were guarded on the
+    # way out, so ``answer`` is the text the user received.
+    run_id = context.get("run_id")
+    emit_flow_completed(
+        build_flow_completed(
+            intent=intent,
+            query=query,
+            response=answer,
+            context=context,
+            start_time=start_time,
+            run_id=run_id if isinstance(run_id, str) else None,
+            budget=budget,
+            streamed=True,
+        )
+    )
 
 
 __all__ = ["stream_with_loop_controls"]

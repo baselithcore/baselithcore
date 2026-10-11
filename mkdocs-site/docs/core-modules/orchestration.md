@@ -586,7 +586,14 @@ Moderator and classifier failures are **fail-open** — an outage degrades to
 unguarded service, never a chat outage.
 
 The outbound gate is `guard_output_async`, awaited by `process()` on the final
-result. The synchronous `guard_output` (PII redaction, harmful-content
+result. `FLOW_COMPLETED` is emitted only **after** it
+(`baselith/core/orchestration/mixins/_flow_events.py`): `_process_with_budget`
+stages the payload on the request context and `process()` completes it with
+the guarded `response` and the guard's `guardrails` verdicts, so subscribers
+(online evaluation above all) see what the user received; the payload also
+carries `tenant_id`, `cost_usd` and `tokens`. A guard that raises discards the
+staged event. `process_stream` emits it once a stream completes
+(`streamed: true`); an abandoned stream emits nothing. The synchronous `guard_output` (PII redaction, harmful-content
 patterns) always applies first. The **groundedness rail** then applies when
 enabled (`BASELITH_OUTPUT_GROUNDEDNESS=off` default | `annotate` | `block` —
 `baselith/core/orchestration/guard_groundedness.py`): a response whose result dict

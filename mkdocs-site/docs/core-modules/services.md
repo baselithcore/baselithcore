@@ -2373,7 +2373,7 @@ loop.start()   # subscribes to EventBus
 loop.stop()
 ```
 
-**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_COMPLETED` → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+**Event flow**: `FLOW_COMPLETED` → `EvaluationService` (judged share of the sampled flows, `EVAL_ONLINE_JUDGE_RATE`) → `EVALUATION_COMPLETED` → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
 
 ---
 

@@ -44,7 +44,8 @@ __all__ = [
 #: Tables carrying a ``tenant_id`` column, protected by a row-level-security
 #: policy. Migration 008 retrofits the policy onto the tables that predate it;
 #: a table introduced later declares its own policy in the migration that
-#: creates it (``009_tool_invocations.py``, ``011_webhooks.py``). Keep this tuple in step with the
+#: creates it (``009_tool_invocations.py``, ``011_webhooks.py``,
+#: ``013_online_eval_results.py``). Keep this tuple in step with the
 #: union of those lists — ``tests/unit/test_schema_ownership.py`` fails
 #: otherwise.
 RLS_PROTECTED_TABLES: tuple[str, ...] = (
@@ -54,6 +55,7 @@ RLS_PROTECTED_TABLES: tuple[str, ...] = (
     "chat_feedback",
     "feedback",
     "interactions",
+    "online_eval_results",
     "tool_invocations",
     "webhook_deliveries",
     "webhook_endpoints",

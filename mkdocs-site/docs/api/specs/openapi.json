@@ -1149,6 +1149,93 @@
         "title": "ObservationRequest",
         "type": "object"
       },
+      "OnlineEvaluationSummary": {
+        "description": "The online evaluator's state on the serving worker.",
+        "properties": {
+          "intents": {
+            "items": {
+              "$ref": "#/components/schemas/OnlineIntentWindow"
+            },
+            "title": "Intents",
+            "type": "array"
+          },
+          "judge_rate": {
+            "title": "Judge Rate",
+            "type": "number"
+          },
+          "queue_depth": {
+            "title": "Queue Depth",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "sample_rate": {
+            "title": "Sample Rate",
+            "type": "number"
+          }
+        },
+        "required": [
+          "running",
+          "sample_rate",
+          "judge_rate",
+          "queue_depth",
+          "intents"
+        ],
+        "title": "OnlineEvaluationSummary",
+        "type": "object"
+      },
+      "OnlineIntentWindow": {
+        "description": "Rolling-window statistics of one intent and score source.",
+        "properties": {
+          "degraded": {
+            "title": "Degraded",
+            "type": "boolean"
+          },
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          },
+          "observed": {
+            "title": "Observed",
+            "type": "integer"
+          },
+          "reference_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Mean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "window_mean": {
+            "title": "Window Mean",
+            "type": "number"
+          },
+          "window_samples": {
+            "title": "Window Samples",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "intent",
+          "source",
+          "window_mean",
+          "window_samples",
+          "observed",
+          "degraded"
+        ],
+        "title": "OnlineIntentWindow",
+        "type": "object"
+      },
       "PendingApproval": {
         "description": "A run durably paused ``awaiting_approval``.",
         "properties": {
@@ -7402,6 +7489,64 @@
         ]
       }
     },
+    "/evaluation/online/summary": {
+      "get": {
+        "deprecated": true,
+        "description": "Per-intent rolling-window quality of the sampled production traffic.",
+        "operationId": "online_summary_evaluation_online_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineEvaluationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Online Summary",
+        "tags": [
+          "evaluation"
+        ]
+      }
+    },
     "/feedback": {
       "post": {
         "deprecated": true,
@@ -12066,6 +12211,63 @@
         "summary": "Reclassify System",
         "tags": [
           "compliance"
+        ]
+      }
+    },
+    "/v1/evaluation/online/summary": {
+      "get": {
+        "description": "Per-intent rolling-window quality of the sampled production traffic.",
+        "operationId": "online_summary_v1_evaluation_online_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlineEvaluationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBasic": []
+          }
+        ],
+        "summary": "Online Summary",
+        "tags": [
+          "evaluation"
         ]
       }
     },

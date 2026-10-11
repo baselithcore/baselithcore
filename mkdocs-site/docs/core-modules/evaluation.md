@@ -19,7 +19,13 @@ baselith/core/evaluation/               # the evaluation toolkit
 ├── judges.py                  # Relevance/Coherence/Faithfulness/CompositeEvaluator
 ├── consensus.py               # ConsensusEvaluator (same question, several judges)
 ├── metrics.py                 # DeepEval metric wrappers (gated on EvaluationConfig)
-├── service.py                 # event-driven EvaluationService (FLOW_COMPLETED listener)
+├── service.py                 # online EvaluationService (sampled FLOW_COMPLETED listener)
+├── online_sampling.py         # OnlineSampler: deterministic run-id hash sampling
+├── online_checks.py           # cheap deterministic checks (no LLM)
+├── online_metrics.py          # mas_eval_online_* recording, intent label cap
+├── online_monitor.py          # QualityMonitor: rolling windows + hysteresis
+├── online_store.py            # OnlineEvalStore protocol, in-memory store
+├── online_store_postgres.py   # PostgresOnlineEvalStore (migration 013)
 ├── prompt_eval.py             # PromptEvaluator / EvalCase
 ├── bake_off.py                # run_bake_off multi-model comparison
 ├── trajectory.py              # trajectory-aware case evaluation
@@ -100,35 +106,131 @@ print(f"Faithfulness: {faithfulness:.2f}  Relevancy: {relevancy:.2f}")
 
 ---
 
-## Integration with Optimization Loop
+## Online evaluation
 
-The class that closes the loop is the **event-driven**
-`baselith.core.evaluation.service.EvaluationService` (exported from `baselith.core.evaluation`).
-It subscribes to `FLOW_COMPLETED`, judges
-each successful flow in a background task, and emits the verdict:
+`baselith.core.evaluation.EvaluationService` evaluates **production traffic**:
+it subscribes to `FLOW_COMPLETED` and scores a deterministic sample of the
+successful flows off the request path. It is off unless both `EVAL_ENABLED`
+and `EVAL_ONLINE_ENABLED` are true; then the app lifespan starts it at boot
+(through the lazy registry, so a plugin that requires the `evaluation`
+resource gets the same instance) and stops it on shutdown, cancelling its
+workers. Settings are read when `start()` runs, never at import.
 
 ```python
-from baselith.core.evaluation import EvaluationService
+from baselith.core.config.evaluation import EvaluationConfig
+from baselith.core.evaluation import EvaluationService, InMemoryOnlineEvalStore
 
-service = EvaluationService()   # evaluator defaults to CompositeEvaluator()
-service.start()                 # subscribes; a no-op unless EVAL_ENABLED=true
-# ...
-service.stop()                  # unsubscribes from FLOW_COMPLETED, flips the flag
+service = EvaluationService(
+    config=EvaluationConfig(enabled=True, online_sample_rate=0.1, online_judge_rate=0.01),
+    store=InMemoryOnlineEvalStore(),
+)
+service.start()             # subscribes; spawns the workers on the running loop
+print(service.summary())    # sample/judge rate, queue depth, per-intent windows
+await service.shutdown()    # unsubscribes and cancels the workers
 ```
 
-**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_STARTED` → judge → `EVALUATION_COMPLETED` (or `EVALUATION_FAILED`) → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+### The pipeline
 
-- Flows are skipped when `success` is false, the intent is missing or starts
-  with `evaluation`, or the payload has no `query`/`response`.
-- Concurrency is bounded by `max_concurrent` (default `8`, a semaphore bound
-  to the running loop) so a burst of completed flows cannot fan out into
-  unbounded LLM-judge calls.
-- The `EVALUATION_COMPLETED` payload carries `intent`, `score`, `quality`,
-  `feedback`, `aspects`, `should_refine`, `metadata`, plus the evaluated
-  `response` and the originating `run_id` for the learning subsystems.
+1. **Sampling.** A flow is sampled when a stable hash of its `run_id` falls
+   below `EVAL_ONLINE_SAMPLE_RATE` (default `0.05`), overridable per intent
+   with `EVAL_ONLINE_INTENT_SAMPLE_RATES` (JSON). The decision is
+   reproducible — the same run is in or out on every replica, and raising the
+   rate only adds runs. Failed flows, flows without an intent and intents
+   starting with `evaluation` are never evaluated; a run without an id is
+   sampled at the rate with a random key.
+2. **Backpressure.** Sampled flows go to a bounded queue
+   (`EVAL_ONLINE_QUEUE_SIZE`, default 256) drained by `EVAL_ONLINE_WORKERS`
+   workers (default 2). When it is full the sample is dropped and counted in
+   `mas_eval_online_dropped_total{reason="queue_full"}`: the event handler
+   never waits, so evaluation can never slow a request.
+3. **Deterministic checks** (`online_checks.py`, no LLM) run on every sampled
+   flow. Each failed check multiplies the score by its factor:
 
-This allows the framework to detect when an agent's performance drops below a
-quality threshold and trigger automatic prompt evolution.
+    | Flag | Factor | Fails when |
+    | --- | --- | --- |
+    | `empty` | 0.0 | the answer is blank |
+    | `guard_blocked` | 0.0 | moderation or the groundedness rail replaced it |
+    | `refusal` | 0.25 | it *opens* with a refusal phrase |
+    | `too_short` | 0.5 | it is shorter than `EVAL_ONLINE_MIN_ANSWER_CHARS` (20) |
+    | `ungrounded` | 0.5 | the groundedness rail scored it below 0.5 |
+
+    Latency, spend (`cost_usd`, `tokens`) and guard redaction counts are kept
+    as signals, not scored: a slow or redacted answer is not necessarily worse.
+4. **LLM judge (opt-in).** `EVAL_ONLINE_JUDGE_RATE` (default `0.0`, off) is the
+   share of *all* flows also scored by the judge (`CompositeEvaluator`, built
+   on first use), capped at the sample rate: judged runs are always a subset of
+   sampled ones. A judged flow emits `EVALUATION_STARTED` and
+   `EVALUATION_COMPLETED` (or `EVALUATION_FAILED`) exactly as before — with
+   `tenant_id` and `source: "judge"` added — so the optimization loop and the
+   learning subsystems keep consuming it.
+5. **Metrics.** Every verdict feeds the `mas_eval_online_*` metrics, labelled by
+   intent and source (`checks` / `judge`). Intents are capped at
+   `EVAL_ONLINE_MAX_INTENTS` (50) distinct label values; later ones report as
+   `other`. See [Observability › Online evaluation metrics](observability-module.md#online-evaluation-metrics).
+6. **Quality monitor** (below) and **store** (below).
+
+### What `FLOW_COMPLETED` carries
+
+The orchestrator emits the success event **after** the output guard, so
+`response` is the text the user received and `guardrails` holds the guard's
+verdicts (redaction counts, moderation, groundedness). The payload also carries
+`run_id`, `tenant_id` (the ambient tenant: subscribers run outside the request),
+`duration_ms`, `cost_usd` and `tokens`. Streamed answers emit the event too,
+with `streamed: true`, once the stream completes; an abandoned stream emits
+nothing.
+
+### Rolling quality monitor
+
+`QualityMonitor` keeps, per intent and source, a window of the last
+`EVAL_ONLINE_WINDOW` (50) scores and a trailing reference of up to
+`EVAL_ONLINE_REFERENCE_WINDOW` (500) scores before it. Once the window holds
+`EVAL_ONLINE_MIN_SAMPLES` (20) scores, the series is **degraded** when the
+windowed mean falls below `EVAL_ONLINE_QUALITY_FLOOR` (unset by default) or
+more than `EVAL_ONLINE_DEGRADATION_THRESHOLD` (0.15) below the reference mean.
+A degradation logs a warning, emits `EVALUATION_DEGRADED`
+(`intent`, `source`, `window_mean`, `reference_mean`, `floor`, `samples`,
+`reason` = `below_floor` / `below_reference`) and sets
+`mas_eval_online_degraded{intent,source}` to 1.
+
+Hysteresis keeps it from flapping: a degraded series recovers (emitting
+`EVALUATION_RECOVERED`, gauge back to 0) only once the windowed mean is
+`EVAL_ONLINE_RECOVERY_MARGIN` (0.05) *inside* both boundaries, at least
+`EVAL_ONLINE_MIN_SAMPLES` scores must arrive between two state changes, and the
+reference mean is frozen while degraded, so a long incident cannot drag the
+reference down until it looks normal. The monitor is per process: each worker
+watches its own share of the traffic. Alert on the gauge or subscribe to the
+event; a quality degradation is not routed into the regulatory incident
+subsystem (`baselith.core.incidents`), which records reportable incidents.
+
+### Result store (opt-in)
+
+`EVAL_ONLINE_STORE` selects where verdicts are persisted: `none` (default),
+`memory` (`InMemoryOnlineEvalStore`, bounded by
+`EVAL_ONLINE_STORE_MAX_RECORDS`, oldest evicted) or `postgres`
+(`PostgresOnlineEvalStore`, table `online_eval_results` from migration
+`013_online_eval_results`, tenant-scoped under row-level security). One record
+per verdict — the checks always, the judge when the flow was judged — holding
+score, quality, aspects, flags, signals, intent, run id, tenant and timestamp.
+The query and response text are **not** stored unless
+`EVAL_ONLINE_STORE_RAW_TEXT=true`, and then only after
+`baselith.core.observability.redaction.redact_text` masked e-mail addresses and
+credentials, cut to 4 000 characters. A retention sweep deletes records older
+than `EVAL_ONLINE_RETENTION_DAYS` (30; `0` keeps them) every hour; the Postgres
+sweep runs as the `system` maintenance identity.
+
+### Read API
+
+With `EVAL_ONLINE_ENABLED`, the `api_routers` plugin mounts
+`GET /v1/evaluation/online/summary` behind the admin Basic Auth: the sample and
+judge rates, the queue depth and the per-intent window statistics of the
+worker that serves the request (503 while the service is not running).
+
+### Event flow
+
+`FLOW_COMPLETED` → `EvaluationService` (sample → checks → optional judge) →
+`EVALUATION_COMPLETED` (judged flows) → `OptimizationLoop` → `auto_tune()` →
+`OPTIMIZATION_COMPLETED`; and `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED`
+from the monitor.
 
 ---
 

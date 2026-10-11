@@ -5,6 +5,11 @@ Provides LLM-as-a-Judge evaluation capabilities for assessing
 agent response quality across multiple dimensions (relevance,
 coherence, faithfulness).
 
+The event-driven ``EvaluationService`` evaluates a deterministic sample of
+production flows online: cheap deterministic checks on every sampled flow, an
+opt-in LLM-judge rate on top, Prometheus metrics, a per-intent rolling quality
+monitor and an opt-in result store.
+
 Also includes the Prompt Regression Testing harness (prompt_eval) for
 running structured eval cases against system prompts — see §2.6 of
 "Building AI Agents: From Design Patterns to Production".
@@ -23,6 +28,12 @@ from baselith.core.evaluation.fairness import (
     evaluate_fairness,
 )
 from baselith.core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from baselith.core.evaluation.online_monitor import QualityMonitor
+from baselith.core.evaluation.online_store import (
+    InMemoryOnlineEvalStore,
+    OnlineEvalRecord,
+    OnlineEvalStore,
+)
 from baselith.core.evaluation.promotion import (
     PromotionError,
     PromotionResult,
@@ -50,6 +61,11 @@ __all__ = [
     "RelevanceEvaluator",
     "CompositeEvaluator",
     "ConsensusEvaluator",
+    # Online evaluation of production traffic
+    "QualityMonitor",
+    "OnlineEvalRecord",
+    "OnlineEvalStore",
+    "InMemoryOnlineEvalStore",
     # Prompt regression testing
     "EvalCase",
     "CaseResult",

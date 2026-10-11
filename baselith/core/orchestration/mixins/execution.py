@@ -30,6 +30,11 @@ from baselith.core.orchestration.mixins._failure_paths import (
     handle_cancellation,
     handle_handler_error,
 )
+from baselith.core.orchestration.mixins._flow_events import (
+    FLOW_EVENT_KEY,
+    build_flow_completed,
+    emit_staged_flow_completed,
+)
 from baselith.core.orchestration.run_events import EventType, publish_run_event
 
 #: What a stream says when its handler fails mid-answer.
@@ -174,6 +179,7 @@ class ExecutionMixin:
         budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
         context["loop_budget"] = budget
         token = activate_budget(budget)
+        guarded: dict[str, Any] | None = None
         try:
             result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
@@ -181,9 +187,11 @@ class ExecutionMixin:
             # Output guardrails (PII redaction, harmful-content filter, and
             # opt-in content moderation) on the final response text before it
             # leaves the orchestrator.
-            return await guard_output_async(result)
+            guarded = await guard_output_async(result)
+            return guarded
         finally:
             deactivate_budget(token)
+            emit_staged_flow_completed(context, guarded)
 
     async def _init_checkpoint(
         self,
@@ -319,33 +327,19 @@ class ExecutionMixin:
             if self.memory_manager:
                 self._schedule_memory_write(query, result.get("response", ""), intent)
 
-            # Emit flow completed event
+            # Stage the completion event: process() emits it after the output
+            # guard, so it carries the text the user received (_flow_events).
             if _HAS_EVENT_BUS:
-                elapsed = time.time() - start_time
-
-                # Create safe context for event (exclude complex objects)
-                safe_context = {
-                    k: v
-                    for k, v in context.items()
-                    if isinstance(v, (str, int, float, bool, list, dict))
-                    and k != "memory_manager"
-                }
-
-                try:
-                    get_event_bus().emit_sync(
-                        EventNames.FLOW_COMPLETED,
-                        {
-                            "intent": intent,
-                            "query": query,
-                            "response": result.get("response", ""),
-                            "context": safe_context,
-                            "duration_ms": int(elapsed * 1000),
-                            "success": not result.get("error", False),
-                            "run_id": events_run_id,
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to emit completion event: {e}")
+                context[FLOW_EVENT_KEY] = build_flow_completed(
+                    intent=intent,
+                    query=query,
+                    response=result.get("response", ""),
+                    context=context,
+                    start_time=start_time,
+                    run_id=events_run_id,
+                    budget=budget,
+                    success=not result.get("error", False),
+                )
 
             # Persist final budget + mark the checkpoint completed.
             if checkpoint_mgr is not None:

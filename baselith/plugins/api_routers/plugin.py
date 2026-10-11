@@ -13,8 +13,9 @@ class ApiRoutersPlugin(Plugin):
     mounting path (``get_routers``) so they attach at startup without the app
     factory taking a ``core -> plugins`` import: prompts, the WebSocket chat
     channel, the async-agent API, and — behind their feature flags — webhooks,
-    privacy, compliance, approvals and runs. Every API router is served under
-    ``/v1`` and, deprecated, at its unprefixed path (:mod:`baselith.core.api.versioning`).
+    privacy, compliance, approvals, runs and the online-evaluation summary.
+    Every API router is served under ``/v1`` and, deprecated, at its
+    unprefixed path (:mod:`baselith.core.api.versioning`).
     """
 
     async def initialize(self, config: dict) -> None:
@@ -106,6 +107,15 @@ class ApiRoutersPlugin(Plugin):
 
             routers.append(approvals_router)
             routers.append(runs_router)
+
+        from baselith.core.config.evaluation import get_evaluation_config
+
+        if get_evaluation_config().online_enabled:
+            from baselith.plugins.api_routers.evaluation import (
+                router as evaluation_router,
+            )
+
+            routers.append(evaluation_router)
 
         # Async agent runs (POST /agent/async + GET /agent/status/{id}).
         # Mounted unconditionally: queue-infrastructure absence surfaces as

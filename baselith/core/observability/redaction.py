@@ -301,6 +301,23 @@ def redact_secrets(
     return _mask_credentials(text, _SECRET_PAIR, mask)
 
 
+def redact_text(text: str, *, mask: str = _REDACTED) -> str:
+    """Mask e-mail addresses and credentials in free text bound for storage.
+
+    The pass for user-supplied text a feature persists (a stored query or
+    answer): e-mail local parts are masked as the log pipeline masks them,
+    then :func:`redact_secrets` masks every credential shape it knows.
+
+    Args:
+        text: The text to redact.
+        mask: Replacement for masked credentials.
+
+    Returns:
+        The redacted text.
+    """
+    return redact_secrets(_EMAIL_REGEX.sub(_mask_email, text), mask=mask)
+
+
 def safe_snippet(
     text: str, secrets: Iterable[str] = (), *, limit: int = 200, mask: str = _REDACTED
 ) -> str:
@@ -317,6 +334,7 @@ def safe_snippet(
 __all__ = [
     "redact_secrets",
     "redact_sensitive",
+    "redact_text",
     "redact_url_credentials",
     "safe_snippet",
 ]

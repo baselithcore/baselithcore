@@ -42,7 +42,7 @@ The **agentic patterns** are organized into 7 functional categories:
 | 19  | **Memory Tiering**     | Infrastructure | `baselith/core/memory/`      | Multi-level memory system                 |
 | 20  | **Multi-Tenancy**      | Infrastructure | `baselith/core/context.py`   | Data isolation between tenants            |
 | 21  | **Task Queue**         | Infrastructure | `baselith/core/task_queue/`  | Distributed queues for async jobs         |
-| 22  | **Evaluation**         | Infrastructure | `baselith/core/evaluation/`          | LLM response quality evaluation       |
+| 22  | **Evaluation**         | Infrastructure | `baselith/core/evaluation/`          | LLM response quality evaluation; sampled online evaluation of production flows |
 
 !!! note "In the running app versus in the library"
     A pattern having a module does not mean the default app runs it. These are

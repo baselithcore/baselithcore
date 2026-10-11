@@ -235,6 +235,51 @@ FEEDBACK_RECEIVED_TOTAL = Counter(
     ["sentiment"],
 )
 
+# === Online Evaluation Metrics ===
+# Emitted from baselith.core.evaluation.service on sampled production flows.
+# ``intent`` is capped (EVAL_ONLINE_MAX_INTENTS distinct values, the rest are
+# ``other``); ``source`` is ``checks`` (deterministic, no LLM) or ``judge``.
+EVAL_ONLINE_SAMPLES_TOTAL = Counter(
+    "mas_eval_online_samples_total",
+    "Production flows sampled for online evaluation.",
+    ["intent"],
+)
+EVAL_ONLINE_SCORE = Histogram(
+    "mas_eval_online_score",
+    "Online evaluation score (0-1) of sampled flows.",
+    ["intent", "source"],
+    buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+EVAL_ONLINE_QUALITY_TOTAL = Counter(
+    "mas_eval_online_quality_total",
+    "Online evaluation verdicts by quality level.",
+    ["intent", "source", "quality"],
+)
+EVAL_ONLINE_FLAGS_TOTAL = Counter(
+    "mas_eval_online_flags_total",
+    "Deterministic online check failures (empty, too_short, refusal, "
+    "guard_blocked, ungrounded).",
+    ["intent", "flag"],
+)
+EVAL_ONLINE_FAILURES_TOTAL = Counter(
+    "mas_eval_online_failures_total",
+    "Online evaluation steps that raised (checks, judge, store, retention).",
+    ["stage"],
+)
+EVAL_ONLINE_DROPPED_TOTAL = Counter(
+    "mas_eval_online_dropped_total",
+    "Sampled flows dropped before evaluation (queue full).",
+    ["reason"],
+)
+# ``livemax``: each worker monitors its own traffic, so an intent counts as
+# degraded while any live worker sees it degraded.
+EVAL_ONLINE_DEGRADED = Gauge(
+    "mas_eval_online_degraded",
+    "1 while the rolling quality monitor holds an intent degraded.",
+    ["intent", "source"],
+    multiprocess_mode="livemax",
+)
+
 # === HTTP Server Metrics (RED: Rate, Errors, Duration) ===
 # Emitted by ``baselith.core.middleware.http_metrics.HTTPMetricsMiddleware``. Names follow
 # the de-facto Prometheus HTTP convention (``http_requests_total`` /
@@ -317,6 +362,14 @@ __all__ = [
     "AUTH_TOKEN_VALIDATION_SECONDS",
     # Feedback
     "FEEDBACK_RECEIVED_TOTAL",
+    # Online evaluation
+    "EVAL_ONLINE_SAMPLES_TOTAL",
+    "EVAL_ONLINE_SCORE",
+    "EVAL_ONLINE_QUALITY_TOTAL",
+    "EVAL_ONLINE_FLAGS_TOTAL",
+    "EVAL_ONLINE_FAILURES_TOTAL",
+    "EVAL_ONLINE_DROPPED_TOTAL",
+    "EVAL_ONLINE_DEGRADED",
     # HTTP (RED)
     "HTTP_REQUESTS_TOTAL",
     "HTTP_REQUEST_DURATION_SECONDS",

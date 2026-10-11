@@ -189,7 +189,13 @@ async def initialize_memory() -> Any:
 
 async def initialize_evaluation() -> Any:
     """
-    Lazy initialize the Evaluation service for benchmarking results.
+    Lazy initialize the online Evaluation service.
+
+    Started by a plugin that requires the ``evaluation`` resource, or at boot
+    when ``EVAL_ENABLED`` and ``EVAL_ONLINE_ENABLED`` are both on (see
+    :mod:`baselith.core.api._runtime_services`). ``start()`` reads the
+    settings now, so a no-op unless ``EVAL_ENABLED``; the lazy registry's
+    teardown calls ``shutdown()``, which cancels the evaluation workers.
 
     Returns:
         Any: The started EvaluationService instance.

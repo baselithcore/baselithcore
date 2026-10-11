@@ -20,6 +20,10 @@ Current services:
   of its release mirrors are reported.
 * **Update boot report** (``UPDATE_APPLY_ENABLED``) — each worker records the
   plugins it loaded so the one-click updater can verify a restart.
+* **Online evaluation** (``EVAL_ENABLED`` + ``EVAL_ONLINE_ENABLED``) — the
+  sampled evaluation of production flows
+  (:class:`baselith.core.evaluation.EvaluationService`), started through the
+  lazy registry so a plugin that requires ``evaluation`` gets the same instance.
 """
 
 from __future__ import annotations
@@ -87,7 +91,27 @@ async def start_runtime_services(app: Any) -> None:
     except Exception as exc:
         logger.warning("plugin_updates_start_failed: %s", exc)
 
+    await _start_online_evaluation(app)
     await _write_update_boot_report()
+
+
+async def _start_online_evaluation(app: Any) -> None:
+    """Start online evaluation when both evaluation switches are on."""
+    try:
+        from baselith.core.config.evaluation import get_evaluation_config
+
+        config = get_evaluation_config()
+        if not (config.enabled and config.online_enabled):
+            return
+        if getattr(app.state, "evaluation_service", None) is not None:
+            return  # already started for a plugin that requires it
+        from baselith.core.di.lazy_registry import get_lazy_registry
+
+        app.state.evaluation_service = await get_lazy_registry().get_or_create(
+            "evaluation"
+        )
+    except Exception as exc:
+        logger.warning("online_evaluation_start_failed: %s", exc)
 
 
 async def _write_update_boot_report() -> None:
@@ -138,6 +162,15 @@ async def stop_runtime_services(app: Any) -> None:
             await prompt_sync.stop()
         except Exception as exc:
             logger.warning("prompt_sync_stop_failed: %s", exc)
+
+    # Stop sampling first: flows completing during the drain below are not
+    # evaluated. The lazy registry's own teardown repeats this harmlessly.
+    evaluation = getattr(app.state, "evaluation_service", None)
+    if evaluation is not None and hasattr(evaluation, "shutdown"):
+        try:
+            await evaluation.shutdown()
+        except Exception as exc:
+            logger.warning("evaluation_service_stop_failed: %s", exc)
 
     plugin_updates = getattr(app.state, "plugin_updates", None)
     if plugin_updates is not None:

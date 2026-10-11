@@ -38,6 +38,10 @@ class EventNames:
     EVALUATION_STARTED = "evaluation.started"
     EVALUATION_COMPLETED = "evaluation.completed"
     EVALUATION_FAILED = "evaluation.failed"
+    # Online quality monitor: an intent's windowed score fell below its
+    # floor/reference (and later came back, past the hysteresis margin).
+    EVALUATION_DEGRADED = "evaluation.degraded"
+    EVALUATION_RECOVERED = "evaluation.recovered"
 
     # System
     SYSTEM_READY = "system.ready"

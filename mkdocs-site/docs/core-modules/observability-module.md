@@ -535,6 +535,30 @@ Emitted from the orchestrator guard pipeline
 [Guardrails](guardrails.md#prometheus-metrics) and
 [Orchestration › Tool burst rate limit](orchestration.md#tool-burst-rate-limit-rate_limitpy).
 
+### Online evaluation metrics
+
+Emitted from `baselith/core/evaluation/service.py` on the sampled production
+flows (see [Evaluation › Online evaluation](evaluation.md#online-evaluation)).
+`intent` is capped at `EVAL_ONLINE_MAX_INTENTS` distinct values (default 50;
+later intents report as `other`), `source` is `checks` (deterministic, no LLM)
+or `judge`:
+
+| Metric | Type | Labels | Description |
+| ------ | ---- | ------ | ----------- |
+| `mas_eval_online_samples_total` | Counter | `intent` | Flows sampled and queued for online evaluation |
+| `mas_eval_online_score` | Histogram | `intent`, `source` | Score (0-1) of each evaluated sample |
+| `mas_eval_online_quality_total` | Counter | `intent`, `source`, `quality` | Verdicts by quality level |
+| `mas_eval_online_flags_total` | Counter | `intent`, `flag` | Failed deterministic checks (`empty`, `too_short`, `refusal`, `guard_blocked`, `ungrounded`) |
+| `mas_eval_online_failures_total` | Counter | `stage` | Steps that raised (`checks`, `judge`, `store`, `retention`, `monitor`, `pipeline`) |
+| `mas_eval_online_dropped_total` | Counter | `reason` | Sampled flows dropped because the queue was full (`queue_full`) |
+| `mas_eval_online_degraded` | Gauge | `intent`, `source` | `1` while the rolling quality monitor holds the series degraded |
+
+The gauge uses `multiprocess_mode="livemax"`: each worker monitors its own
+share of the traffic, so a series reads degraded while any live worker sees it
+degraded. A sustained non-zero `rate(mas_eval_online_dropped_total[5m])` means
+`EVAL_ONLINE_QUEUE_SIZE`/`EVAL_ONLINE_WORKERS` are too small for the sample
+rate (or the judge is slow).
+
 ### Update-notice metric
 
 `baselith_update_available{component,security}` (Gauge, `UPDATE_AVAILABLE`) is

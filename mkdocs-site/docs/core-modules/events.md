@@ -225,8 +225,10 @@ async def auto_generate_report(data):
 | Event                  | Emitter           | Data                         |
 | ---------------------- | ----------------- | ---------------------------- |
 | `FLOW_STARTED`         | Orchestrator      | intent, query                |
-| `FLOW_COMPLETED`       | Orchestrator      | intent, query, response, context, duration_ms, success, run_id — on failure: intent, duration_ms, success=False, error, run_id |
+| `FLOW_COMPLETED`       | Orchestrator      | intent, query, response (the guarded text the user received), context, duration_ms, success, run_id, tenant_id, cost_usd, tokens, guardrails (when a guard acted), streamed (streamed answers) — on failure: intent, duration_ms, success=False, error, run_id |
 | `EVALUATION_COMPLETED` | EvaluationService | score, quality, feedback     |
+| `EVALUATION_DEGRADED`  | EvaluationService | intent, source, window_mean, reference_mean, floor, samples, reason |
+| `EVALUATION_RECOVERED` | EvaluationService | intent, source, window_mean, reference_mean, floor, samples |
 | `EXPERIENCE_RECORDED`  | ContinuousLearner | action, reward               |
 | `PLUGIN_LOADED`        | PluginRegistry    | name, action                 |
 | `AGENT_FAILED`         | Agent runtime     | error, source, context       |

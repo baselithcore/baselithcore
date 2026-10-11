@@ -67,8 +67,14 @@ POST /chat        # unprefixed — still served, deprecated
 Versioned: chat (`/chat`, `/chat/stream`), indexing (`/index/*`, `/reindex`),
 feedback, the plugin-management API (`/api/plugins/*`), and the routers the
 `api_routers` plugin mounts — `/compliance`, `/approvals`, `/runs`,
-`/webhooks`, `/privacy`, `/prompts` and `/agent` — and the WebSocket chat
-channel (`/v1/chat/ws`, see below).
+`/webhooks`, `/privacy`, `/prompts`, `/agent` and `/evaluation` — and the
+WebSocket chat channel (`/v1/chat/ws`, see below).
+
+`GET /v1/evaluation/online/summary` (admin Basic Auth, mounted with
+`EVAL_ONLINE_ENABLED`) reports the online evaluator's sample and judge rates,
+queue depth and per-intent rolling-window quality on the serving worker; 503
+while the service is not running. See
+[Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation).
 
 The unprefixed copies are **deprecated**: their operations carry
 `deprecated: true` in the OpenAPI document, and every response they produce —

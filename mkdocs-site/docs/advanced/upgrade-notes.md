@@ -556,6 +556,23 @@ Every connection string now gets `connect_timeout`, TCP keepalives and
 sets them. A failover is noticed in about a minute instead of the OS default of
 up to fifteen. Set a value to `0` to hand it back to libpq and the OS.
 
+### `EvaluationService` samples instead of judging every flow
+
+With `EVAL_ENABLED=true`, the `EvaluationService` used to send **every**
+successful flow to the LLM judge. It now evaluates a deterministic sample
+(`EVAL_ONLINE_SAMPLE_RATE`, default `0.05`) with cheap deterministic checks,
+and the judge is opt-in on top: `EVAL_ONLINE_JUDGE_RATE` defaults to `0.0`, so
+no `EVALUATION_COMPLETED` is emitted until it is raised. A deployment whose
+`OptimizationLoop` or learning subsystems relied on judging every flow sets
+`EVAL_ONLINE_SAMPLE_RATE=1.0` and `EVAL_ONLINE_JUDGE_RATE=1.0` to keep the old
+behaviour. The service is also started at boot only when `EVAL_ONLINE_ENABLED`
+is on as well (or a plugin requires the `evaluation` resource, as before).
+
+`FLOW_COMPLETED` is now emitted **after** the output guard: its `response` is
+the guarded text the user received (PII redacted), not the handler's raw
+answer, and streamed answers emit it too (`streamed: true`). See
+[Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation).
+
 ### Metrics and spans follow the OpenTelemetry GenAI conventions
 
 - The Prometheus label `gen_ai_system` on the `gen_ai_client_*` metrics is

@@ -1076,6 +1076,28 @@ MEMORY_CONTEXT_FOLD_THRESHOLD_CHARS=2000  # Below this, the verbatim fast-path r
     behaviour: [Memory › Persistence at
     bootstrap](memory.md#persistence-at-bootstrap).
 
+### Evaluation Config
+
+`EvaluationConfig` (`baselith/core/config/evaluation.py`, `EVAL_` prefix) holds
+the judge settings of the offline gates and the online evaluation of production
+traffic (`EVAL_ONLINE_*`). Read it through `get_evaluation_config()` at use
+time: the module-level `evaluation_config` is an import-time alias of the same
+singleton, kept for existing importers.
+
+```python
+from baselith.core.config.evaluation import get_evaluation_config
+
+config = get_evaluation_config()
+
+print(config.online_enabled)       # False  (EVAL_ONLINE_ENABLED; needs EVAL_ENABLED too)
+print(config.online_sample_rate)   # 0.05   (EVAL_ONLINE_SAMPLE_RATE)
+print(config.online_judge_rate)    # 0.0    (EVAL_ONLINE_JUDGE_RATE: LLM judge off)
+print(config.online_store)         # "none" (EVAL_ONLINE_STORE: none | memory | postgres)
+```
+
+Every field is in the [generated reference](../getting-started/configuration.md#evaluation-configuration-eval_);
+the behaviour is in [Evaluation › Online evaluation](evaluation.md#online-evaluation).
+
 ---
 
 ## Environment drift

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from baselith.core.observability.logging import get_logger
 
-from .protocols import EvaluationResult, Evaluator, QualityLevel
+from .protocols import EvaluationResult, Evaluator, QualityLevel, quality_for_score
 
 if TYPE_CHECKING:
     from baselith.core.services.llm import LLMService
@@ -146,16 +146,7 @@ class BaseLLMEvaluator(Evaluator, ABC):
 
     def _score_to_quality(self, score: float) -> QualityLevel:
         """Convert normalized score (0.0-1.0) to QualityLevel."""
-        if score >= 0.9:
-            return QualityLevel.EXCELLENT
-        elif score >= 0.75:
-            return QualityLevel.GOOD
-        elif score >= 0.6:
-            return QualityLevel.ACCEPTABLE
-        elif score >= 0.4:
-            return QualityLevel.NEEDS_IMPROVEMENT
-        else:
-            return QualityLevel.POOR
+        return quality_for_score(score)
 
     def _fallback_evaluation(self, response: str, query: str) -> EvaluationResult:
         """Default fallback when the judge could not be reached or read.

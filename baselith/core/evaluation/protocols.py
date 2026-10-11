@@ -17,6 +17,23 @@ class QualityLevel(Enum):
     POOR = "poor"
 
 
+def quality_for_score(score: float) -> QualityLevel:
+    """Map a normalized score (0.0-1.0) to its :class:`QualityLevel` band.
+
+    The one banding every evaluator shares: the LLM judges and the online
+    deterministic checks report comparable quality levels.
+    """
+    if score >= 0.9:
+        return QualityLevel.EXCELLENT
+    if score >= 0.75:
+        return QualityLevel.GOOD
+    if score >= 0.6:
+        return QualityLevel.ACCEPTABLE
+    if score >= 0.4:
+        return QualityLevel.NEEDS_IMPROVEMENT
+    return QualityLevel.POOR
+
+
 @dataclass
 class EvaluationResult:
     """Result of a response evaluation."""

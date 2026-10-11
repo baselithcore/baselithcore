@@ -17,10 +17,18 @@ class TestOrchestratorEvents:
             return_value=self.mock_event_bus,
         )
         self.patcher.start()
+        # The completion event is emitted by the shared payload helper, after
+        # the output guard (baselith.core.orchestration.mixins._flow_events).
+        self.flow_patcher = patch(
+            "baselith.core.orchestration.mixins._flow_events.get_event_bus",
+            return_value=self.mock_event_bus,
+        )
+        self.flow_patcher.start()
 
         self.orchestrator = Orchestrator(intent_classifier=self.mock_intent_classifier)
 
     def teardown_method(self):
+        self.flow_patcher.stop()
         self.patcher.stop()
 
     @pytest.mark.asyncio
