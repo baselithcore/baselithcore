@@ -284,8 +284,11 @@ class TestService:
         config = VoiceConfig(
             _env_file=None, openai_api_key=SecretStr("sk-test-key-0000")
         )
-        monkeypatch.setattr(
-            "baselith.core.services.voice.service.get_voice_config", lambda: config
+        # Patch the namespace VoiceService actually reads, not a dotted path
+        # re-resolved through sys.modules: in the full CI run that patch did not
+        # reach the service, which saw the real, keyless config.
+        monkeypatch.setitem(
+            VoiceService.__init__.__globals__, "get_voice_config", lambda: config
         )
         caps = VoiceService().capabilities()
         assert (caps.stt_provider, caps.tts_provider) == ("openai", "openai")

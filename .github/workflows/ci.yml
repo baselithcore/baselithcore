@@ -1043,6 +1043,12 @@ jobs:
           version: "0.12.0"
           enable-cache: true
           cache-dependency-glob: uv.lock
+      - name: Make the interpreter's directory non-world-writable
+        # The runner image ships its tool cache world-writable, and the MCP
+        # stdio launcher refuses a binary in a world-writable directory: the
+        # stdio client tests spawn sys.executable as their fake server. Owner
+        # write stays, so the installs below are unaffected.
+        run: chmod -R o-w "$pythonLocation"
       - name: Run Tests
         env:
           POSTGRES_DB: test_db
