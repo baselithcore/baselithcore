@@ -68,10 +68,15 @@ DEFAULT_INJECTION_PATTERNS = [
     # System-prompt extraction: the payload never says "ignore", it just asks
     # for the instructions verbatim.
     # Bound to the assistant's own prompt: "the instructions" alone is an
-    # ordinary request ("show me the instructions for setting up Redis").
+    # ordinary request ("show me the instructions for setting up Redis"), and
+    # "the system prompt" followed by a topic word or another owner is a
+    # question about system prompts ("... best practices", "... for my bot").
     r"(reveal|show|print|repeat|output|display|dump)\s+(me\s+)?"
     r"(your\s+(system\s+|initial\s+|original\s+)?(prompt|instructions?)"
-    r"|the\s+(system|initial|original)\s+(prompt|instructions?))",
+    r"|the\s+(system|initial|original)\s+(prompt|instructions?+)"
+    r"(?!-\w|\s+(best\s+practices?|examples?|templates?|guide(lines?)?|tips|"
+    r"format|structure|design|engineering|writing|tutorial|checklist|"
+    r"(for|of)\s+(a|an|my|our)\b|(i|we)\s+(wrote|write|made|use|drafted)\b)))",
     r"repeat\s+(the\s+)?(words|text|everything)\s+above",
     # Multilingual overrides. An English-only pattern set is a one-line
     # bypass for any non-English user; these cover the canonical override in

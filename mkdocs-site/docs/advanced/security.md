@@ -373,12 +373,20 @@ async def process_user_input(user_input: str) -> str:
   letter-spacing undone, alone or combined) and decoded
   base64/hex/percent-encoded payloads; the Russian patterns also accept
   Latin lookalike spellings, the non-Latin ones English or leet keywords
-  inside a native-script sentence, the Arabic ones Arabizi digits standing
-  for a letter and informal spelling, the Chinese ones curated homophones
-  and variant characters of their keywords, and the Japanese ones kana
-  spellings; Russian, Hindi and Arabic typed in the Latin alphabet
-  (`zabud vse pravila`, `pichle sabhi nirdesh ignore karo`, Arabizi
-  `tjahal kol al ta3limat al sabiqa`) have their own pattern families
+  inside a native-script sentence, the Arabic ones Arabizi digits and
+  confusable digits (`1` for alef, `0`/`٥` for heh) standing for a letter
+  and informal spelling, the Chinese ones curated homophones, variant
+  characters and number homophones (`指0` for 指令) of their keywords, the
+  Japanese ones kana spellings and `64` for `むし`, the Hindi ones `2` for
+  `दो`; Russian, Hindi, Arabic, Chinese and Japanese typed in the Latin
+  alphabet (`zabud vse pravila`, `pichle sabhi nirdesh ignore karo`, Arabizi
+  `tjahal kol al ta3limat al sabiqa`, pinyin `hulüe zhiqian de suoyou
+  zhiling` with or without tones, romaji `mae no shiji wo mushi shite`)
+  have their own pattern families. Requests to reveal *this* assistant's
+  system prompt are blocked; questions *about* system prompts (`告诉我系统提示的写法`,
+  `show me the system prompt best practices`) pass — see
+  [Guardrails › Evasion resistance](../core-modules/guardrails.md#evasion-resistance-normalised-and-decoded-views)
+  for the exemptions and the remaining limits
 - **Code execution attempts**: shell/eval-style payloads
   (`block_code_execution`)
 - **Custom patterns**: operator-supplied regexes

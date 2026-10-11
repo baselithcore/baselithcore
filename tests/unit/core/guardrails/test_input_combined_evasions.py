@@ -119,9 +119,9 @@ class TestRussianLatinLookalikes:
         assert expand_cyrillic_lookalikes(r"все\s+dan") == r"[вb][сc][еeёë]\s+dan"
         assert expand_cyrillic_lookalikes("ты") == "[тtm](?:ы|bi|bl|b1)"
 
-    def test_expansion_refuses_a_character_class(self) -> None:
-        with pytest.raises(ValueError):
-            expand_cyrillic_lookalikes("[аб]")
+    def test_expansion_leaves_a_character_class_alone(self) -> None:
+        # A class already lists what it accepts; escapes are copied too.
+        assert expand_cyrillic_lookalikes(r"[аб]\[в") == r"[аб]\[[вb]"
 
     def test_pattern_source_falls_back_to_the_pattern(self) -> None:
         import re

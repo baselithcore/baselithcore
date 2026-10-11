@@ -20,11 +20,20 @@ The non-Latin patterns also take the canonical English keywords in their
 slots (code-mixing: ``पिछले सभी instructions को ignore करो``), always next to
 a native word. Spelling variants are widened on the pattern side, at compile
 time (:mod:`baselith.core.guardrails.variants`): Russian letters to their
-Latin lookalikes, Arabic letters to their Arabizi digits and informal
-spellings, Chinese keywords to curated homophones and variant characters.
-The romanised families — ``ru-latn`` (the Russian table, transliterated),
-``hi-latn`` and ``ar-latn`` (:mod:`baselith.core.guardrails.romanized`) —
-cover the same intents typed in the Latin alphabet.
+Latin lookalikes, Arabic letters to their Arabizi digits, visual stand-ins
+and informal spellings, Chinese keywords to curated homophones, variant
+characters and number homophones, Devanagari ``ा`` to the strokes that
+imitate it. The romanised families — ``ru-latn`` (the Russian table,
+transliterated), ``hi-latn``, ``ar-latn``, ``zh-latn`` (pinyin) and
+``ja-latn`` (romaji) (:mod:`baselith.core.guardrails.romanized`) — cover the
+same intents typed in the Latin alphabet.
+
+A request to *reveal* the system prompt is told apart from a question
+*about* system prompts: possessive forms (``your``, ``你的``, ``अपना``) always
+count, a bare "show the system prompt" counts unless a topic word or another
+owner follows it (``... best practices``, ``系统提示的写法``, ``... für
+meinen Bot``) or, in Chinese and Japanese, a "how / write" word or a second
+object sits between verb and noun.
 """
 
 from __future__ import annotations
@@ -37,9 +46,24 @@ from .romanized import ROMANIZED_INJECTION_PATTERNS
 from .variants import (
     expand_arabic_variants,
     expand_cyrillic_lookalikes,
+    expand_devanagari_variants,
+    expand_pinyin,
     expand_zh_homophones,
     transliterate_cyrillic,
 )
+
+#: Between a Chinese reveal verb and its object: no "how / what / write /
+#: about / some / good" (``告诉我怎么写系统提示`` asks how to write one).
+_ZH_REVEAL_GAP = "[^。！？\\n怎如何写寫编編什么麼样樣例关關些好]"
+#: After the object: a topic word makes it a question *about* system prompts
+#: (``系统提示的写法``, ``系统提示词应该怎么写``), not a request for this one.
+_ZH_TOPIC = (
+    "(?![词詞]?(的|之)?(写法|寫法|写作|寫作|例子|示例|范例|範例|样例|樣例|模板|格式|"
+    "技巧|最佳|设计|設計|编写|編寫|怎么|怎麼|怎样|怎樣|如何|应该|應該|要怎|是什么|"
+    "是什麼|结构|結構|原则|原則|指南|教程|方法|要点|要點|作用|概念|定义|定義))"
+)
+#: Hindi reveal verbs; ``2``/``२`` is ``दो`` ("give", as in ``दिखा दो``).
+_HI_SHOW = r"(दिखाओ|दिखाएं|दिखाइए|दिखा\s*(दो|2|२)|बताओ|बताएं|बता\s*(दो|2|२))"
 
 #: Language code -> injection patterns. Extend by adding entries.
 MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -52,7 +76,8 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(revela|mu[eé]stra|imprime|repite)(me)?\s+(tu|tus)\s+"
         r"(prompt|instrucciones)",
         r"(revela|mu[eé]stra|imprime|repite)(me)?\s+el\s+prompt\s+"
-        r"(del\s+)?sistema",
+        r"(del\s+)?sistema(?!\s+(ideal|perfecto|de\s+ejemplo|para\s+(un|una|mi|mis|"
+        r"nuestro|nuestra)\b|que\s+(escrib|hice|uso)))",
         r"nuevo\s+prompt\s+del\s+sistema",
     ),
     "fr": (
@@ -65,7 +90,8 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(r[eé]v[eè]le|affiche|montre|r[eé]p[eè]te)[sz]?(-moi)?\s+"
         r"(ton|votre|tes|vos)\s+(prompt|instructions)",
         r"(r[eé]v[eè]le|affiche|montre)[sz]?(-moi)?\s+le\s+prompt\s+"
-        r"(du\s+)?syst[eè]me",
+        r"(du\s+)?syst[eè]me(?!\s+(id[eé]al|parfait|d['’]exemple|type|pour\s+(un|une|"
+        r"mon|ma|mes|notre|nos)\b|que\s+j))",
     ),
     "de": (
         r"ignorier(e|en|t)?\s+(alle\s+)?(vorherigen|bisherigen|obigen)\s+"
@@ -76,7 +102,10 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bdu\s+bist\s+(jetzt|nun|ab\s+jetzt)\s+(ein|eine|der|die|das)\b",
         r"(zeig(e)?|verrate|gib)\s+(mir\s+)?(deinen|deine|ihren|ihre)\s+"
         r"(system-?prompt|anweisungen|instruktionen)",
-        r"(zeig(e)?|verrate|gib)\s+(mir\s+)?den\s+system-?prompt",
+        # "den Systemprompt-Leitfaden", "... für meinen Bot": a topic
+        r"(zeig(e)?|verrate|gib)\s+(mir\s+)?den\s+system-?prompt(?!-|[a-zäöüß]|"
+        r"\s+(f[uü]r\s+(einen|eine|ein|meinen|meine|mein|unseren|unsere|unser)\b|"
+        r"als\s+beispiel|von\s+(einem|einer|meinem|meiner)\b))",
     ),
     "it": (
         r"ignora\s+(tutte\s+le\s+|le\s+)?istruzioni\s+(precedenti|di\s+prima)",
@@ -85,7 +114,9 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bda\s+(ora|adesso)\s+(in\s+poi\s+)?sei\s+(un|una|uno|il|la|lo)\b",
         r"(rivela|mostra(mi)?|stampa|ripeti)\s+(il\s+tuo|i\s+tuoi|le\s+tue)\s+"
         r"(prompt|istruzioni)",
-        r"(rivela|mostra(mi)?|stampa)\s+il\s+prompt\s+di\s+sistema",
+        r"(rivela|mostra(mi)?|stampa)\s+il\s+prompt\s+di\s+sistema(?!\s+(ideale|"
+        r"perfetto|migliore|d['’]esempio|di\s+esempio|per\s+(un|una|uno|il\s+mio|"
+        r"la\s+mia|i\s+miei|il\s+nostro|la\s+nostra)\b|che\s+(ho|abbiamo)\b))",
     ),
     "pt": (
         r"ignor[ea]\s+(todas\s+)?(as\s+)?instru[cç][oõ]es\s+"
@@ -112,8 +143,10 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(покажи|раскрой|выведи|повтори)(те)?\s+(мне\s+)?"
         r"(свой|свои|твой|твои|ваш|ваши)\s+(системный\s+)?"
         r"(промпт|инструкции|prompt|instructions?)",
+        # "... для чат-бота", "... пример": a topic; "для этого чата" is not
         r"(покажи|раскрой|выведи)(те)?\s+(мне\s+)?(системный\s+промпт|"
-        r"system\s+prompt)",
+        r"system\s+prompt)(?!\s+(для\s+(?!(этого|этой|тебя|себя|меня|нас|вас)\b)|"
+        r"пример|образ|шаблон|котор|идеальн|хорош))",
     ),
     # Native-script languages: each pattern leads with the language's own
     # words (CJK first-character scans are what keep these cheap), and the
@@ -134,7 +167,8 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(你现在是|你現在是|从现在开始你是|從現在開始你是)"
         r"(一个|一個|一名|DAN)",
         r"(显示|顯示|输出|輸出|告诉我|告訴我|泄露|洩露|打印|重复|重複)"
-        r"[^。！？\n]{0,6}?(系统提示|系統提示|初始指令|system\s*prompt)",
+        rf"{_ZH_REVEAL_GAP}{{0,6}}?(系统提示|系統提示|初始指令|system\s*prompt)"
+        rf"{_ZH_TOPIC}",
         r"(显示|顯示|输出|輸出|告诉我|告訴我|泄露|洩露)[^。！？\n]{0,4}?"
         r"你的(指令|提示词|提示詞|指示)",
         # English-led
@@ -144,18 +178,19 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(?<![a-z])forget(?![a-z])[^。！？\n]{0,6}?(你的|所有)[^。！？\n]{0,4}?"
         r"(指令|规则|規則|设定|設定|instructions?|rules)",
         r"(?<![a-z])(reveal|show|print|output|display|repeat)(?![a-z])"
-        r"[^。！？\n]{0,6}?(系统提示|系統提示|初始指令|你的(指令|提示词|提示詞|指示))",
+        rf"{_ZH_REVEAL_GAP}{{0,6}}?(系统提示|系統提示|初始指令|你的(指令|提示词|提示詞|"
+        rf"指示)){_ZH_TOPIC}",
     ),
     "ja": (
         # Kana spellings ride along: ``むし``/``ムシ`` (slang for ignoring),
         # ``しじ``, ``ぷろんぷと``, ``しすてむ``, ``ひょうじ``...
         r"(以前|いぜん|前|まえ|上記|これまで)の[^。！？\n]{0,6}?"
         r"(指示|しじ|命令|めいれい|指令|しれい|プロンプト|ぷろんぷと|"
-        r"instructions?|rules|prompts?)を[^。！？\n]{0,4}?(無視|むし|ムシ|"
+        r"instructions?|rules|prompts?)を[^。！？\n]{0,4}?(無視|[むム6][しシ4]|"
         r"忘れ|わすれ|(?<![a-z])(ignore|disregard|forget)(?![a-z]))",
         r"(あなた|君|きみ|お前|おまえ)は(今|いま|今から|いまから|これから)は?"
         r"(DAN|制限のない|せいげんのない|自由な|別の)",
-        r"(システム|しすてむ)(プロンプト|ぷろんぷと)を[^。！？\n]{0,6}?"
+        r"(システム|しすてむ)(プロンプト|ぷろんぷと)を[^。！？\nを書作]{0,6}?"
         r"(表示|ひょうじ|教えて|おしえて|出力|見せて|みせて|明かして|あかして|"
         r"(?<![a-z])(show|reveal|print|output|display)(?![a-z]))",
         r"(あなたの|君の|きみの)(指示|しじ|プロンプト|ぷろんぷと|命令|めいれい)を"
@@ -164,8 +199,9 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         # English-led
         r"(?<![a-z])(previous|prior|above)の[^。！？\n]{0,6}?"
         r"(指示|命令|指令|プロンプト|instructions?|rules|prompts?)を"
-        r"[^。！？\n]{0,4}?(無視|忘れ|(?<![a-z])(ignore|disregard|forget)(?![a-z]))",
-        r"(?<![a-z])system\s*promptを[^。！？\n]{0,6}?"
+        r"[^。！？\n]{0,4}?(無視|[むム6][しシ4]|忘れ|(?<![a-z])(ignore|disregard|"
+        r"forget)(?![a-z]))",
+        r"(?<![a-z])system\s*promptを[^。！？\nを書作]{0,6}?"
         r"(表示|教えて|出力|見せて|明かして|(?<![a-z])(show|reveal|print|output|"
         r"display)(?![a-z]))",
     ),
@@ -178,8 +214,10 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"لا\s+تلتزم\s+ب(التعليمات|الأوامر)\s+السابقة",
         r"أنت\s+الآن\s+(DAN|نموذج|مساعد\s+بدون|بدون\s+قيود)",
         r"(اكشف|أظهر|اعرض|اطبع|كرر)\s+(لي\s+)?"
-        r"(تعليماتك|موجه\s+النظام|التعليمات\s+الأصلية|your\s+(system\s+)?"
-        r"(prompt|instructions?)|the\s+system\s+prompt)",
+        r"(تعليماتك|موجه\s+النظام(?!\s+(المثالي|مثالي|الجيد|النموذجي|ل(روبوت|بوت|"
+        r"تطبيق|مساعد|موقع|شات)|الخاص\s+ب(ي|نا)|الذي\s+(كتبته|أستخدمه)))|"
+        r"التعليمات\s+الأصلية|your\s+(system\s+)?(prompt|instructions?)|"
+        r"the\s+system\s+prompt)",
         # English-led
         r"\b(ignore|disregard)\s+(جميع\s+|كل\s+)?(التعليمات|الأوامر|الإرشادات)\s+"
         r"(السابقة|الأولى)",
@@ -193,9 +231,13 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(भूल|(ignore|forget|disregard)\s*कर)",
         r"अब\s+(से\s+)?(तुम|आप)\s+(DAN|एक\s+(अलग|नया|अनियंत्रित))",
         r"(अपना|अपने|अपनी)\s+(सिस्टम\s+प्रॉम्प्ट|निर्देश|प्रॉम्प्ट|system\s+prompt|"
-        r"prompt|instructions?)\s+(दिखाओ|दिखाएं|दिखाइए|बताओ|बताएं|प्रकट\s+करें|"
-        r"(show|reveal)\s*कर)",
-        r"सिस्टम\s+प्रॉम्प्ट\s+(दिखाओ|दिखाएं|दिखाइए|बताओ|बताएं)",
+        rf"prompt|instructions?)\s+({_HI_SHOW}|प्रकट\s+करें|(show|reveal)\s*कर)",
+        # Unqualified only: "एक/अच्छा सिस्टम प्रॉम्प्ट दिखाओ" (show one, a good
+        # one) asks for an example; "मुझे/अब ..." qualifies nothing.
+        r"सिस्टम(?<![\u0900-\u0963\u0966-\u097f]\sसिस्टम)\s+प्रॉम्प्ट\s+(को\s+)?"
+        rf"(मुझे\s+)?{_HI_SHOW}",
+        r"(मुझे|कृपया|अब|अभी|तुरंत|जल्दी|please)\s+सिस्टम\s+प्रॉम्प्ट\s+(को\s+)?"
+        rf"{_HI_SHOW}",
         # English-led
         r"\b(previous|prior|above|earlier)\s+(all\s+)?(instructions?|rules|prompts?)"
         r"\s+(को\s+)?(अनदेखा|नज़रअंदाज़|नजरअंदाज|भूल|(ignore|forget|disregard)\s*कर)",
@@ -215,7 +257,9 @@ PATTERN_EXPANDERS: Mapping[str, Callable[[str], str]] = {
     "ru": expand_cyrillic_lookalikes,
     "ru-latn": transliterate_cyrillic,
     "ar": expand_arabic_variants,
+    "hi": expand_devanagari_variants,
     "zh": expand_zh_homophones,
+    "zh-latn": expand_pinyin,
 }
 
 #: Languages written in a non-Latin script.
@@ -296,13 +340,53 @@ def compile_multilingual(
     return compiled
 
 
+def _drop_spacing_lookarounds(source: str) -> str:
+    """Remove every lookaround group whose body mentions ``\\s``.
+
+    Such a group tests the words around a phrase (``(?!\\s+best\\s+
+    practices)``, ``(?<![…]\\sसिस्टम)``), which a letters-only view no
+    longer has. One linear scan; escapes and classes are skipped over.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(source):
+        if source.startswith(("(?=", "(?!", "(?<=", "(?<!"), i):
+            depth, j, in_class = 0, i, False
+            while j < len(source):
+                ch = source[j]
+                if ch == "\\":
+                    j += 2
+                    continue
+                if in_class:
+                    in_class = ch != "]"
+                elif ch == "[":
+                    in_class = True
+                elif ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            group = source[i : j + 1]
+            if "\\s" in group:
+                i = j + 1
+                continue
+        out.append(source[i])
+        i += 1
+    return "".join(out)
+
+
 def squash_pattern(source: str) -> str:
     r"""Whole-phrase form of a pattern, for letter-only (squashed) views.
 
     Drops every whitespace (``\s``, ``\s+``, ``\s*``) and word-boundary
     (``\b``) token, so ``забудь(те)?\s+(все\s+)?правила`` becomes
     ``забудь(те)?(все)?правила`` — what that phrase reads like once
-    ``з а б у д ь в с е п р а в и л а`` has lost every gap.
+    ``з а б у д ь в с е п р а в и л а`` has lost every gap. A lookaround
+    that tests whitespace (a topic exemption such as ``(?!\s+examples)``)
+    is dropped whole: there is no next word left to test, and a spaced-out
+    "s h o w  t h e  s y s t e m  p r o m p t" is no question.
 
     Args:
         source: Regex source of a word pattern.
@@ -310,7 +394,7 @@ def squash_pattern(source: str) -> str:
     Returns:
         The same pattern with the spacing tokens removed.
     """
-    return _SPACING_TOKEN_RE.sub("", source)
+    return _SPACING_TOKEN_RE.sub("", _drop_spacing_lookarounds(source))
 
 
 #: Pre-compiled multilingual patterns, tagged with their language code, each

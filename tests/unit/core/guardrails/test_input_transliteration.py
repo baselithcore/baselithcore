@@ -181,9 +181,8 @@ class TestArabicDigitsAndSpelling:
         assert expand_arabic_variants("علم") == "[ع3٣۳]لم"
         assert expand_arabic_variants("خ") == "(?:خ|5|٥|۵|7'|7’)"
 
-    def test_expansion_refuses_a_character_class(self) -> None:
-        with pytest.raises(ValueError):
-            expand_arabic_variants("[عب]")
+    def test_expansion_leaves_a_character_class_alone(self) -> None:
+        assert expand_arabic_variants("[عب]ع") == "[عب][ع3٣۳]"
 
 
 class TestChineseHomophones:
@@ -211,7 +210,7 @@ class TestChineseHomophones:
         assert _blocked_in(guard, payload, "injection:zh")
 
     def test_equal_branches_are_merged(self) -> None:
-        assert expand_zh_homophones("(无视|無視)") == "([无無毋吴][视視示])"
+        assert expand_zh_homophones("(无视|無視)") == "([无無毋吴5五][视視示])"
 
     def test_gap_classes_are_left_alone(self) -> None:
         source = "忽略[^。！？\\n]{0,8}?之前"

@@ -26,8 +26,9 @@ The views, cheapest first:
   ``i g n 0 r e`` is one run — then leetspeak de-substitution inside
   alphanumeric tokens (``0→o 1→i 3→e 4→a 5→s 7→t @→a $→s``, with ``11→ll``
   first so ``a11`` reads as ``all``), and finally removal of one to three
-  digits wedged between two Arabic, Devanagari or CJK letters
-  (``تجا1هل``, ``忽1略``).
+  digits glued to an Arabic, Devanagari or CJK word — wedged between two of
+  its letters (``تجا1هل``, ``忽1略``) or stuck to its start or end
+  (``निर्देश1``).
 * ``squashed`` — letters only (accents dropped), produced only when
   letter-spacing was found: ``i g n o r e p r e v i o u s`` has no word
   boundaries left, so it is matched against whole-phrase patterns (English
@@ -211,12 +212,18 @@ def _fold_native_noise(text: str) -> str:
 
 @cache
 def _inserted_digits_re() -> re.Pattern[str]:
-    """A native-script letter, then one to three ASCII digits, then another.
+    """One to three ASCII digits glued to a native-script word.
 
-    Led by the letter (captured, put back by the substitution) rather than a
-    lookbehind, so the regex engine can skip ahead to candidate letters.
+    Between two native letters (``تجا1هل``), after one at the end of a word
+    (``निर्देश1 को``) or before one at its start (``सभी 1निर्देश``) — never
+    inside a Latin token, so ``v2``, ``mp3`` and numbers in Latin text stay.
+    Both branches start at the digit run, so the regex engine only stops at
+    digits.
     """
-    return re.compile(rf"([{_NATIVE_LETTERS}])[0-9]{{1,3}}(?=[{_NATIVE_LETTERS}])")
+    return re.compile(
+        rf"(?<=[{_NATIVE_LETTERS}])[0-9]{{1,3}}(?![0-9A-Za-z])"
+        rf"|(?<![0-9A-Za-z])[0-9]{{1,3}}(?=[{_NATIVE_LETTERS}])"
+    )
 
 
 @dataclass(frozen=True)
@@ -364,7 +371,7 @@ def matching_views(text: str) -> list[MatchingView]:
     collapsed, spaced = _collapse_spaced(folded)
     deobfuscated = _deleet(collapsed, _LEET_I)
     if not deobfuscated.isascii():
-        deobfuscated = _inserted_digits_re().sub(r"\1", deobfuscated)
+        deobfuscated = _inserted_digits_re().sub("", deobfuscated)
     add("deobfuscated", deobfuscated)
     if spaced:
         letters = deobfuscated.lower()

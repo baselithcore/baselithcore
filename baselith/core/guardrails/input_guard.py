@@ -57,8 +57,10 @@ _SCRIPT_GATES: dict[str, re.Pattern[str]] = {
 assert {f"injection:{lang}" for lang in NON_LATIN_LANGUAGES} - set(_SCRIPT_GATES) == {
     f"injection:{lang}" for lang in FOLDED_SCRIPT_LANGUAGES
 }
-#: A Latin word: without one, :data:`LATIN_LED_PATTERNS` cannot match.
-_LATIN_WORD = re.compile("[A-Za-z]{3}")
+#: A Latin word: without one, :data:`LATIN_LED_PATTERNS` cannot match. Latin-1
+#: and Latin Extended-A/B letters count: pinyin with tone marks
+#: (``hūlüè zhīqián``) may hold no three plain ASCII letters in a row.
+_LATIN_WORD = re.compile("[A-Za-z\u00c0-\u024f]{3}")
 
 #: Valid taxonomy labels; anything else from the LLM fails open.
 _TAXONOMY_INTENTS = frozenset({"in_scope", "out_of_scope", "jailbreak", "harmful"})
