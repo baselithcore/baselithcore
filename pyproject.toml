@@ -345,6 +345,9 @@ constraint-dependencies = [
   # PYSEC-2026-3628: duplicate Host headers forwarded on HTTP/2 -> HTTP/1.1
   # downgrade (request smuggling, CWE-444). Transitive via httpx[http2].
   "h2>=4.4.1",
+  # CVE-2026-102991: TemplateLookup path traversal via a drive-letter URI
+  # (Windows). Transitive via alembic, which renders migration templates.
+  "mako>=1.4.2",
 ]
 # `mineru[pipeline]` caps transformers at <5.0.0, while `huggingface` requires
 # >=5.3.0 (CVE-2026-4372 RCE). The two extras are genuinely incompatible — they
