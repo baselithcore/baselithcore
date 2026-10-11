@@ -964,8 +964,8 @@ idempotency ledger had nothing to match.
 `process_with_stable_run_id(orchestrator, query, context, run_id)`
 (`run_ids.py`) decides what an attempt does: no checkpoint yet → a fresh run
 under the id; `completed` → its recorded answer, nothing executes, passed
-through the output guard again (the checkpoint stores the handler's answer
-from before the guard, so the stored text is unredacted);
+through the output guard again (the checkpoint records the answer after
+the guard, but a checkpoint written by an earlier release holds it raw);
 `running` / `failed` → `resume=True`; `awaiting_approval` → the pause,
 unchanged (decisions go through `/approvals`); a checkpoint recorded for a
 **different query** → left alone, the attempt runs fresh under a new id. A
@@ -1718,7 +1718,11 @@ event stream tells it what the agent is *doing*. `baselith/core/orchestration/ru
 fans out `AgentEvent`s (`baselith/core/api/events.py`) per `run_id`: `run_started`,
 `tool_call` / `tool_result` (emitted by `CheckpointManager.run_step`,
 including replays flagged `replayed: true`), `final`, `error`, and `human`
-(durable approval pause). Publishing with zero subscribers is a no-op, so the
+(durable approval pause). `final` carries the answer after the output guard
+(PII redaction, harmful-content filter, opt-in moderation): `process()` guards
+a handler's answer once, before it records it in the checkpoint and publishes
+it, so subscribers, the checkpoint history and replays see the text the
+caller received. Publishing with zero subscribers is a no-op, so the
 loop pays nothing when nobody listens.
 
 Library-level consumption — run a query and iterate its events:

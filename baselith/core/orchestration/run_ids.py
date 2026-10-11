@@ -94,9 +94,9 @@ async def process_with_stable_run_id(
         from baselith.core.orchestration.guard_pipeline import guard_output_async
 
         logger.info("stable_run_replayed run=%s", run_id)
-        # The checkpoint records the handler's answer *before* process() runs
-        # the output guard, so the stored text is unredacted. A replay leaves
-        # through the same guard as the original response did.
+        # process() guards an answer before recording it, but a checkpoint
+        # written by an earlier release holds the raw text. A replay always
+        # leaves through the output guard, like the original response did.
         replayed: dict[str, Any] = await guard_output_async(
             {
                 "response": existing.answer if existing.answer is not None else "",

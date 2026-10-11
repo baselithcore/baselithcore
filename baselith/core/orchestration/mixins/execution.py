@@ -66,6 +66,9 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+#: Private result flag: ``_process_with_budget`` already guarded the answer.
+_OUTPUT_GUARDED_KEY = "_output_guarded"
+
 
 class ExecutionMixin:
     """Mixin for query execution and processing."""
@@ -192,8 +195,11 @@ class ExecutionMixin:
             )
             # Output guardrails (PII redaction, harmful-content filter, and
             # opt-in content moderation) on the final response text before it
-            # leaves the orchestrator.
-            guarded = await guard_output_async(result)
+            # leaves the orchestrator — unless the handler's answer was guarded
+            # before it was recorded and published (see _process_with_budget).
+            if not result.pop(_OUTPUT_GUARDED_KEY, False):
+                result = await guard_output_async(result)
+            guarded = result
             return guarded
         finally:
             # Stop this attempt's lease heartbeat and hand the run back —
@@ -357,6 +363,13 @@ class ExecutionMixin:
                     budget=budget,
                     success=not result.get("error", False),
                 )
+
+            # Guard the answer before it is recorded or published: replays and
+            # /runs history serve the checkpoint answer, /runs events RESPONSE_FINAL.
+            from baselith.core.orchestration.guard_pipeline import guard_output_async
+
+            result = await guard_output_async(result)
+            result[_OUTPUT_GUARDED_KEY] = True
 
             # Persist final budget + mark the checkpoint completed.
             if checkpoint_mgr is not None:
