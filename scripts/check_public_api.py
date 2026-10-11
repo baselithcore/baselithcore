@@ -280,12 +280,43 @@ def load_baseline(baseline_path: Path) -> dict[str, list[str]]:
     }
 
 
-def check_public_api(root: Path, *, baseline: dict[str, list[str]]) -> list[str]:
+_NAMESPACE_ROOTS = frozenset({"baselith.core", "baselith.plugins"})
+
+
+def removal_tier(package: str, baseline_tiers: dict[str, str]) -> Stability:
+    """The tier that prices removing symbols from ``package``.
+
+    Normally the declared tier. A package deleted outright has also left
+    ``PACKAGE_STABILITY`` (the gate demands the table match the tree), and
+    :func:`stability_of` would then fall back to ``experimental`` and call the
+    removal free. The promise that was published is the one recorded in the
+    baseline, so a package missing from the table is priced by that record.
+    """
+    parts = package.split(".")
+    for stop in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:stop])
+        # The namespace roots carry no tier of their own (the facade's
+        # ``baselith`` entry does not extend to ``baselith.core.*``).
+        if prefix in PACKAGE_STABILITY or prefix in _NAMESPACE_ROOTS:
+            break
+        recorded = baseline_tiers.get(prefix)
+        if recorded in {str(tier) for tier in Stability}:
+            return Stability(recorded)
+    return stability_of(package)
+
+
+def check_public_api(
+    root: Path,
+    *,
+    baseline: dict[str, list[str]],
+    baseline_tiers: dict[str, str] | None = None,
+) -> list[str]:
     """Return human-readable violations for any drift from the baseline."""
     diff = diff_public_api(baseline, collect_public_api(root))
+    tiers = baseline_tiers or {}
     violations: list[str] = []
     for package, names in diff.removed.items():
-        cost = _REMOVAL_COST[stability_of(package)].format(package=package)
+        cost = _REMOVAL_COST[removal_tier(package, tiers)].format(package=package)
         violations.append(
             f"{package} no longer exports {', '.join(names)} — {cost}. "
             f"See {POLICY_DOC}; refresh the baseline in that same change"
@@ -340,10 +371,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Baseline refreshed: {total} public symbol(s) recorded.")
         return 0
 
-    violations = check_public_api(REPO_ROOT, baseline=load_baseline(BASELINE_PATH))
-    violations += check_stability(
-        REPO_ROOT, baseline_tiers=load_baseline_tiers(BASELINE_PATH)
+    baseline_tiers = load_baseline_tiers(BASELINE_PATH)
+    violations = check_public_api(
+        REPO_ROOT,
+        baseline=load_baseline(BASELINE_PATH),
+        baseline_tiers=baseline_tiers,
     )
+    violations += check_stability(REPO_ROOT, baseline_tiers=baseline_tiers)
     if violations:
         print("Public API surface drift:", file=sys.stderr)
         for violation in violations:

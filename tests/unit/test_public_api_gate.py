@@ -18,6 +18,7 @@ from scripts.check_public_api import (
     load_baseline,
     load_baseline_tiers,
     read_literal_all,
+    removal_tier,
     top_level_packages,
     write_baseline,
 )
@@ -122,6 +123,35 @@ def test_vanished_package_removes_every_symbol(tmp_path: Path) -> None:
     assert diff.added == {}
 
 
+def test_deleted_package_is_priced_by_its_recorded_tier(tmp_path: Path) -> None:
+    """Deleting a package also deletes its table entry; the published promise
+    still sets the price, so a retired shim reads MAJOR, not experimental."""
+    _tree(tmp_path)
+    baseline = {**collect_public_api(tmp_path), "baselith.core.gone": ["x"]}
+
+    (violation,) = check_public_api(
+        tmp_path,
+        baseline=baseline,
+        baseline_tiers={"baselith.core.gone": str(Stability.DEPRECATED)},
+    )
+
+    assert "MAJOR — baselith.core.gone is a retired compatibility shim" in violation
+
+
+def test_removal_tier_prefers_the_live_table() -> None:
+    recorded = {"baselith.core.agent": str(Stability.EXPERIMENTAL)}
+
+    assert removal_tier("baselith.core.agent.x", recorded) is Stability.STABLE
+    assert removal_tier("baselith.core.gone.sub", {}) is Stability.EXPERIMENTAL
+    assert (
+        removal_tier("baselith.core.gone.sub", {"baselith.core.gone": "deprecated"})
+        is Stability.DEPRECATED
+    )
+    assert removal_tier("baselith.core.gone", {"baselith.core.gone": "?"}) is (
+        Stability.EXPERIMENTAL
+    )
+
+
 def test_baseline_roundtrip(tmp_path: Path) -> None:
     _tree(tmp_path)
     baseline_path = tmp_path / "baseline.json"
@@ -193,7 +223,7 @@ class TestTierRatchet:
 
     def test_retirement_is_allowed_from_any_tier(self) -> None:
         """Announcing a retirement is never itself a regression."""
-        recorded = {"baselith.core.agents": str(Stability.STABLE)}
+        recorded = {"baselith.core.scraper": str(Stability.STABLE)}
 
         assert check_tier_ratchet(recorded) == []
 
