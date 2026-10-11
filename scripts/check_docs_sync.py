@@ -196,11 +196,11 @@ def main() -> int:
     touched_docs = {path for path in paths if path.startswith(f"{DOCS_ROOT}/")}
     changed_modules = sorted(
         {
-            path.split("/")[1]
+            path.split("/")[2]
             for path in paths
             if path.startswith("baselith/core/")
             and path.endswith(".py")
-            and "/" in path[5:]
+            and "/" in path[14:]
         }
     )
     if not changed_modules:
