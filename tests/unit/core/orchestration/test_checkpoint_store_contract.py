@@ -312,3 +312,57 @@ async def test_an_expired_lease_is_taken_over_and_fences_the_old_owner(open_stor
     assert stored is not None
     assert stored.owner == "worker-b" and "late" not in stored.plugin_data
     assert stored.status == STATUS_RUNNING
+
+
+async def test_a_reloaded_copy_cannot_write_over_another_owner(open_store):
+    """Version alone is not the fence: a replica that lost its lease and
+    reloads the row (so its version is current) must still not write over the
+    new owner's run, nor take it back by writing its own name."""
+    store = open_store()
+    run_id = f"refence-{uuid.uuid4().hex[:8]}"
+    await store.save(Checkpoint(run_id=run_id, query="q"))
+    assert await store.claim(run_id, "worker-a", 30.0, now=time.time() - 60)
+    assert await open_store().claim(run_id, "worker-b", 30.0)
+
+    reloaded = await store.load(run_id)
+    assert reloaded is not None and reloaded.owner == "worker-b"
+    reloaded.owner = "worker-a"
+    reloaded.plugin_data["hijack"] = True
+    with pytest.raises(CheckpointConflictError):
+        await store.save(reloaded)
+
+    # A step save takes the same fence.
+    reloaded = await store.load(run_id)
+    assert reloaded is not None
+    reloaded.owner = "worker-a"
+    with pytest.raises(CheckpointConflictError):
+        await store.save_step(reloaded, "k", {"result": 1}, {"tool": "t", "args": {}})
+
+    # Without any owner, a writer cannot touch an owned run either.
+    reloaded = await store.load(run_id)
+    assert reloaded is not None
+    reloaded.owner = None
+    with pytest.raises(CheckpointConflictError):
+        await store.save(reloaded)
+
+    stored = await store.load(run_id)
+    assert stored is not None
+    assert stored.owner == "worker-b" and "hijack" not in stored.plugin_data
+
+
+async def test_the_owner_still_writes_and_an_unowned_run_stays_writable(open_store):
+    store = open_store()
+    run_id = f"owned-{uuid.uuid4().hex[:8]}"
+    await store.save(Checkpoint(run_id=run_id, query="q"))
+    mine = await store.claim(run_id, "worker-a", 30.0)
+    assert mine is not None
+    mine.plugin_data["ok"] = 1
+    await store.save(mine)
+
+    await store.release_lease(run_id, "worker-a")
+    free = await store.load(run_id)
+    assert free is not None and free.owner is None
+    free.plugin_data["after_release"] = 2
+    await store.save(free)
+    stored = await store.load(run_id)
+    assert stored is not None and stored.plugin_data["after_release"] == 2

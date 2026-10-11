@@ -1040,9 +1040,14 @@ the streaming twin of `process_with_stable_run_id`; it returns a `StreamRun`
 
 #### Concurrency: compare-and-swap writes and per-run leases
 
-**Writes are compare-and-swap on `version`.** `save` and `save_step` succeed
-only while the stored version still equals the writer's copy, then bump it; a
-stale writer gets `CheckpointConflictError` and nothing is written. The
+**Writes are compare-and-swap on `version`, fenced on the lease owner.**
+`save` and `save_step` succeed only while the stored version still equals the
+writer's copy **and** the run is unowned or owned by the writer, then bump the
+version; anything else gets `CheckpointConflictError` and nothing is written.
+The owner fence matters for a replica that lost its lease and reloads the run:
+its version is current again, but it still cannot write over the new owner's
+state or take the run back by writing its own name. Taking a run over goes
+through `claim`, which checks the lease and bumps the version. The
 orchestrator turns a conflict into an error result
 (`{"error": true, "checkpoint_conflict": true}`) and **stops** — it does not
 call `fail()`, which would clobber the newer state. A fresh run whose `run_id`

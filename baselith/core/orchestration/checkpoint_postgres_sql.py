@@ -7,7 +7,11 @@ which modules may create Postgres tables.
 Every write here is a **compare-and-swap** on the ``version`` column: the
 statement matches only while the stored version still equals the writer's, so
 a writer holding a stale copy changes nothing and the store raises
-``CheckpointConflictError``. ``version``, ``owner`` and ``lease_expires_at``
+``CheckpointConflictError``. It is also **fenced on the lease owner**: a write
+matches only a row that is unowned or owned by the writer. A replica that
+lost its lease and reloads the row (so its version is current again) still
+cannot write over the new owner's run, or take it back; taking a run over
+goes through the claim, which checks the lease and bumps the version. ``version``, ``owner`` and ``lease_expires_at``
 columns are authoritative over the copies inside ``data``: the lease
 statements update only the columns.
 
@@ -88,6 +92,7 @@ ON CONFLICT (run_id) DO UPDATE SET
     lease_expires_at = EXCLUDED.lease_expires_at,
     updated_at = NOW()
 WHERE agent_checkpoints.version = %s
+  AND (agent_checkpoints.owner IS NULL OR agent_checkpoints.owner = %s)
 """
 
 # Incremental step write: the new step entry and trajectory element are the
@@ -112,7 +117,7 @@ UPDATE agent_checkpoints SET
     owner = %s,
     lease_expires_at = EXTRACT(EPOCH FROM now())::float8 + %s::float8,
     updated_at = NOW()
-WHERE run_id = %s AND version = %s
+WHERE run_id = %s AND version = %s AND (owner IS NULL OR owner = %s)
 """
 
 _LOAD = """

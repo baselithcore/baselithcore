@@ -206,8 +206,10 @@ class SQLiteCheckpointStore:
             updated = self._conn.execute(
                 "UPDATE checkpoints SET tenant_id=?, status=?, updated_at=?,"
                 " data=?, version=?, owner=?, lease_expires_at=?"
-                " WHERE run_id = ? AND version = ?",
-                (*row, data["run_id"], expected),
+                " WHERE run_id = ? AND version = ?"
+                # Fenced on the lease owner as well as the version.
+                " AND (owner IS NULL OR owner = ?)",
+                (*row, data["run_id"], expected, data.get("owner")),
             ).rowcount
             if not updated:
                 try:

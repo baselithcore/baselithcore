@@ -141,9 +141,16 @@ class InMemoryCheckpointStore:
             self._history.pop(victim, None)
 
     def _check_version(self, checkpoint: Checkpoint) -> dict[str, Any] | None:
-        """The stored row, after the compare-and-swap check on ``version``."""
+        """The stored row, after the compare-and-swap check on ``version``.
+
+        Also fenced on the lease owner: a row owned by someone else is never
+        written, even at a current version (see ``checkpoint_postgres_sql``).
+        """
         stored = self._store.get(checkpoint.run_id)
-        if stored is not None and stored.get("version", 0) != checkpoint.version:
+        if stored is not None and (
+            stored.get("version", 0) != checkpoint.version
+            or stored.get("owner") not in (None, checkpoint.owner)
+        ):
             raise CheckpointConflictError(checkpoint.run_id, checkpoint.version)
         return stored
 

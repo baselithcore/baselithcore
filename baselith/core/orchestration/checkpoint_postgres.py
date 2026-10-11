@@ -227,6 +227,7 @@ class PostgresCheckpointStore:
                     checkpoint.owner,
                     _lease_remaining(checkpoint),
                     expected,
+                    checkpoint.owner,
                 ),
             )
             if not cur.rowcount:
@@ -280,6 +281,7 @@ class PostgresCheckpointStore:
             _lease_remaining(checkpoint),
             checkpoint.run_id,
             expected,
+            checkpoint.owner,
         )
         async with get_async_cursor() as cur:
             await cur.execute(_STEP_UPDATE, params)
