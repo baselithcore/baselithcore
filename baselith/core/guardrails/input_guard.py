@@ -34,6 +34,7 @@ from .multilingual import (
     COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
     FOLDED_SCRIPT_LANGUAGES,
     LATIN_LED_PATTERNS,
+    LOWERCASE_PATTERN_IDS,
     NON_LATIN_LANGUAGES,
     pattern_source,
 )
@@ -289,11 +290,21 @@ class InputGuard:
         patterns: list[tuple[str, re.Pattern[str]]],
         matched: dict[str, str],
     ) -> None:
-        """Record every not-yet-matched pattern that hits ``text``."""
+        """Record every not-yet-matched pattern that hits ``text``.
+
+        Multilingual patterns are compiled lowercase (see
+        :data:`LOWERCASE_PATTERN_IDS`) and search the lowercased text.
+        """
+        lowered: str | None = None
         for family, pattern in patterns:
+            target = text
+            if id(pattern) in LOWERCASE_PATTERN_IDS:
+                if lowered is None:
+                    lowered = text.lower()
+                target = lowered
             # Search first: the label is only worth building on a hit, and
             # benign traffic has none.
-            if pattern.search(text):
+            if pattern.search(target):
                 matched.setdefault(f"{family}:{pattern_source(pattern)}", view)
 
     def _build_classify_prompt(self, text: str) -> str:

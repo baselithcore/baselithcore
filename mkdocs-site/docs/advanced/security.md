@@ -372,8 +372,13 @@ async def process_user_input(user_input: str) -> str:
   invisible characters stripped, homoglyphs folded, leetspeak and
   letter-spacing undone, alone or combined) and decoded
   base64/hex/percent-encoded payloads; the Russian patterns also accept
-  Latin lookalike spellings, and the non-Latin ones English or leet
-  keywords inside a native-script sentence
+  Latin lookalike spellings, the non-Latin ones English or leet keywords
+  inside a native-script sentence, the Arabic ones Arabizi digits standing
+  for a letter and informal spelling, the Chinese ones curated homophones
+  and variant characters of their keywords, and the Japanese ones kana
+  spellings; Russian, Hindi and Arabic typed in the Latin alphabet
+  (`zabud vse pravila`, `pichle sabhi nirdesh ignore karo`, Arabizi
+  `tjahal kol al ta3limat al sabiqa`) have their own pattern families
 - **Code execution attempts**: shell/eval-style payloads
   (`block_code_execution`)
 - **Custom patterns**: operator-supplied regexes

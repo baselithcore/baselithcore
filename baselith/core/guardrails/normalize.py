@@ -12,15 +12,17 @@ matching and are discarded afterwards.
 The views, cheapest first:
 
 * ``normalized`` — Unicode NFKC (folds fullwidth, mathematical alphanumerics,
-  ligatures, compatibility forms) and removal of every format character
+  ligatures, compatibility forms), removal of every format character
   (Unicode category ``Cf``: zero-width space/joiners, word joiner, BOM, soft
-  hyphen, bidi embeddings/overrides/isolates). Non-Latin scripts survive, so
-  the multilingual patterns run here.
+  hyphen, bidi embeddings/overrides/isolates), non-ASCII decimal digits
+  folded to ASCII (``ign٠re``) and Arabic tatweel and harakat dropped
+  (``تـجـاهـل``). Non-Latin scripts survive, so the multilingual patterns
+  run here — and so do digits, which the Arabic patterns read as the
+  Arabizi letters they stand for (``الت3ليمات``).
 * ``deobfuscated`` — ``normalized`` plus a confusables fold (Cyrillic/Greek
-  lookalikes to Latin), non-ASCII decimal digits folded to ASCII
-  (``ign٠re``), Arabic tatweel and harakat dropped (``تـجـاهـل``),
-  collapsing of single-letter runs split by one separator (``i.g.n.o.r.e``,
-  ``i g n o r e``) — a lone leet character counts as a letter there, so
+  lookalikes to Latin), collapsing of single-letter runs split by one
+  separator (``i.g.n.o.r.e``, ``i g n o r e``) — a lone leet character
+  counts as a letter there, so
   ``i g n 0 r e`` is one run — then leetspeak de-substitution inside
   alphanumeric tokens (``0→o 1→i 3→e 4→a 5→s 7→t @→a $→s``, with ``11→ll``
   first so ``a11`` reads as ``all``), and finally removal of one to three
@@ -350,11 +352,13 @@ def matching_views(text: str) -> list[MatchingView]:
             views.append(MatchingView(label, value, squashed, native))
 
     normalized = nfkc_clean(text)
+    if not normalized.isascii():
+        # Before any pattern sees it: an Arabizi digit standing for a letter
+        # (``الت3ليمات``) must survive, but tatweel/harakat around it must not.
+        normalized = _fold_native_noise(normalized)
     add("normalized", normalized)
 
     folded = normalized.translate(_CONFUSABLES_TABLE)
-    if not folded.isascii():
-        folded = _fold_native_noise(folded)
     # Collapse before de-substituting: a spaced-out leet digit (``i g n 0 r e``)
     # is only part of a word once the run is joined.
     collapsed, spaced = _collapse_spaced(folded)
@@ -380,8 +384,7 @@ def matching_views(text: str) -> list[MatchingView]:
     if native not in (normalized, deobfuscated):
         add("native", native, native=True)
     if native_spaced and not native.isascii():
-        letters = _fold_native_noise(native)
-        squashed_native = _non_letter_or_mark_re().sub("", letters).lower()
+        squashed_native = _non_letter_or_mark_re().sub("", native).lower()
         add("native-squashed", squashed_native, squashed=True, native=True)
     return views
 

@@ -18,14 +18,28 @@ vocabulary. Benign sentences that must stay allowed are pinned in
 
 The non-Latin patterns also take the canonical English keywords in their
 slots (code-mixing: ``पिछले सभी instructions को ignore करो``), always next to
-a native word, and the Russian ones are compiled with every Cyrillic letter
-widened to its Latin lookalikes (:func:`expand_cyrillic_lookalikes`).
+a native word. Spelling variants are widened on the pattern side, at compile
+time (:mod:`baselith.core.guardrails.variants`): Russian letters to their
+Latin lookalikes, Arabic letters to their Arabizi digits and informal
+spellings, Chinese keywords to curated homophones and variant characters.
+The romanised families — ``ru-latn`` (the Russian table, transliterated),
+``hi-latn`` and ``ar-latn`` (:mod:`baselith.core.guardrails.romanized`) —
+cover the same intents typed in the Latin alphabet.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable, Mapping
+
+from .romanized import ROMANIZED_INJECTION_PATTERNS
+from .variants import (
+    expand_arabic_variants,
+    expand_cyrillic_lookalikes,
+    expand_zh_homophones,
+    transliterate_cyrillic,
+)
 
 #: Language code -> injection patterns. Extend by adding entries.
 MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -113,9 +127,9 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"(忽略|无视|無視|忽視|不要理会|不要理會)[^。！？\n]{0,8}?"
         r"(之前|以前|先前|上面|上述|前面)[^。！？\n]{0,6}?"
         r"(指令|指示|提示|说明|說明|规则|規則|instructions?|rules|prompts?)",
-        r"忘(记|記|掉)[^。！？\n]{0,6}?(你的|所有)[^。！？\n]{0,4}?"
+        r"(忘记|忘記|忘掉)[^。！？\n]{0,6}?(你的|所有)[^。！？\n]{0,4}?"
         r"(指令|规则|規則|设定|設定|instructions?|rules)",
-        r"(忽略|无视|無視|忽視|不要理会|不要理會|忘(记|記|掉))[^。！？\n]{0,8}?"
+        r"(忽略|无视|無視|忽視|不要理会|不要理會|(忘记|忘記|忘掉))[^。！？\n]{0,8}?"
         r"(?<![a-z])(previous|prior|above|earlier|your)\s+(instructions?|rules|prompts?)",
         r"(你现在是|你現在是|从现在开始你是|從現在開始你是)"
         r"(一个|一個|一名|DAN)",
@@ -133,16 +147,20 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"[^。！？\n]{0,6}?(系统提示|系統提示|初始指令|你的(指令|提示词|提示詞|指示))",
     ),
     "ja": (
-        r"(以前|前|上記|これまで)の[^。！？\n]{0,6}?"
-        r"(指示|命令|指令|プロンプト|instructions?|rules|prompts?)を"
-        r"[^。！？\n]{0,4}?(無視|忘れ|(?<![a-z])(ignore|disregard|forget)(?![a-z]))",
-        r"(あなた|君|お前)は(今|今から|これから)は?"
-        r"(DAN|制限のない|自由な|別の)",
-        r"システムプロンプトを[^。！？\n]{0,6}?"
-        r"(表示|教えて|出力|見せて|明かして|(?<![a-z])(show|reveal|print|output|"
-        r"display)(?![a-z]))",
-        r"(あなたの|君の)(指示|プロンプト|命令)を[^。！？\n]{0,4}?"
-        r"(表示|教えて|出力|見せて|明かして)",
+        # Kana spellings ride along: ``むし``/``ムシ`` (slang for ignoring),
+        # ``しじ``, ``ぷろんぷと``, ``しすてむ``, ``ひょうじ``...
+        r"(以前|いぜん|前|まえ|上記|これまで)の[^。！？\n]{0,6}?"
+        r"(指示|しじ|命令|めいれい|指令|しれい|プロンプト|ぷろんぷと|"
+        r"instructions?|rules|prompts?)を[^。！？\n]{0,4}?(無視|むし|ムシ|"
+        r"忘れ|わすれ|(?<![a-z])(ignore|disregard|forget)(?![a-z]))",
+        r"(あなた|君|きみ|お前|おまえ)は(今|いま|今から|いまから|これから)は?"
+        r"(DAN|制限のない|せいげんのない|自由な|別の)",
+        r"(システム|しすてむ)(プロンプト|ぷろんぷと)を[^。！？\n]{0,6}?"
+        r"(表示|ひょうじ|教えて|おしえて|出力|見せて|みせて|明かして|あかして|"
+        r"(?<![a-z])(show|reveal|print|output|display)(?![a-z]))",
+        r"(あなたの|君の|きみの)(指示|しじ|プロンプト|ぷろんぷと|命令|めいれい)を"
+        r"[^。！？\n]{0,4}?(表示|ひょうじ|教えて|おしえて|出力|見せて|みせて|明かして|"
+        r"あかして)",
         # English-led
         r"(?<![a-z])(previous|prior|above)の[^。！？\n]{0,6}?"
         r"(指示|命令|指令|プロンプト|instructions?|rules|prompts?)を"
@@ -183,7 +201,22 @@ MULTILINGUAL_INJECTION_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\s+(को\s+)?(अनदेखा|नज़रअंदाज़|नजरअंदाज|भूल|(ignore|forget|disregard)\s*कर)",
     ),
 }
+# Latin-alphabet forms. Russian typed in transliteration is the Russian table
+# again, rewritten letter by letter at compile time (``PATTERN_EXPANDERS``).
+MULTILINGUAL_INJECTION_PATTERNS |= {
+    "ru-latn": MULTILINGUAL_INJECTION_PATTERNS["ru"],
+    **ROMANIZED_INJECTION_PATTERNS,
+}
 
+#: Language -> rewrite applied to each of its pattern sources before
+#: compiling (:mod:`baselith.core.guardrails.variants`); a match is still
+#: reported under the source as written (:func:`pattern_source`).
+PATTERN_EXPANDERS: Mapping[str, Callable[[str], str]] = {
+    "ru": expand_cyrillic_lookalikes,
+    "ru-latn": transliterate_cyrillic,
+    "ar": expand_arabic_variants,
+    "zh": expand_zh_homophones,
+}
 
 #: Languages written in a non-Latin script.
 NON_LATIN_LANGUAGES: frozenset[str] = frozenset({"ru", "zh", "ja", "ar", "hi"})
@@ -200,61 +233,9 @@ FOLDED_SCRIPT_LANGUAGES: frozenset[str] = frozenset({"ru"})
 # a pattern drops.
 _SPACING_TOKEN_RE = re.compile(r"\\s[+*]?|\\b")
 
-#: Latin letters and digits that stand in for a Cyrillic letter, upright or
-#: italic/handwritten (``u`` for ``и``, ``r`` for ``г``, ``n`` for ``п``,
-#: ``m`` for ``т``, ``6`` for ``б``, ``3`` for ``з``). Matching is
-#: case-insensitive, so ``b`` also covers ``B`` for ``в``.
-_CYRILLIC_LOOKALIKES: dict[str, str] = {
-    "а": "a@", "б": "6", "в": "b", "г": "r", "д": "dg", "е": "eёë",
-    "ё": "eеë", "з": "3", "и": "u", "й": "иu", "к": "k", "м": "m", "н": "h",
-    "о": "o0", "п": "n", "р": "p", "с": "c", "т": "tm", "у": "y", "х": "x",
-    "ц": "u", "ч": "4", "ъ": "b", "ь": "b", "э": "3",
-}  # fmt: skip
-#: Cyrillic letters imitated by a sequence of Latin characters.
-_CYRILLIC_LOOKALIKE_SEQUENCES: dict[str, tuple[str, ...]] = {
-    "л": ("ji", "jl"),
-    "ш": ("w", "lli", "iii"),
-    "щ": ("ш", "w", "lli", "lll"),
-    "ы": ("bi", "bl", "b1"),
-}
-
 #: Expanded pattern -> the source it was expanded from, so a match is reported
-#: under the pattern as written, not under its lookalike-class form.
+#: under the pattern as written, not under its widened form.
 _DISPLAY_SOURCES: dict[re.Pattern[str], str] = {}
-
-
-def expand_cyrillic_lookalikes(source: str) -> str:
-    """Let every Cyrillic letter of a pattern also match its Latin lookalikes.
-
-    ``все`` becomes ``[вb][сc][еeёë]``, so ``Bce`` — Latin letters only —
-    matches, as do mixed tokens (``npeдыдущue``) and leet digits (``3абудь``).
-    Applied to the pattern rather than the text, so no extra view is
-    scanned, and an English word can only match if it spells a whole
-    Russian override phrase letter by letter. Adds character classes and
-    bounded alternations only: no new quantifier, so the pattern stays
-    linear.
-
-    Args:
-        source: Regex source whose Cyrillic letters are all literals.
-
-    Returns:
-        The pattern with each Cyrillic letter widened to its lookalikes.
-
-    Raises:
-        ValueError: The source has a character class, where a widened
-            letter would no longer be a literal.
-    """
-    if "[" in source:
-        raise ValueError(f"cannot expand a pattern with a class: {source!r}")
-    parts: list[str] = []
-    for ch in source:
-        if ch in _CYRILLIC_LOOKALIKES:
-            parts.append(f"[{ch}{_CYRILLIC_LOOKALIKES[ch]}]")
-        elif ch in _CYRILLIC_LOOKALIKE_SEQUENCES:
-            parts.append(f"(?:{'|'.join((ch, *_CYRILLIC_LOOKALIKE_SEQUENCES[ch]))})")
-        else:
-            parts.append(ch)
-    return "".join(parts)
 
 
 def pattern_source(pattern: re.Pattern[str]) -> str:
@@ -264,7 +245,7 @@ def pattern_source(pattern: re.Pattern[str]) -> str:
         pattern: A pattern compiled by :func:`compile_multilingual`.
 
     Returns:
-        The source as written in the table (before any lookalike
+        The source as written in the table (before any variant
         expansion).
     """
     return _DISPLAY_SOURCES.get(pattern, pattern.pattern)
@@ -273,7 +254,7 @@ def pattern_source(pattern: re.Pattern[str]) -> str:
 def compile_multilingual(
     table: dict[str, tuple[str, ...]],
     *,
-    lookalike_languages: frozenset[str] = frozenset(),
+    expanders: Mapping[str, Callable[[str], str]] | None = None,
     lowercase: bool = False,
 ) -> list[tuple[str, re.Pattern[str]]]:
     """Compile a language table into ``(language, pattern)`` pairs.
@@ -284,12 +265,12 @@ def compile_multilingual(
 
     Args:
         table: Language code -> regex source strings.
-        lookalike_languages: Languages whose patterns are widened with
-            :func:`expand_cyrillic_lookalikes`; :func:`pattern_source` maps
-            each back to its source.
-        lowercase: The patterns only ever see lowercased text (the squashed
-            views): lowercase the sources and compile case-sensitively, which
-            lets the regex engine skip ahead to the first letter.
+        expanders: Language -> source rewrite (see
+            :data:`PATTERN_EXPANDERS`); :func:`pattern_source` maps each
+            rewritten pattern back to its source.
+        lowercase: The patterns only ever see lowercased text: lowercase
+            the sources and compile case-sensitively, which lets the regex
+            engine skip ahead to the first letter.
 
     Returns:
         Compiled patterns tagged with their language; case-insensitive
@@ -298,17 +279,19 @@ def compile_multilingual(
     flags = 0 if lowercase else re.IGNORECASE
     compiled: list[tuple[str, re.Pattern[str]]] = []
     for lang, sources in table.items():
+        expand = (expanders or {}).get(lang)
         for source in sources:
             written = unicodedata.normalize("NFKC", source)
+            body = written
             if lowercase:
-                if re.search(r"\\[A-Z]", written):
-                    raise ValueError(f"cannot lowercase an escape in {written!r}")
-                written = written.lower()
-            if lang not in lookalike_languages:
-                compiled.append((lang, re.compile(written, flags)))
-                continue
-            pattern = re.compile(expand_cyrillic_lookalikes(written), flags)
-            _DISPLAY_SOURCES[pattern] = written
+                if re.search(r"\\[A-Z]", body):
+                    raise ValueError(f"cannot lowercase an escape in {body!r}")
+                body = body.lower()
+            if expand is not None:
+                body = expand(body)
+            pattern = re.compile(body, flags)
+            if body != written:
+                _DISPLAY_SOURCES[pattern] = written
             compiled.append((lang, pattern))
     return compiled
 
@@ -330,10 +313,13 @@ def squash_pattern(source: str) -> str:
     return _SPACING_TOKEN_RE.sub("", source)
 
 
-#: Pre-compiled multilingual patterns, tagged with their language code. The
-#: folded-script (Russian) ones also match Latin lookalike spellings.
+#: Pre-compiled multilingual patterns, tagged with their language code, each
+#: widened by its language's expander. Compiled lowercase and case-sensitive,
+#: and matched against the lowercased view (:data:`LOWERCASE_PATTERN_IDS`):
+#: a case-insensitive pattern defeats the regex engine's skip-ahead to its
+#: first literal, which made each one several times slower on plain text.
 COMPILED_MULTILINGUAL_PATTERNS = compile_multilingual(
-    MULTILINGUAL_INJECTION_PATTERNS, lookalike_languages=FOLDED_SCRIPT_LANGUAGES
+    MULTILINGUAL_INJECTION_PATTERNS, expanders=PATTERN_EXPANDERS, lowercase=True
 )
 
 
@@ -351,7 +337,7 @@ def _squashed_table(*, non_latin: bool) -> dict[str, tuple[str, ...]]:
 #: around an embedded English phrase), so the collapsed views serve them.
 COMPILED_SQUASHED_MULTILINGUAL_PATTERNS = compile_multilingual(
     _squashed_table(non_latin=True),
-    lookalike_languages=FOLDED_SCRIPT_LANGUAGES,
+    expanders=PATTERN_EXPANDERS,
     lowercase=True,
 )
 
@@ -360,26 +346,43 @@ COMPILED_SQUASHED_MULTILINGUAL_PATTERNS = compile_multilingual(
 #: leaves the two-letter ``l e`` spaced (a run needs three letters), which
 #: only the gapless form reads past.
 COMPILED_SQUASHED_LATIN_MULTILINGUAL_PATTERNS = compile_multilingual(
-    _squashed_table(non_latin=False), lowercase=True
+    _squashed_table(non_latin=False), expanders=PATTERN_EXPANDERS, lowercase=True
+)
+
+#: Identities of every pattern above: compiled lowercase, they are matched
+#: against the lowercased view text (the squashed views already are).
+LOWERCASE_PATTERN_IDS: frozenset[int] = frozenset(
+    id(pattern)
+    for _, pattern in (
+        *COMPILED_MULTILINGUAL_PATTERNS,
+        *COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
+        *COMPILED_SQUASHED_LATIN_MULTILINGUAL_PATTERNS,
+    )
 )
 
 # A pattern source whose first literal is a Latin letter, past any opening
 # groups, ``\b`` or ``(?<![a-z])``.
 _LATIN_LEAD_RE = re.compile(r"(?:\(\?<!\[a-z\]\)|\\b|\()*[a-z]")
 
-#: Patterns of the script-bound languages (CJK, Arabic, Devanagari) that lead
-#: with an English word: they cannot use the regex engine's first-character
-#: scan, and cannot match a view without a Latin word, so the guard skips
-#: them there. Russian is excluded — every one of its patterns can match
-#: Latin lookalikes.
+#: Patterns that cannot match a view without a Latin word, so the guard skips
+#: them there: every pattern of the Latin-script languages (romanised ones
+#: included — each spells out at least one Latin word), and the patterns of
+#: the script-bound languages (CJK, Arabic, Devanagari) that lead with an
+#: English word, which also cannot use the regex engine's first-character
+#: scan. Russian is excluded — every one of its patterns can match Latin
+#: lookalikes.
 LATIN_LED_PATTERNS: frozenset[re.Pattern[str]] = frozenset(
     pattern
     for lang, pattern in (
         *COMPILED_MULTILINGUAL_PATTERNS,
         *COMPILED_SQUASHED_MULTILINGUAL_PATTERNS,
+        *COMPILED_SQUASHED_LATIN_MULTILINGUAL_PATTERNS,
     )
-    if lang in NON_LATIN_LANGUAGES - FOLDED_SCRIPT_LANGUAGES
-    and _LATIN_LEAD_RE.match(pattern_source(pattern))
+    if lang not in NON_LATIN_LANGUAGES
+    or (
+        lang not in FOLDED_SCRIPT_LANGUAGES
+        and _LATIN_LEAD_RE.match(pattern_source(pattern)) is not None
+    )
 )
 
 __all__ = [
@@ -388,8 +391,10 @@ __all__ = [
     "COMPILED_SQUASHED_MULTILINGUAL_PATTERNS",
     "FOLDED_SCRIPT_LANGUAGES",
     "LATIN_LED_PATTERNS",
+    "LOWERCASE_PATTERN_IDS",
     "MULTILINGUAL_INJECTION_PATTERNS",
     "NON_LATIN_LANGUAGES",
+    "PATTERN_EXPANDERS",
     "compile_multilingual",
     "expand_cyrillic_lookalikes",
     "pattern_source",

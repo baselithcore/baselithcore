@@ -238,6 +238,9 @@ class TestViews:
             "injection:de",
             "injection:it",
             "injection:pt",
+            "injection:ru-latn",
+            "injection:hi-latn",
+            "injection:ar-latn",
         }
         # Japanese has only an English-led whole-phrase pattern, and this
         # view holds no Latin word.
