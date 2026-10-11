@@ -29,10 +29,37 @@ from threading import RLock
 from typing import Any, Protocol
 from uuid import uuid4
 
+from baselith.core.context import get_tenant_or_default
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+#: Tenant of records written before consent was tenant-scoped; its store key is
+#: the bare subject id, so those records keep reading back unchanged.
+DEFAULT_TENANT = "default"
+
+
+def subject_key(subject_id: str, tenant_id: str | None = None) -> str:
+    """The store key of ``subject_id`` inside a tenant.
+
+    Two tenants can hold the same subject id, so the consent log is keyed by
+    both: the default tenant keeps the bare id (records from before tenant
+    scoping), any other tenant gets ``<tenant>\\x1f<subject>``. ``None`` means
+    the tenant of the current request.
+
+    Raises:
+        ValueError: ``subject_id`` contains a control character.
+    """
+    if any(ord(ch) < 0x20 for ch in subject_id):
+        # The separator is a control character: a subject id carrying one could
+        # name another tenant's key from the default tenant.
+        raise ValueError("subject id must not contain control characters")
+    tenant = tenant_id if tenant_id is not None else get_tenant_or_default()
+    if tenant == DEFAULT_TENANT:
+        return subject_id
+    return f"{tenant}\x1f{subject_id}"
 
 
 @dataclass
@@ -52,6 +79,14 @@ class ConsentRecord:
     withdrawn_at: float | None = None
     details: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid4().hex)
+    #: Tenant the record belongs to. Subject ids are only unique inside a
+    #: tenant, so every read and erasure is scoped by it (see :func:`subject_key`).
+    tenant_id: str = DEFAULT_TENANT
+
+    @property
+    def store_key(self) -> str:
+        """The key a store files this record under (:func:`subject_key`)."""
+        return subject_key(self.subject_id, self.tenant_id)
 
     @property
     def is_active(self) -> bool:
@@ -70,6 +105,7 @@ class ConsentRecord:
             "withdrawn_at": self.withdrawn_at,
             "is_active": self.is_active,
             "details": self.details,
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -85,6 +121,7 @@ class ConsentRecord:
             withdrawn_at=data.get("withdrawn_at"),
             details=dict(data.get("details", {})),
             id=data["id"],
+            tenant_id=data.get("tenant_id", DEFAULT_TENANT),
         )
 
 
@@ -96,11 +133,11 @@ class ConsentStore(Protocol):
         ...
 
     async def for_subject(self, subject_id: str) -> list[ConsentRecord]:
-        """Every record held for a subject, oldest first."""
+        """Every record held under a subject key (:func:`subject_key`), oldest first."""
         ...
 
     async def drop_subject(self, subject_id: str) -> int:
-        """Remove every record for a subject; returns how many were removed."""
+        """Remove every record under a subject key; returns how many were removed."""
         ...
 
 
@@ -111,7 +148,7 @@ class InMemoryConsentStore:
         self._records: dict[str, list[ConsentRecord]] = {}
 
     async def append(self, record: ConsentRecord) -> None:
-        self._records.setdefault(record.subject_id, []).append(record)
+        self._records.setdefault(record.store_key, []).append(record)
 
     async def for_subject(self, subject_id: str) -> list[ConsentRecord]:
         return list(self._records.get(subject_id, []))
@@ -169,7 +206,7 @@ class SQLiteConsentStore:
             self._conn.execute(
                 "INSERT INTO consent_log (id, subject_id, purpose, data) "
                 "VALUES (?, ?, ?, ?)",
-                (record.id, record.subject_id, record.purpose, blob),
+                (record.id, record.store_key, record.purpose, blob),
             )
 
     def _for_subject_sync(self, subject_id: str) -> list[ConsentRecord]:
@@ -234,6 +271,7 @@ class ConsentService:
         """Record that a subject consented to ``purpose``."""
         record = ConsentRecord(
             subject_id=subject_id,
+            tenant_id=get_tenant_or_default(),
             purpose=purpose,
             granted=True,
             notice_version=notice_version,
@@ -271,6 +309,7 @@ class ConsentService:
             return None
         record = ConsentRecord(
             subject_id=subject_id,
+            tenant_id=get_tenant_or_default(),
             purpose=purpose,
             granted=False,
             withdrawn_at=time.time(),
@@ -296,7 +335,9 @@ class ConsentService:
         restores consent without rewriting history.
         """
         records = [
-            r for r in await self._store.for_subject(subject_id) if r.purpose == purpose
+            r
+            for r in await self._store.for_subject(subject_key(subject_id))
+            if r.purpose == purpose
         ]
         if not records:
             return False
@@ -305,19 +346,21 @@ class ConsentService:
     async def active_purposes(self, subject_id: str) -> list[str]:
         """Every purpose the subject currently consents to."""
         latest: dict[str, ConsentRecord] = {}
-        for record in await self._store.for_subject(subject_id):
+        for record in await self._store.for_subject(subject_key(subject_id)):
             latest[record.purpose] = record
         return sorted(p for p, r in latest.items() if r.is_active)
 
     async def history(self, subject_id: str) -> list[ConsentRecord]:
         """The full record chain — the Art. 7(1) proof."""
-        return await self._store.for_subject(subject_id)
+        return await self._store.for_subject(subject_key(subject_id))
 
     # -- DataProvider protocol ------------------------------------------------
 
     async def export(self, subject_id: str) -> list[dict[str, Any]]:
         """Export the subject's consent history (right to access)."""
-        return [r.to_dict() for r in await self._store.for_subject(subject_id)]
+        return [
+            r.to_dict() for r in await self._store.for_subject(subject_key(subject_id))
+        ]
 
     async def erase(self, subject_id: str) -> int:
         """Erase the subject's consent records.
@@ -329,7 +372,7 @@ class ConsentService:
         claims, Art. 17(3)(e) is the ground to retain it — implement a store
         that honours the exemption rather than quietly refusing here.
         """
-        removed = await self._store.drop_subject(subject_id)
+        removed = await self._store.drop_subject(subject_key(subject_id))
         logger.info(
             "AUDIT | PRIVACY | consent erased | subject=%s records=%d",
             subject_id,

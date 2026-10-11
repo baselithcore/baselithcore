@@ -202,3 +202,13 @@ def test_withdraw_without_consent_is_404(service, consent):
         "/privacy/consent/withdraw", json={"subject_id": "s1", "purpose": "none"}
     )
     assert r.status_code == 404
+
+
+def test_control_characters_in_a_subject_id_are_refused(service, consent):
+    client = _client(ADMIN, service)
+    r = client.post(
+        "/privacy/consent/grant", json={"subject_id": "acme\x1fs1", "purpose": "p"}
+    )
+    assert r.status_code == 422
+    r = client.get("/privacy/consent/acme%1Fs1")
+    assert r.status_code == 422

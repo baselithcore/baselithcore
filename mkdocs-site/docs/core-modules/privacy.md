@@ -163,6 +163,15 @@ not call into question the lawfulness of processing that already happened
 latest record for a purpose wins, so a re-grant restores consent without
 rewriting history.
 
+Consent is **tenant-scoped**. Subject ids are only unique inside a tenant, so
+every record carries the `tenant_id` of the request that wrote it, and every
+read, withdrawal, export and erasure sees only the current tenant's records:
+the store files them under `subject_key(subject_id)` — the bare id in the
+`default` tenant (so records from before scoping still read back), and
+`<tenant>\x1f<subject>` elsewhere. A subject id with a control character is
+refused (`ValueError`; `422` at the HTTP routes), since it could otherwise
+spell another tenant's key.
+
 Set `PRIVACY_CONSENT_DB_PATH` in production. The default in-memory store
 disappears on restart, and Art. 7(1) asks the controller to demonstrate consent
 *later*, when challenged — a proof that does not survive a deploy is not proof.

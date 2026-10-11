@@ -594,7 +594,9 @@
             "type": "string"
           },
           "subject_id": {
+            "maxLength": 256,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Subject Id",
             "type": "string"
           }
@@ -1183,7 +1185,9 @@
             "type": "string"
           },
           "subject_id": {
+            "maxLength": 256,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Subject Id",
             "type": "string"
           }
@@ -2101,7 +2105,9 @@
             "type": "object"
           },
           "subject_id": {
+            "maxLength": 256,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Subject Id",
             "type": "string"
           }
@@ -2463,7 +2469,9 @@
             "type": "boolean"
           },
           "subject_id": {
+            "maxLength": 256,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Subject Id",
             "type": "string"
           }
@@ -2879,7 +2887,9 @@
         "description": "Identify the data subject for an export or erasure.",
         "properties": {
           "subject_id": {
+            "maxLength": 256,
             "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
             "title": "Subject Id",
             "type": "string"
           }
@@ -8298,6 +8308,9 @@
             "name": "subject_id",
             "required": true,
             "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
               "title": "Subject Id",
               "type": "string"
             }
@@ -13551,6 +13564,9 @@
             "name": "subject_id",
             "required": true,
             "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
               "title": "Subject Id",
               "type": "string"
             }

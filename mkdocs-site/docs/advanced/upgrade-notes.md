@@ -56,6 +56,17 @@ The classes are the same objects the shims re-exported, so the import is the
 only change. The other three frozen shims (`doc_sources`, `routers`,
 `scraper`) stay, still `deprecated`, with no removal date announced.
 
+### Consent records are tenant-scoped
+
+The consent log was keyed by subject id alone, so two tenants sharing a
+subject id shared its consent chain, and its DSR export and erasure. Records
+now carry `tenant_id`; reads, withdrawals, exports and erasures see only the
+current tenant. Records written before the upgrade belong to the `default`
+tenant. A deployment that recorded consent for other tenants before the
+upgrade finds those records under `default`; re-record them, or re-file them
+with `subject_key(subject_id, tenant_id)` in a custom `ConsentStore`. Subject
+ids with control characters are refused.
+
 ### Overdue deprecations are removed
 
 Two APIs announced for removal in 0.41.0 outlived their date; 1.0 removes

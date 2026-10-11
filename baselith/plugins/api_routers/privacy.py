@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
@@ -40,6 +40,10 @@ router = APIRouter(
 
 _SCOPE = "privacy:manage"
 
+#: A subject id is an opaque identifier: no control characters (the consent
+#: log separates tenant and subject with one).
+_SUBJECT_ID = r"^[^\x00-\x1f\x7f]+$"
+
 
 def _enforce(request: Request) -> AuthUser:
     user: AuthUser | None = getattr(request.state, "user", None)
@@ -51,7 +55,7 @@ def _enforce(request: Request) -> AuthUser:
 class SubjectRequest(BaseModel):
     """Identify the data subject for an export or erasure."""
 
-    subject_id: str = Field(..., min_length=1)
+    subject_id: str = Field(..., min_length=1, max_length=256, pattern=_SUBJECT_ID)
 
 
 class RetentionRequest(BaseModel):
@@ -63,21 +67,21 @@ class RetentionRequest(BaseModel):
 class RectifyRequest(BaseModel):
     """Art. 16 corrections to apply across providers."""
 
-    subject_id: str = Field(..., min_length=1)
+    subject_id: str = Field(..., min_length=1, max_length=256, pattern=_SUBJECT_ID)
     corrections: dict[str, Any] = Field(..., min_length=1)
 
 
 class RestrictRequest(BaseModel):
     """Art. 18 restriction (or release) of processing for a subject."""
 
-    subject_id: str = Field(..., min_length=1)
+    subject_id: str = Field(..., min_length=1, max_length=256, pattern=_SUBJECT_ID)
     restricted: bool = True
 
 
 class ObjectionRequest(BaseModel):
     """An Art. 21 objection to processing."""
 
-    subject_id: str = Field(..., min_length=1)
+    subject_id: str = Field(..., min_length=1, max_length=256, pattern=_SUBJECT_ID)
     processing: str = Field(default="", max_length=500)
     direct_marketing: bool = False
     override_grounds: str | None = Field(default=None, max_length=2000)
@@ -86,7 +90,7 @@ class ObjectionRequest(BaseModel):
 class ConsentRequest(BaseModel):
     """An Art. 7 consent decision for one subject and one purpose."""
 
-    subject_id: str = Field(..., min_length=1)
+    subject_id: str = Field(..., min_length=1, max_length=256, pattern=_SUBJECT_ID)
     purpose: str = Field(..., min_length=1, max_length=200)
     notice_version: str = Field(default="", max_length=100)
     evidence: str = Field(default="", max_length=2000)
@@ -211,7 +215,10 @@ async def record_objection(
 
 
 @router.get("/consent/{subject_id}", responses=problem_responses(401, 403))
-async def subject_consent(request: Request, subject_id: str) -> dict[str, Any]:
+async def subject_consent(
+    request: Request,
+    subject_id: str = Path(..., min_length=1, max_length=256, pattern=_SUBJECT_ID),
+) -> dict[str, Any]:
     """Return the subject's active purposes and the Art. 7(1) proof chain."""
     _enforce(request)
     service = get_consent_service()
