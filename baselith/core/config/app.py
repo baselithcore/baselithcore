@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
 from baselith.core.config.environment import is_production_env
+from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +447,7 @@ class AppConfig(BaseSettings):
 _app_config: AppConfig | None = None
 
 
+@overridable(AppConfig)
 def get_app_config() -> AppConfig:
     """
     Retrieve or initialize the global AppConfig instance.

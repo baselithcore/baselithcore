@@ -9,6 +9,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -115,6 +117,7 @@ class ResilienceConfig(BaseSettings):
 _resilience_config: ResilienceConfig | None = None
 
 
+@overridable(ResilienceConfig)
 def get_resilience_config() -> ResilienceConfig:
     """Get or create the global resilience configuration instance."""
     global _resilience_config

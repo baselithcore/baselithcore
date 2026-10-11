@@ -20,6 +20,7 @@ from baselith.core.config._security_parsers import (
     parse_scoped_keys,
 )
 from baselith.core.config._security_posture import check_insecure_defaults
+from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +475,7 @@ class SecurityConfig(BaseSettings):
 _security_config: SecurityConfig | None = None
 
 
+@overridable(SecurityConfig)
 def get_security_config() -> SecurityConfig:
     """Get or create the global security configuration instance."""
     global _security_config

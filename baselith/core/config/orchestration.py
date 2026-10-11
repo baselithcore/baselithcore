@@ -11,6 +11,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from baselith.core.config.overrides import overridable
+
 
 class RouterConfig(BaseSettings):
     """Configuration for the Router."""
@@ -232,6 +234,7 @@ _router_config: RouterConfig | None = None
 _orchestration_config: OrchestrationConfig | None = None
 
 
+@overridable(RouterConfig)
 def get_router_config() -> RouterConfig:
     """Get router configuration."""
     global _router_config
@@ -240,6 +243,7 @@ def get_router_config() -> RouterConfig:
     return _router_config
 
 
+@overridable(OrchestrationConfig)
 def get_orchestration_config() -> OrchestrationConfig:
     """Get orchestration configuration."""
     global _orchestration_config

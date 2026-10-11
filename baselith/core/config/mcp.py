@@ -11,6 +11,8 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 #: Smallest honourable value for ``MCP_MAX_TOOL_RESULT_BYTES``.
@@ -444,6 +446,7 @@ class MCPConfig(BaseSettings):
 _mcp_config: MCPConfig | None = None
 
 
+@overridable(MCPConfig)
 def get_mcp_config() -> MCPConfig:
     """Get or create the global MCP configuration instance."""
     global _mcp_config

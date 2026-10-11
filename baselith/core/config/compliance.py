@@ -17,6 +17,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +72,7 @@ class ComplianceConfig(BaseSettings):
 _compliance_config: ComplianceConfig | None = None
 
 
+@overridable(ComplianceConfig)
 def get_compliance_config() -> ComplianceConfig:
     """Get or create the global compliance configuration instance."""
     global _compliance_config

@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,6 +207,7 @@ class VectorStoreConfig(BaseSettings):
 _vectorstore_config: VectorStoreConfig | None = None
 
 
+@overridable(VectorStoreConfig)
 def get_vectorstore_config() -> VectorStoreConfig:
     """Retrieve or initialize the global VectorStoreConfig singleton."""
     global _vectorstore_config
@@ -216,6 +219,7 @@ def get_vectorstore_config() -> VectorStoreConfig:
     return _vectorstore_config
 
 
+@overridable(VectorStoreConfig)
 def get_vectorstore_config_no_lazy() -> VectorStoreConfig:
     """Non-logging version for bootstrap safety."""
     return get_vectorstore_config()

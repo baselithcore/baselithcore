@@ -11,6 +11,7 @@ import logging
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
 from baselith.core.transparency.disclosure import DEFAULT_DISCLOSURE_TEXT
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class TransparencyConfig(BaseSettings):
 _transparency_config: TransparencyConfig | None = None
 
 
+@overridable(TransparencyConfig)
 def get_transparency_config() -> TransparencyConfig:
     """Get or create the global transparency configuration instance."""
     global _transparency_config

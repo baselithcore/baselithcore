@@ -25,6 +25,7 @@ from baselith.core.config.multimodal import (
     get_vision_config,
     get_voice_config,
 )
+from baselith.core.config.overrides import overridable
 
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
@@ -459,6 +460,7 @@ from baselith.core.config.vectorstore import (  # noqa: E402
 _llm_config: LLMConfig | None = None
 
 
+@overridable(LLMConfig)
 def get_llm_config() -> LLMConfig:
     """Retrieve or initialize the global LLMConfig singleton."""
     global _llm_config

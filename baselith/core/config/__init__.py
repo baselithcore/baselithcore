@@ -47,6 +47,7 @@ from baselith.core.config.orchestration import (
     get_orchestration_config,
     get_router_config,
 )
+from baselith.core.config.overrides import overridable, override_config
 from baselith.core.config.plugin_update_apply import (
     UpdateApplyConfig,
     get_update_apply_config,
@@ -89,6 +90,7 @@ from baselith.core.config.webhooks import WebhookConfig, get_webhook_config
 from baselith.core.config.world_model import WorldModelConfig, get_world_model_config
 
 __all__ = [
+    "override_config",
     "AppConfig",
     "AuctionConfig",
     "CacheConfig",
@@ -170,6 +172,7 @@ __all__ = [
 _task_queue_config: TaskQueueConfig | None = None
 
 
+@overridable(TaskQueueConfig)
 def get_task_queue_config() -> TaskQueueConfig:
     """
     Retrieve the singleton TaskQueueConfig instance.

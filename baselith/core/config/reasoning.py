@@ -10,6 +10,8 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,6 +73,7 @@ class ReasoningConfig(BaseSettings):
 _reasoning_config: ReasoningConfig | None = None
 
 
+@overridable(ReasoningConfig)
 def get_reasoning_config() -> ReasoningConfig:
     """Get or create the global reasoning configuration instance."""
     global _reasoning_config

@@ -6,6 +6,8 @@ Provides centralized configuration for the Reflection agentic design pattern.
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 
 class ReflectionConfig(BaseSettings):
     """Configuration for the Reflection pattern."""
@@ -23,6 +25,7 @@ class ReflectionConfig(BaseSettings):
 _reflection_config: ReflectionConfig | None = None
 
 
+@overridable(ReflectionConfig)
 def get_reflection_config() -> ReflectionConfig:
     """Get or create global Reflection config."""
     global _reflection_config

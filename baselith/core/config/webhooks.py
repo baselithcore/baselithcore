@@ -12,6 +12,8 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +62,7 @@ class WebhookConfig(BaseSettings):
 _webhook_config: WebhookConfig | None = None
 
 
+@overridable(WebhookConfig)
 def get_webhook_config() -> WebhookConfig:
     """Get or create the global webhook configuration instance."""
     global _webhook_config

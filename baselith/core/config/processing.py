@@ -11,6 +11,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
+from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,7 @@ class ProcessingConfig(BaseSettings):
 _processing_config: ProcessingConfig | None = None
 
 
+@overridable(ProcessingConfig)
 def get_processing_config() -> ProcessingConfig:
     """Get or create the global processing configuration instance."""
     global _processing_config

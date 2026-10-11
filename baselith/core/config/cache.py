@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import Field, field_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 # Direct stdlib logger: config modules load before observability is set up.
 logger = logging.getLogger(__name__)
 
@@ -209,6 +211,7 @@ _redis_cache_config: RedisCacheConfig | None = None
 _semantic_cache_config: SemanticCacheConfig | None = None
 
 
+@overridable(CacheConfig)
 def get_cache_config() -> CacheConfig:
     """Get or create global Cache config."""
     global _cache_config
@@ -217,6 +220,7 @@ def get_cache_config() -> CacheConfig:
     return _cache_config
 
 
+@overridable(RedisCacheConfig)
 def get_redis_cache_config() -> RedisCacheConfig:
     """Get or create global Redis Cache config."""
     global _redis_cache_config
@@ -225,6 +229,7 @@ def get_redis_cache_config() -> RedisCacheConfig:
     return _redis_cache_config
 
 
+@overridable(SemanticCacheConfig)
 def get_semantic_cache_config() -> SemanticCacheConfig:
     """Get or create global Semantic Cache config."""
     global _semantic_cache_config

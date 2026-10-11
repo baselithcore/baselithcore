@@ -12,6 +12,8 @@ from functools import lru_cache
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,12 +125,14 @@ class MemoryRuntimeConfig(BaseSettings):
     )
 
 
+@overridable(MemoryRuntimeConfig)
 @lru_cache(maxsize=1)
 def get_memory_runtime_config() -> MemoryRuntimeConfig:
     """Return the singleton MemoryRuntimeConfig instance."""
     return MemoryRuntimeConfig()
 
 
+@overridable(SupermemoryConfig)
 @lru_cache(maxsize=1)
 def get_supermemory_config() -> SupermemoryConfig:
     """Return the singleton SupermemoryConfig instance."""

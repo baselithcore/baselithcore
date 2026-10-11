@@ -20,6 +20,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from baselith.core.config._pg_conninfo import merge_conninfo
 from baselith.core.config._pg_conninfo import transport_params as _transport_params
 from baselith.core.config.environment import is_production_env
+from baselith.core.config.overrides import overridable
 
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
@@ -461,6 +462,7 @@ class StorageConfig(BaseSettings):
 _storage_config: StorageConfig | None = None
 
 
+@overridable(StorageConfig)
 def get_storage_config() -> StorageConfig:
     """Get or create the global storage configuration instance."""
     global _storage_config

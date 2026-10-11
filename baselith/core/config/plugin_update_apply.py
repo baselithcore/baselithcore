@@ -17,6 +17,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
+from baselith.core.config.overrides import overridable
 
 
 class UpdateApplyConfig(BaseSettings):
@@ -125,6 +126,7 @@ class UpdateApplyConfig(BaseSettings):
         return bool(self.restart_command)
 
 
+@overridable(UpdateApplyConfig)
 @lru_cache(maxsize=1)
 def get_update_apply_config() -> UpdateApplyConfig:
     """The cached settings (the updater re-reads nothing else across runs)."""

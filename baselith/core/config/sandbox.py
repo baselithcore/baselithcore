@@ -9,6 +9,8 @@ from typing import Literal, TypeAlias
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 
 class SandboxConfig(BaseSettings):
     """
@@ -118,6 +120,7 @@ SandboxProvider: TypeAlias = Literal["docker", "sbx"]
 _sandbox_config: SandboxConfig | None = None
 
 
+@overridable(SandboxConfig)
 def get_sandbox_config() -> SandboxConfig:
     """Get or create the global sandbox configuration instance."""
     global _sandbox_config

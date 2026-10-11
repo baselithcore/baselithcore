@@ -13,6 +13,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,7 @@ class ThirdPartyRegisterConfig(BaseSettings):
 _register_config: ThirdPartyRegisterConfig | None = None
 
 
+@overridable(ThirdPartyRegisterConfig)
 def get_register_config() -> ThirdPartyRegisterConfig:
     """Get or create the global register-persistence configuration instance."""
     global _register_config

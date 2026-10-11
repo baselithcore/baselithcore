@@ -273,6 +273,37 @@ Most factories use a module-level singleton guard (created on first call). A
 few (e.g. `get_supermemory_config`) use `functools.lru_cache`. Either way, the
 result is a single shared instance per process.
 
+### Scoped overrides (`override_config`)
+
+The shared instance is right for a deployment and wrong for code that needs a
+different configuration for a while: a test, a script that builds two clients
+side by side, an application embedding the framework with its own settings.
+`override_config` injects settings objects for the duration of a `with` block,
+without patching any import path:
+
+```python
+from baselith.core.config import LLMConfig, StorageConfig, override_config
+
+with override_config(LLMConfig(provider="ollama", model="llama3"), StorageConfig()):
+    service = LLMService()  # get_llm_config() returns the injected LLMConfig
+```
+
+- The scope is a `ContextVar`: blocks nest (the inner one wins for the classes
+  it names), asyncio tasks created inside the block inherit it, and concurrent
+  requests or tests never see each other's overrides. `asyncio.to_thread`
+  copies the context; a bare `ThreadPoolExecutor` does not.
+- An override answers for its own class and for every settings class it
+  derives from; an exact-class instance wins over a subclass for its base.
+  Two instances of one class in the same call raise `ValueError`.
+- Outside the block nothing changed: the cached process-wide instance is
+  never replaced.
+- Every accessor in `baselith.core.config` is decorated with
+  `@overridable(<ConfigClass>)` (`baselith.core.config.overrides`), outermost
+  above any `lru_cache`, and `tests/unit/core/config/test_overrides.py` fails
+  if a new `get_*` accessor returning a settings class is not. A value
+  captured at import time (a module-level `x = get_x_config()`) cannot see an
+  override.
+
 ---
 
 ## Configuration Modules

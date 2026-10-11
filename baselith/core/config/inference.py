@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 Backend = Literal["remote", "local"]
 #: Wire protocol of the model server (see baselith/core/services/inference/_protocols.py):
 #: the platform's TEI, or what a customer's own GPUs already expose.
@@ -294,6 +296,7 @@ _rerank: RerankConfig | None = None
 _qdrant: QdrantServerConfig | None = None
 
 
+@overridable(EmbeddingConfig)
 def get_embedding_config() -> EmbeddingConfig:
     """Return the process-wide :class:`EmbeddingConfig`."""
     global _embedding
@@ -302,6 +305,7 @@ def get_embedding_config() -> EmbeddingConfig:
     return _embedding
 
 
+@overridable(RerankConfig)
 def get_rerank_config() -> RerankConfig:
     """Return the process-wide :class:`RerankConfig`."""
     global _rerank
@@ -310,6 +314,7 @@ def get_rerank_config() -> RerankConfig:
     return _rerank
 
 
+@overridable(QdrantServerConfig)
 def get_qdrant_server_config() -> QdrantServerConfig:
     """Return the process-wide :class:`QdrantServerConfig`."""
     global _qdrant

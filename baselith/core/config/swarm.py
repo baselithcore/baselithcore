@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 
 class AuctionConfig(BaseModel):
     """Configuration for task auctions."""
@@ -93,6 +95,7 @@ class SwarmConfig(BaseSettings):
 _swarm_config: SwarmConfig | None = None
 
 
+@overridable(SwarmConfig)
 def get_swarm_config() -> SwarmConfig:
     """Get or create the global swarm configuration instance."""
     global _swarm_config

@@ -9,6 +9,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,6 +98,7 @@ class ChatConfig(BaseSettings):
 _chat_config: ChatConfig | None = None
 
 
+@overridable(ChatConfig)
 def get_chat_config() -> ChatConfig:
     """Retrieve or initialize the global ChatConfig singleton."""
     global _chat_config

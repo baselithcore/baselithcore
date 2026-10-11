@@ -441,6 +441,7 @@
       "get_webhook_config",
       "get_world_model_config",
       "is_production_env",
+      "override_config",
       "register_owned_env",
       "set_web_concurrency",
       "suspected_typos",

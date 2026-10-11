@@ -12,6 +12,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
+from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,7 @@ class ScraperConfig(BaseSettings):
 _scraper_config: ScraperConfig | None = None
 
 
+@overridable(ScraperConfig)
 def get_scraper_config() -> ScraperConfig:
     """Get or create the global scraper configuration instance."""
     global _scraper_config

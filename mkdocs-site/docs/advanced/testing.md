@@ -665,8 +665,7 @@ a test can build an explicit config without touching `os.environ` (mirrors
 `tests/unit/core/config/test_storage_conninfo_leak.py`):
 
 ```python
-from unittest.mock import patch
-
+from baselith.core.config import override_config
 from baselith.core.config.storage import StorageConfig
 
 
@@ -679,16 +678,18 @@ def test_storage_config_from_env_aliases():
 def test_component_sees_the_override():
     config = StorageConfig(CACHE_REDIS_URL="redis://cache:6379/15")
 
-    # Patch the getter where the code under test looks it up
-    with patch("baselith.core.config.storage.get_storage_config", return_value=config):
+    # Every get_*_config() accessor returns the injected instance in the block
+    with override_config(config):
         ...
 ```
 
-The `get_*_config()` getters are cached singletons: patch the getter at the
-import site the code under test actually uses (a component that does
-`from baselith.core.config import get_task_queue_config` inside a method needs
-`patch("baselith.core.config.get_task_queue_config", ...)`, as
-`tests/unit/core/task_queue/test_scheduler.py` does).
+The `get_*_config()` getters are cached singletons. Prefer `override_config`
+(`from baselith.core.config import override_config`) to patching them: it
+works wherever the code under test imported the getter from, and it cannot
+leak into another test. See
+[Config › Scoped overrides](../core-modules/config.md#scoped-overrides-override_config).
+Patching the getter at its import site still works for a test that needs a
+mock rather than a settings object.
 
 ### Test Organization
 

@@ -12,6 +12,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
 # observability infrastructure is fully set up. Direct logging prevents circular dependencies.
@@ -107,6 +109,7 @@ class CoreConfig(BaseSettings):
 _core_config: CoreConfig | None = None
 
 
+@overridable(CoreConfig)
 def get_core_config() -> CoreConfig:
     """
     Retrieve the global singleton instance of CoreConfig.

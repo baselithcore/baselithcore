@@ -17,6 +17,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
+from baselith.core.config.overrides import overridable
 
 
 class GuardrailsSettings(BaseSettings):
@@ -82,6 +83,7 @@ class GuardrailsSettings(BaseSettings):
 _guardrails_settings: GuardrailsSettings | None = None
 
 
+@overridable(GuardrailsSettings)
 def get_guardrails_settings() -> GuardrailsSettings:
     """Get or create the global guardrails settings instance."""
     global _guardrails_settings

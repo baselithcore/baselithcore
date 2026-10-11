@@ -11,6 +11,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +77,7 @@ _per_tenant_cost_overrides: dict[str, tuple[float | None, float | None]] = {}
 _per_key_cost_overrides: dict[str, tuple[float | None, float | None]] = {}
 
 
+@overridable(QuotaConfig)
 def get_quota_config() -> QuotaConfig:
     """Get or create the global quota configuration instance."""
     global _quota_config

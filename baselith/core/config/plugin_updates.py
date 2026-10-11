@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -265,6 +267,7 @@ class PluginUpdateConfig(BaseSettings):
         return self.plugin_checks_enabled or self.system_checks_enabled
 
 
+@overridable(PluginUpdateConfig)
 @lru_cache(maxsize=1)
 def get_plugin_update_config() -> PluginUpdateConfig:
     """Get the cached plugin update configuration.

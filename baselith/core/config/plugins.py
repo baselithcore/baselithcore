@@ -18,6 +18,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
 # observability infrastructure is fully set up. Direct logging prevents circular dependencies.
@@ -207,6 +209,7 @@ class PluginConfig(BaseSettings):
 _plugin_config: PluginConfig | None = None
 
 
+@overridable(PluginConfig)
 def get_plugin_config() -> PluginConfig:
     """Get or create the global plugin configuration instance."""
     global _plugin_config

@@ -14,6 +14,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,6 +98,7 @@ class IncidentReportingConfig(BaseSettings):
 _incident_config: IncidentReportingConfig | None = None
 
 
+@overridable(IncidentReportingConfig)
 def get_incident_config() -> IncidentReportingConfig:
     """Get or create the global incident-reporting configuration instance."""
     global _incident_config

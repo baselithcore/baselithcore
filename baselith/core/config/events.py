@@ -7,6 +7,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +44,7 @@ class EventsConfig(BaseSettings):
 _events_config: EventsConfig | None = None
 
 
+@overridable(EventsConfig)
 def get_events_config() -> EventsConfig:
     """Get or create the global events configuration instance."""
     global _events_config

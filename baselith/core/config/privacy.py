@@ -10,6 +10,8 @@ import logging
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,7 @@ class PrivacyConfig(BaseSettings):
 _privacy_config: PrivacyConfig | None = None
 
 
+@overridable(PrivacyConfig)
 def get_privacy_config() -> PrivacyConfig:
     """Get or create the global privacy configuration instance."""
     global _privacy_config

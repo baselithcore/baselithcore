@@ -25,6 +25,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from baselith.core.config._collections import csv_list
+from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class ObservabilityConfig(BaseSettings):
 _observability_config: ObservabilityConfig | None = None
 
 
+@overridable(ObservabilityConfig)
 def get_observability_config() -> ObservabilityConfig:
     """Get or create the global observability configuration instance."""
     global _observability_config

@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
 # This is intentional: config modules initialize during framework bootstrap, before the
 # observability infrastructure is fully set up. Direct logging prevents circular dependencies.
@@ -313,6 +315,7 @@ _voice_config: VoiceConfig | None = None
 _finetuning_config: FineTuningConfig | None = None
 
 
+@overridable(VisionConfig)
 def get_vision_config() -> VisionConfig:
     """Retrieve or initialize the global Vision configuration."""
     global _vision_config
@@ -321,6 +324,7 @@ def get_vision_config() -> VisionConfig:
     return _vision_config
 
 
+@overridable(VoiceConfig)
 def get_voice_config() -> VoiceConfig:
     """Retrieve or initialize the global Voice configuration."""
     global _voice_config
@@ -329,6 +333,7 @@ def get_voice_config() -> VoiceConfig:
     return _voice_config
 
 
+@overridable(FineTuningConfig)
 def get_finetuning_config() -> FineTuningConfig:
     """Retrieve or initialize the global Fine-tuning configuration."""
     global _finetuning_config

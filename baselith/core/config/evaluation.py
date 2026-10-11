@@ -7,6 +7,8 @@ evaluation and the CI replay runner.
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 
 class EvaluationConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EVAL_")
@@ -39,6 +41,7 @@ class EvaluationConfig(BaseSettings):
 _evaluation_config: EvaluationConfig | None = None
 
 
+@overridable(EvaluationConfig)
 def get_evaluation_config() -> EvaluationConfig:
     """Get or create global Evaluation config."""
     global _evaluation_config

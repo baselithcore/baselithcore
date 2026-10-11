@@ -7,6 +7,8 @@ agent takes against the outside world.
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 
 class WorldModelConfig(BaseSettings):
     """Configuration for World Model and Predictive Planning."""
@@ -44,5 +46,6 @@ class WorldModelConfig(BaseSettings):
     )
 
 
+@overridable(WorldModelConfig)
 def get_world_model_config() -> WorldModelConfig:
     return WorldModelConfig()

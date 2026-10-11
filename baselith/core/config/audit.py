@@ -24,6 +24,8 @@ from typing import Any
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config.overrides import overridable
+
 logger = logging.getLogger(__name__)
 
 #: Statutory floor for audit-log retention (AI Act Art. 19 / Art. 26(6)):
@@ -141,6 +143,7 @@ class AuditConfig(BaseSettings):
 _audit_config: AuditConfig | None = None
 
 
+@overridable(AuditConfig)
 def get_audit_config() -> AuditConfig:
     """Get or create the global audit configuration instance."""
     global _audit_config
