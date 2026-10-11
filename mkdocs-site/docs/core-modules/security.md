@@ -176,6 +176,35 @@ Hardening details baked into the factory:
   gap; pass `limits=httpx.Limits(...)` explicitly to opt back into pooling
   when the caller is a single fixed host.
 
+### `baselith.core.security.bounded_body` {#bounded-bodies}
+
+A byte counter on `httpx.Response.aiter_bytes()` does not bound memory for a
+compressed body: httpx inflates each network chunk whole before yielding it,
+so a few KiB of gzip on the wire become gigabytes before the counter is
+consulted. `aiter_bounded(response, limit)` / `read_bounded(response, limit)`
+read the raw wire bytes and inflate them under the cap instead:
+
+- `identity` (or no `Content-Encoding`) passes through, and an identity
+  `Content-Length` over the cap is refused before the body is read;
+- `gzip` and `deflate` are inflated with `zlib` under a `max_length`, so the
+  decoder never produces more than `limit + 1` bytes;
+- any other encoding (`br`, `zstd`, stacked encodings) raises
+  `UnsupportedEncodingError` before the body is read.
+
+Over the cap raises `BodyTooLargeError`; both derive from `BodyLimitError`
+(a `ValueError`). `read_truncated(response, limit)` keeps the first `limit`
+decoded bytes instead of refusing — for bodies where a prefix is still useful,
+such as `robots.txt`. Requests read this way send
+`Accept-Encoding: BOUNDED_ACCEPT_ENCODING` (`gzip, deflate`), so a server never
+picks an encoding the reader refuses; `decoded_headers(response)` drops
+`Content-Encoding`/`Content-Length` when a buffered response is rebuilt from
+the decoded body.
+
+Every capped reader goes through it: the connector client, the plugin-update
+source, the inference HTTP client, the voice providers, and the `web_scraper`
+and `document_sources` web fetchers. The MCP client keeps its stricter
+identity-only rule (`baselith.core.mcp.bounded_http`).
+
 ### Adopted call sites
 
 Every framework component that fetches an attacker-influenced URL routes

@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from baselith.core.config.scraper import ScraperConfig, get_scraper_config
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    read_truncated,
+)
 
 from ._http_pool import get_robots_client
 from .models import CrawlError, CrawlResult, CrawlStats, ExtractedData, ScrapedPage
@@ -247,17 +251,18 @@ class CrawlEngine:
             async with client.stream(
                 "GET",
                 pinned_url,
-                headers={"Host": original_host},
+                headers={
+                    "Host": original_host,
+                    "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+                },
                 extensions={"sni_hostname": original_host},
             ) as response:
                 if response.status_code != 200:
                     return empty
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) >= ROBOTS_MAX_BYTES:
-                        break
-            text = bytes(body[:ROBOTS_MAX_BYTES]).decode("utf-8", errors="replace")
+                # An oversized robots.txt is cut at the cap, not refused; a
+                # gzip one is inflated only that far.
+                body = await read_truncated(response, ROBOTS_MAX_BYTES)
+            text = body.decode("utf-8", errors="replace")
             rules = parse_robots_txt(text, user_agent=self.config.user_agent)
             self._robots_cache[domain] = rules
             return rules

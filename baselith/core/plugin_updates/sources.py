@@ -12,6 +12,14 @@ import httpx
 import yaml
 from pydantic import SecretStr
 
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyLimitError,
+    BodyTooLargeError,
+    aiter_bounded,
+    decoded_headers,
+)
+
 from ._advisories import parse_advisory
 from ._release_parse import parse_release as _parse_release
 from ._release_parse import text as _text
@@ -135,7 +143,11 @@ class GitHubReleaseSource:
         return self._api_url
 
     def _headers(self, accept: str) -> dict[str, str]:
-        headers = {"Accept": accept, "X-GitHub-Api-Version": _API_VERSION}
+        headers = {
+            "Accept": accept,
+            "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+            "X-GitHub-Api-Version": _API_VERSION,
+        }
         if self._token is not None and self._token.get_secret_value():
             headers["Authorization"] = f"Bearer {self._token.get_secret_value()}"
         return headers
@@ -160,22 +172,17 @@ class GitHubReleaseSource:
                         f"GitHub returned HTTP {response.status_code}",
                         response.status_code,
                     )
-                declared = response.headers.get("content-length", "")
-                if declared.isdigit() and int(declared) > cap:
-                    raise SourceError(f"response is larger than {cap} bytes")
                 body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body += chunk
-                    if len(body) > cap:
-                        raise SourceError(f"response is larger than {cap} bytes")
-                headers = [
-                    (k, v)
-                    for k, v in response.headers.multi_items()
-                    if k.lower() not in ("content-encoding", "content-length")
-                ]
+                try:
+                    async for chunk in aiter_bounded(response, cap):
+                        body += chunk
+                except BodyTooLargeError as exc:
+                    raise SourceError(f"response is larger than {cap} bytes") from exc
+                except BodyLimitError as exc:
+                    raise SourceError(str(exc)) from exc
                 return httpx.Response(
                     response.status_code,
-                    headers=headers,
+                    headers=decoded_headers(response),
                     content=bytes(body),
                     request=response.request,
                 )
@@ -443,18 +450,17 @@ class GitHubReleaseSource:
                         f"GitHub returned HTTP {response.status_code}",
                         response.status_code,
                     )
-                declared = response.headers.get("content-length", "")
-                if declared.isdigit() and int(declared) > cap:
-                    raise SourceError(too_large)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     with dest.open("wb") as fh:
-                        written = 0
-                        async for chunk in response.aiter_bytes():
-                            written += len(chunk)
-                            if written > cap:
-                                raise SourceError(too_large)
+                        async for chunk in aiter_bounded(response, cap):
                             fh.write(chunk)
+                except BodyLimitError as exc:
+                    _discard(dest)
+                    message = (
+                        too_large if isinstance(exc, BodyTooLargeError) else str(exc)
+                    )
+                    raise SourceError(message) from exc
                 except BaseException:
                     _discard(dest)
                     raise

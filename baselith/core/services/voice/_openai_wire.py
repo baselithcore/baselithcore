@@ -21,8 +21,10 @@ from typing import Any
 import httpx
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.bounded_body import BOUNDED_ACCEPT_ENCODING
 from baselith.core.security.http import create_hardened_async_client
 from baselith.core.security.ssrf import SsrfError, SsrfPolicy
+from baselith.core.services.voice._http_providers import read_voice_body
 from baselith.core.services.voice.errors import (
     VoiceEgressError,
     VoiceInputError,
@@ -132,9 +134,9 @@ class OpenAIWireClient:
         return audio
 
     async def _post(self, target: WireTarget, path: str, **kwargs: Any) -> bytes:
-        headers = (
-            {"Authorization": f"Bearer {target.api_key}"} if target.api_key else {}
-        )
+        headers = {"Accept-Encoding": BOUNDED_ACCEPT_ENCODING}
+        if target.api_key:
+            headers["Authorization"] = f"Bearer {target.api_key}"
         url = target.base_url.rstrip("/") + path
         secrets = target.secrets()
         try:
@@ -158,15 +160,7 @@ class OpenAIWireClient:
             raise VoiceUpstreamError("the voice server could not be reached") from None
 
     async def _read(self, response: httpx.Response) -> bytes:
-        declared = response.headers.get("content-length", "")
-        if declared.isdigit() and int(declared) > self._max_response:
-            raise VoiceLimitError("the response exceeds the size cap")
-        body = bytearray()
-        async for chunk in response.aiter_bytes():
-            body += chunk
-            if len(body) > self._max_response:
-                raise VoiceLimitError("the response exceeds the size cap")
-        return bytes(body)
+        return await read_voice_body(response, self._max_response)
 
     @staticmethod
     def _status_error(status: int) -> VoiceUpstreamError | VoiceLimitError:

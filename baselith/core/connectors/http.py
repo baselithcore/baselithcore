@@ -49,6 +49,13 @@ from baselith.core.connectors.errors import (
 )
 from baselith.core.connectors.types import ConnectorSpec
 from baselith.core.resilience import CircuitBreakerError, get_circuit_breaker, retry
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyTooLargeError,
+    UnsupportedEncodingError,
+    aiter_bounded,
+    decoded_headers,
+)
 from baselith.core.security.http import (
     SsrfBlockingTransport,
     create_hardened_async_client,
@@ -222,39 +229,34 @@ class ConnectorHttp:
 
     async def _read_capped(
         self, method: str, url: str, **kwargs: Any
-    ) -> httpx.Response | ConnectorResponseTooLargeError:
+    ) -> httpx.Response | ConnectorError:
         """Send and read the body through the cap; never buffers past it.
 
-        The body is streamed and assembled into a plain buffered
-        ``httpx.Response`` the callers can use as usual; ``Content-Encoding``
-        and ``Content-Length`` are dropped from the copy because the chunks
-        were decoded on the way in.
+        The body is streamed — and, when compressed, inflated under the cap
+        (:mod:`baselith.core.security.bounded_body`) — then assembled into a
+        plain buffered ``httpx.Response`` the callers can use as usual;
+        ``Content-Encoding`` and ``Content-Length`` are dropped from the copy
+        because the chunks were decoded on the way in.
         """
         cap = self._spec.max_response_bytes
-        too_large = ConnectorResponseTooLargeError(
-            self._spec.name, f"response body exceeds {cap} bytes"
-        )
         request = self.client.build_request(method, url, **kwargs)
+        request.headers["Accept-Encoding"] = BOUNDED_ACCEPT_ENCODING
         response = await self.client.send(request, stream=True)
+        body = bytearray()
         try:
-            declared = response.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > cap:
-                return too_large
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
+            async for chunk in aiter_bounded(response, cap):
                 body += chunk
-                if len(body) > cap:
-                    return too_large
+        except BodyTooLargeError:
+            return ConnectorResponseTooLargeError(
+                self._spec.name, f"response body exceeds {cap} bytes"
+            )
+        except UnsupportedEncodingError as exc:
+            return ConnectorError(self._spec.name, str(exc))
         finally:
             await response.aclose()
-        headers = [
-            (k, v)
-            for k, v in response.headers.multi_items()
-            if k.lower() not in ("content-encoding", "content-length")
-        ]
         return httpx.Response(
             response.status_code,
-            headers=headers,
+            headers=decoded_headers(response),
             content=bytes(body),
             request=request,
         )

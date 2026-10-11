@@ -18,6 +18,12 @@ from typing import Any
 import orjson
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyTooLargeError,
+    UnsupportedEncodingError,
+    read_bounded,
+)
 from baselith.core.services.voice.errors import (
     VoiceLimitError,
     VoiceTimeoutError,
@@ -53,7 +59,10 @@ class HttpProviders:
 
         cfg = self._config()
         client = self._get_http_client()
-        headers = {"X-Goog-Api-Key": self._google_key()}
+        headers = {
+            "X-Goog-Api-Key": self._google_key(),
+            "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+        }
         max_bytes = int(cfg.max_response_bytes)
         try:
             async with asyncio.timeout(float(cfg.timeout_seconds)):
@@ -67,7 +76,7 @@ class HttpProviders:
                             f"the voice server answered HTTP {response.status_code}",
                             status=int(response.status_code),
                         )
-                    body = await _read_capped(response, max_bytes)
+                    body = await read_voice_body(response, max_bytes)
                 finally:
                     await response.aclose()
         except (TimeoutError, httpx.TimeoutException):
@@ -171,17 +180,18 @@ class HttpProviders:
         )
 
 
-async def _read_capped(response: Any, max_bytes: int) -> bytes:
-    """Read a streamed body, abandoning it as soon as it crosses ``max_bytes``."""
-    declared = response.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > max_bytes:
-        raise VoiceLimitError("the response exceeds the size cap")
-    body = bytearray()
-    async for chunk in response.aiter_bytes():
-        body += chunk
-        if len(body) > max_bytes:
-            raise VoiceLimitError("the response exceeds the size cap")
-    return bytes(body)
+async def read_voice_body(response: Any, max_bytes: int) -> bytes:
+    """Read a streamed body, abandoning it as soon as it crosses ``max_bytes``.
+
+    A compressed body is inflated under the cap
+    (:mod:`baselith.core.security.bounded_body`), never expanded first.
+    """
+    try:
+        return await read_bounded(response, max_bytes)
+    except BodyTooLargeError:
+        raise VoiceLimitError("the response exceeds the size cap") from None
+    except UnsupportedEncodingError as exc:
+        raise VoiceUpstreamError(str(exc)) from None
 
 
-__all__ = ["HttpProviders"]
+__all__ = ["HttpProviders", "read_voice_body"]

@@ -310,6 +310,30 @@ async def test_compressed_body_survives_the_capped_read(spec, recorder):
     await http.aclose()
 
 
+async def test_a_gzip_bomb_is_cut_on_its_decoded_size(spec, recorder):
+    """httpx inflates a whole chunk before a counter on aiter_bytes sees it;
+    the connector must stop inflating at the cap instead."""
+    import gzip
+
+    from baselith.core.connectors import ConnectorResponseTooLargeError
+
+    bomb = gzip.compress(b"\0" * (16 * 1024 * 1024))
+
+    async def wire() -> AsyncIterator[bytes]:
+        yield bomb
+
+    rec = recorder(
+        httpx.Response(
+            200, stream=_AsyncStream(wire()), headers={"Content-Encoding": "gzip"}
+        )
+    )
+    http = _http(replace(spec, max_response_bytes=1024), rec)
+    with pytest.raises(ConnectorResponseTooLargeError):
+        await http.request("GET", "https://api.acme.test/bomb")
+    assert rec.requests[0].headers["Accept-Encoding"] == "gzip, deflate"
+    await http.aclose()
+
+
 async def test_overall_deadline_bounds_a_dripping_response(spec, recorder):
     import asyncio
 

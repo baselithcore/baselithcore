@@ -213,7 +213,10 @@ are small JSON documents: every metadata response and the `release.json`
 download are read through a **1 MiB** cap (`MAX_TEXT_FILE_BYTES`), streamed and
 cut off past it rather than buffered, so a compromised or misbehaving API host
 cannot exhaust the checker. Tarballs keep the separate
-`PLUGIN_UPDATE_MAX_ARTIFACT_MB` cap.
+`PLUGIN_UPDATE_MAX_ARTIFACT_MB` cap. Both caps count decoded bytes while a
+gzip/deflate body is inflated, so a compressed response cannot expand past
+them; any other `Content-Encoding` is refused
+([bounded bodies](security.md#bounded-bodies)).
 
 The signing key never leaves the maintainers, so a tag pushed by anyone else
 fails rule 3. Keep it off CI runners whose secrets anyone with push access can

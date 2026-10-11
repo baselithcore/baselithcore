@@ -17,6 +17,11 @@ import httpx
 
 from baselith.core.config import get_processing_config
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyLimitError,
+    read_bounded,
+)
 from baselith.core.security.http import create_hardened_async_client
 from baselith.core.security.ssrf import SsrfError, assert_url_safe_async
 
@@ -141,6 +146,7 @@ class WebDocumentSource:
                 "User-Agent": self._user_agent,
                 "Accept": "text/html,application/xhtml+xml;q=0.9",
                 "Accept-Language": "it,it-IT;q=0.9,en;q=0.8",
+                "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
             },
             follow_redirects=False,
             timeout=timeout_config,
@@ -323,18 +329,15 @@ class WebDocumentSource:
 
     @staticmethod
     async def _read_capped(response: httpx.Response, url: str) -> bytes | None:
-        """Read a streamed body, refusing it past the size cap."""
-        declared = response.headers.get("Content-Length", "")
-        if declared.isdigit() and int(declared) > WEB_DOCUMENTS_MAX_BODY_BYTES:
-            logger.warning(f"[web-source] Body too large on {url}: {declared}")
+        """Read a streamed body, refusing it past the size cap.
+
+        A compressed body is inflated under the cap, never expanded first.
+        """
+        try:
+            return await read_bounded(response, WEB_DOCUMENTS_MAX_BODY_BYTES)
+        except BodyLimitError as exc:
+            logger.warning(f"[web-source] Body refused on {url}: {exc}")
             return None
-        body = bytearray()
-        async for chunk in response.aiter_bytes():
-            body.extend(chunk)
-            if len(body) > WEB_DOCUMENTS_MAX_BODY_BYTES:
-                logger.warning(f"[web-source] Body too large on {url}")
-                return None
-        return bytes(body)
 
     def _playwright_page(self):
         """Context manager for Playwright page."""

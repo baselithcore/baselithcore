@@ -1991,7 +1991,10 @@ without echoing the path.
 **Google.** The Google Cloud TTS/STT calls carry the API key in the
 `X-Goog-Api-Key` header, never in the URL, so it cannot surface in an HTTP error
 message or a log line. They run under the same `VOICE_TIMEOUT_SECONDS` deadline,
-stream the response and abandon it at `VOICE_MAX_RESPONSE_BYTES`, and fail with
+stream the response and abandon it at `VOICE_MAX_RESPONSE_BYTES` (counted on
+the decoded body as a gzip/deflate response is inflated; every voice provider
+and the inference HTTP client read through
+[bounded bodies](security.md#bounded-bodies)), and fail with
 the typed `VoiceError` family (`upstream_failed`, `timeout`, `too_large`) without
 embedding the response body.
 

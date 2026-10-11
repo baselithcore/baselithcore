@@ -12,6 +12,13 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyLimitError,
+    BodyTooLargeError,
+    read_bounded,
+)
+
 from ..models import ScrapedPage
 from ..utils import get_pinned_url_for_host
 from .base import BaseFetcher, FetchError
@@ -52,7 +59,7 @@ class HttpxFetcher(BaseFetcher):
                     "User-Agent": self.config.user_agent,
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.5",
-                    "Accept-Encoding": "gzip, deflate",
+                    "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
                 },
                 limits=httpx.Limits(
                     max_connections=self.config.max_connections,
@@ -147,15 +154,20 @@ class HttpxFetcher(BaseFetcher):
                             status_code=413,
                         )
 
-                    content_bytes = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        content_bytes.extend(chunk)
-                        if len(content_bytes) > max_size_bytes:
-                            raise FetchError(
-                                url=url,
-                                message=f"Response too large: exceeds {max_size_bytes} limit",
-                                status_code=413,
-                            )
+                    # Inflated under the cap: a gzip body is bounded on its
+                    # decoded size, not expanded whole first.
+                    try:
+                        content_bytes = await read_bounded(response, max_size_bytes)
+                    except BodyTooLargeError as exc:
+                        raise FetchError(
+                            url=url,
+                            message=f"Response too large: exceeds {max_size_bytes} limit",
+                            status_code=413,
+                        ) from exc
+                    except BodyLimitError as exc:
+                        raise FetchError(
+                            url=url, message=str(exc), status_code=415
+                        ) from exc
 
                     final_html = content_bytes.decode("utf-8", errors="replace")
                     # Scraped pages are untrusted: scan for indirect prompt

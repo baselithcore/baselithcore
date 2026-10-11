@@ -14,6 +14,12 @@ from urllib.parse import urlsplit
 import httpx
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.bounded_body import (
+    BOUNDED_ACCEPT_ENCODING,
+    BodyLimitError,
+    BodyTooLargeError,
+    read_bounded,
+)
 from baselith.core.services.inference.errors import InferenceConfigError, InferenceError
 
 logger = get_logger(__name__)
@@ -159,22 +165,18 @@ class RemoteClient:
         request = self._client.build_request(
             "POST", path, json=payload, timeout=httpx.Timeout(timeout)
         )
+        request.headers["Accept-Encoding"] = BOUNDED_ACCEPT_ENCODING
         response = await self._client.send(request, stream=True)
         try:
             if response.status_code >= 400:
                 return response.status_code
-            declared = response.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > self._max_bytes:
-                raise InferenceError(
-                    f"POST {path}: response larger than {self._max_bytes} bytes"
-                )
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                body += chunk
-                if len(body) > self._max_bytes:
-                    raise InferenceError(
-                        f"POST {path}: response larger than {self._max_bytes} bytes"
-                    )
+            body = await read_bounded(response, self._max_bytes)
+        except BodyTooLargeError as exc:
+            raise InferenceError(
+                f"POST {path}: response larger than {self._max_bytes} bytes"
+            ) from exc
+        except BodyLimitError as exc:
+            raise InferenceError(f"POST {path}: {exc}") from exc
         finally:
             await response.aclose()
         try:

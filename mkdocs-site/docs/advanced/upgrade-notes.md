@@ -313,6 +313,20 @@ compressed body would be inflated in memory before any cap could see it.
 `MCP_CLIENT_MAX_ITEMS`. `baselith.core.mcp.bounded_http.check_declared_length`
 is now `check_response_headers`.
 
+### Other capped HTTP readers refuse brotli and zstd
+
+The connector client, the plugin-update source, the inference HTTP client,
+the voice providers and the `web_scraper` / `document_sources` fetchers read
+bodies through `baselith.core.security.bounded_body`: they send
+`Accept-Encoding: gzip, deflate`, inflate gzip/deflate under their size cap
+(a compressed body used to be expanded whole before the cap saw it), and
+refuse any other `Content-Encoding` before reading the body.
+
+**What can break:** a server that answers with `br` or `zstd` regardless of
+`Accept-Encoding` — the call now fails (`ConnectorError`, `SourceError`,
+`InferenceError`, `VoiceUpstreamError`, `FetchError` 415, or a skipped page)
+instead of succeeding.
+
 ---
 
 ## Supply chain

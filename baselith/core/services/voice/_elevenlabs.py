@@ -28,6 +28,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.security.bounded_body import BOUNDED_ACCEPT_ENCODING, read_bounded
 from baselith.core.security.http import create_hardened_async_client
 from baselith.core.security.ssrf import SsrfError, SsrfPolicy
 from baselith.core.services.voice._elevenlabs_errors import KNOWN_STATUS, Kind, classify
@@ -36,6 +37,7 @@ from baselith.core.services.voice._elevenlabs_payload import (
     is_stitched,
     speech_payload,
 )
+from baselith.core.services.voice._http_providers import read_voice_body
 from baselith.core.services.voice.errors import (
     VoiceEgressError,
     VoiceError,
@@ -365,7 +367,10 @@ class ElevenLabsClient:
         kind: Kind,
         **kwargs: Any,
     ) -> tuple[bytes, httpx.Headers]:
-        headers = {"xi-api-key": target.api_key}
+        headers = {
+            "xi-api-key": target.api_key,
+            "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+        }
         url = self._base + path
         try:
             async with asyncio.timeout(self._timeout):
@@ -421,28 +426,17 @@ class ElevenLabsClient:
 
     async def _detail(self, response: httpx.Response) -> str | None:
         """The whitelisted ``detail.status`` of an error body; everything else is dropped."""
-        body = bytearray()
         try:
-            async for chunk in response.aiter_bytes():
-                body += chunk
-                if len(body) > _ERROR_BODY_MAX:
-                    return None
-            detail = json.loads(bytes(body)).get("detail")
+            # A BodyLimitError (too large, unbounded encoding) is a ValueError.
+            body = await read_bounded(response, _ERROR_BODY_MAX)
+            detail = json.loads(body).get("detail")
         except (ValueError, AttributeError, httpx.HTTPError):
             return None
         status = detail.get("status") if isinstance(detail, dict) else None
         return status if isinstance(status, str) and status in KNOWN_STATUS else None
 
     async def _read(self, response: httpx.Response) -> bytes:
-        declared = response.headers.get("content-length", "")
-        if declared.isdigit() and int(declared) > self._max_response:
-            raise VoiceLimitError("the response exceeds the size cap")
-        body = bytearray()
-        async for chunk in response.aiter_bytes():
-            body += chunk
-            if len(body) > self._max_response:
-                raise VoiceLimitError("the response exceeds the size cap")
-        return bytes(body)
+        return await read_voice_body(response, self._max_response)
 
 
 __all__ = [

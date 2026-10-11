@@ -179,7 +179,7 @@ able to exhaust a worker. Three `ConnectorSpec` fields bound one attempt:
 |---|---|---|
 | `timeout_s` | `30.0` | httpx per-phase timeout (connect, read, write, pool) |
 | `deadline_s` | `120.0` | The whole attempt, headers and body included. A per-phase read timeout never fires on a body that drips one byte at a time; this does. Must be at least `timeout_s`. |
-| `max_response_bytes` | `8 * 1024 * 1024` (8 MiB) | The response body. A declared `Content-Length` above it is refused before reading; otherwise the body is streamed and cut off past the cap, never buffered. Must be at least `1`. |
+| `max_response_bytes` | `8 * 1024 * 1024` (8 MiB) | The response body. A declared `Content-Length` above it is refused before reading; otherwise the body is streamed and cut off past the cap, never buffered. A gzip/deflate body is capped on its decoded size while it is inflated, and any other `Content-Encoding` is refused ([bounded bodies](security.md#bounded-bodies)). Must be at least `1`. |
 
 The body is assembled into an ordinary buffered `httpx.Response`, so connector
 code reads it as before; `Content-Encoding` and `Content-Length` are dropped

@@ -168,8 +168,9 @@ class _StreamingResponse:
         self.status_code = status_code
         self._chunks = chunks
         self.bytes_served = 0
+        self.headers: dict[str, str] = {}
 
-    async def aiter_bytes(self):
+    async def aiter_raw(self):
         for chunk in self._chunks:
             self.bytes_served += len(chunk)
             yield chunk
@@ -209,7 +210,10 @@ async def test_robots_fetch_is_pinned_to_the_verified_ip(mock_config):
 
     method, url, kwargs = client.calls[0]
     assert url == "http://93.184.216.34/robots.txt"
-    assert kwargs["headers"] == {"Host": "example.com"}
+    assert kwargs["headers"] == {
+        "Host": "example.com",
+        "Accept-Encoding": "gzip, deflate",
+    }
     assert kwargs["extensions"] == {"sni_hostname": "example.com"}
     assert rules["disallow"] == ["/x"]
 
