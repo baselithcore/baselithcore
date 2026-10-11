@@ -186,7 +186,7 @@ elided):
 │          │                     │                                │ postgres                       │
 │ ✅ PASS  │ GraphDB             │ Connected (localhost:6379)     │                                │
 │ ✅ PASS  │ Telemetry           │ Disabled                       │                                │
-│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 013_online_eval_results   │
+│ ✅ PASS  │ DB Migrations       │ Run during application startup │ Head 014_checkpoint_leases     │
 │          │                     │                                │ . For predictable startup,     │
 │          │                     │                                │ prefer false and run: baselith │
 │          │                     │                                │ db migrate                     │

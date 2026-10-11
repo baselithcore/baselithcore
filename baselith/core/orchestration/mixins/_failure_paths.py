@@ -11,6 +11,10 @@ Three ways out of the handler, three different obligations:
   stayed ``running`` until the stale sweep noticed, half an hour later. Record
   it, then **re-raise**: swallowing a cancellation breaks structured
   concurrency (the awaiting task never learns it was cancelled).
+* **Checkpoint conflict** — another executor wrote the run (it claimed the
+  lease after this attempt lost it, or the stale sweep failed it). This copy
+  is stale: nothing is written — a ``fail()`` would clobber the newer state —
+  and the caller gets an error result.
 * **Anything else** — mark the checkpoint failed but keep it, so the run stays
   resumable and its completed tool steps replay instead of re-executing.
 
@@ -24,6 +28,7 @@ import time
 from typing import Any
 
 from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 from baselith.core.orchestration.limits import BudgetExceededError
 from baselith.core.orchestration.run_events import EventType, publish_run_event
 
@@ -39,6 +44,7 @@ logger = get_logger(__name__)
 __all__ = [
     "handle_budget_exceeded",
     "handle_cancellation",
+    "handle_checkpoint_conflict",
     "handle_handler_error",
 ]
 
@@ -55,7 +61,11 @@ async def handle_budget_exceeded(
         extra={"intent": intent, "reason": exc.reason, "snapshot": str(exc.snapshot)},
     )
     if checkpoint_mgr is not None:
-        await checkpoint_mgr.fail(f"budget_exceeded: {exc.reason}")
+        try:
+            await checkpoint_mgr.fail(f"budget_exceeded: {exc.reason}")
+        except CheckpointConflictError as conflict:
+            # Someone else owns the run now; their state is the one to keep.
+            logger.warning("budget_exceeded_not_recorded error=%s", conflict)
     publish_run_event(
         events_run_id,
         EventType.ERROR,
@@ -95,6 +105,23 @@ async def handle_cancellation(
         except BaseException as exc:
             logger.warning("Failed to persist checkpoint cancellation: %s", exc)
     publish_run_event(events_run_id, EventType.ERROR, {"error": "cancelled"})
+
+
+def handle_checkpoint_conflict(
+    exc: Exception, intent: str | None, events_run_id: str | None
+) -> dict[str, Any]:
+    """Stop a run whose checkpoint moved on underneath it; write nothing."""
+    logger.warning(
+        "checkpoint_conflict_run_stopped",
+        extra={"intent": intent, "run_id": events_run_id, "error": str(exc)},
+    )
+    publish_run_event(events_run_id, EventType.ERROR, {"error": "checkpoint_conflict"})
+    return {
+        "response": "Request stopped: this run is being executed elsewhere.",
+        "intent": intent,
+        "error": True,
+        "checkpoint_conflict": True,
+    }
 
 
 async def handle_handler_error(

@@ -121,7 +121,12 @@ The `ReActAgent` implements the **Thought/Action/Observation** loop. It allows t
     `TOT_STRATEGY` default) run Tree of Thoughts. An unknown value is rejected
     with `error: True` and `metadata["error"] == "unsupported_strategy"`; a
     tool strategy whose inputs are missing falls back to Tree of Thoughts with
-    a warning. `metadata["strategy"]` always names the strategy that actually
+    a warning — except on a **resumed** run whose persisted tools could not be
+    rebuilt (no [`set_resume_tool_resolver`](orchestration.md#durable-checkpointing-resume)
+    match): that answers `error: True` with
+    `metadata["error"] == "resume_tools_unresolved"` and the missing names,
+    because a different engine would be a different run.
+    `metadata["strategy"]` always names the strategy that actually
     ran, and `metadata["requested_strategy"]` records a request that was not
     honoured. Both engines are reachable through the orchestrator, not only
     standalone.

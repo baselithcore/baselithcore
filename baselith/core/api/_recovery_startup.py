@@ -7,7 +7,15 @@ therefore wrapped in the Redis-backed
 :class:`~baselith.core.resilience.distributed_lock.DistributedLock` when the cache
 backend is Redis; a worker that loses the non-blocking race skips the sweep
 entirely. Without Redis (single-node/local cache mode) the sweep runs
-unguarded, which is safe for a single process.
+unguarded.
+
+That sweep-wide lock is an optimisation, not the safety mechanism: it saves
+replicas from scanning the same page in parallel. What keeps a run from being
+executed twice is the per-run lease
+(:mod:`baselith.core.orchestration.checkpoint_lease`) — a resume claims the run
+with a conditional update before anything executes, and only one claimant can
+win. So the lock failing open (Redis down) costs duplicate scans, never a
+duplicate run.
 """
 
 from __future__ import annotations
@@ -122,17 +130,21 @@ async def stale_sweep_loop(
 def _schedule_recovery_sweep(
     checkpoint_store: Any, background_tasks: set[asyncio.Task[Any]]
 ) -> None:
-    """Start the recovery sweep loop when ``checkpoint_resume_on_startup``.
+    """Start the recovery sweep loop when auto resume is on.
 
+    ``checkpoint_resume_on_startup`` unset means on for a durable store
+    (postgres/sqlite), off for memory — see
+    :func:`~baselith.core.orchestration.checkpoint_factory.auto_resume_enabled`.
     With resume off, a fail-only loop runs instead (unless
     ``recovery_stale_sweep_enabled`` is off): nothing is re-entered, but a run
     a crash left ``running`` is marked failed once it has been silent for
     ``recovery_stale_after_seconds`` rather than staying orphaned forever.
     """
     from baselith.core.config.orchestration import get_orchestration_config
+    from baselith.core.orchestration.checkpoint_factory import auto_resume_enabled
 
     config = get_orchestration_config()
-    if not config.checkpoint_resume_on_startup:
+    if not auto_resume_enabled(checkpoint_store):
         if config.recovery_stale_sweep_enabled:
             _register(
                 asyncio.create_task(
@@ -152,9 +164,9 @@ def _schedule_recovery_sweep(
 
         logger.info(
             "🧬 Crash recovery sweeps every %.0fs "
-            "(resume after %.0fs idle, fail after %.0fs)",
+            "(resume once a run's %.0fs lease expires, fail after %.0fs silent)",
             config.recovery_sweep_interval_seconds,
-            config.recovery_resume_after_seconds,
+            config.checkpoint_lease_seconds,
             config.recovery_stale_after_seconds,
         )
         await recovery_sweep_loop(
@@ -208,8 +220,9 @@ async def start_checkpoint_recovery(
     """Init the shared checkpoint store and schedule the recovery sweeps.
 
     No-op unless ``ORCHESTRATOR_CHECKPOINT_ENABLED``. Resuming interrupted
-    runs additionally requires ``checkpoint_resume_on_startup``; without it
-    only the stale-run sweep runs (:func:`stale_sweep_loop`). The sweep task is registered in
+    runs additionally requires auto resume (``checkpoint_resume_on_startup``,
+    on by default for a durable store); without it only the stale-run sweep
+    runs (:func:`stale_sweep_loop`). The sweep task is registered in
     ``background_tasks`` so the event loop cannot garbage-collect it, and it
     is cancelled with the rest of them at shutdown.
 

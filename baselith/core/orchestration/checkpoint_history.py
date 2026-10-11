@@ -106,7 +106,7 @@ async def fork_run(
 ) -> Checkpoint | None:
     """Fork a run from its state at ``version`` into a fresh resumable run.
 
-    The fork keeps the source's query/intent/budget and — crucially — the
+    The fork keeps the source's query/intent/budget/inputs and — crucially — the
     ``steps`` idempotency map recorded up to the snapshot, so
     ``process(run_id=<fork>, resume=True)`` replays those steps without
     re-executing side effects and diverges live after the fork point.
@@ -131,6 +131,7 @@ async def fork_run(
         trajectory=snapshot.trajectory,
         plugin_data=snapshot.plugin_data,
         steps=snapshot.steps,
+        inputs=snapshot.inputs,
     )
     await store.save(fork)
     logger.info(

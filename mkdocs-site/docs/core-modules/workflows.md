@@ -211,7 +211,10 @@ dialect — `async run(inputs)` returning a `CrewResult` — so
 `baselith.core.workflows`) bridges it onto the contract: the node's prompt is bound
 under `input_key` (default `"input"`, referenced by task descriptions as
 `{input}`), and `CrewResult.final` becomes the node output. A whole crew then
-composes into a graph — and inherits durable execution — as one node:
+composes into a graph as one node. Durable execution applies at **node
+granularity**: a completed crew node replays its recorded output on resume,
+but a crash *inside* the crew re-runs the whole crew node — the crew's own
+tasks are not checkpointed one by one:
 
 ```python
 from baselith.core.agent import Agent, Crew, Task
@@ -277,9 +280,13 @@ result = await executor.execute(wf, initial_input="Q3 error-rate spike")
 ```
 
 With `CrewNodeAdapter` and `ColonyNodeAdapter` together, both multi-agent
-primitives compose into graphs (and inherit durable execution): a **crew**
-node when the collaboration is a fixed task pipeline, a **colony** node when
-the executing agent should be chosen by the auction per task.
+primitives compose into graphs: a **crew** node when the collaboration is a
+fixed task pipeline, a **colony** node when the executing agent should be
+chosen by the auction per task. In [durable mode](#durable-execution-checkpoint-replay)
+either is **one recorded step**: once the node completes its output replays on
+resume, but a crash while it is running re-executes the whole node — every
+crew task, or the colony auction and its `execute_fn` — so side effects
+inside it are only as idempotent as the code they call.
 
 ### Execution Features
 

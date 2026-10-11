@@ -48,12 +48,17 @@ if TYPE_CHECKING:  # pragma: no cover - the eager view, for type checkers
         ApprovalPrincipal,
         record_approval_decision,
     )
+    from .checkpoint_errors import (
+        CheckpointConflictError,
+        CheckpointLeaseHeldError,
+    )
     from .checkpoint_history import (
         fork_run,
         get_state,
         get_state_history,
         list_runs,
     )
+    from .checkpoint_inputs import set_resume_tool_resolver
     from .handlers import (
         BaseFlowHandler,
         BaseStreamHandler,
@@ -121,6 +126,8 @@ _EXPORTS: Final[dict[str, str]] = {
     "BaseFlowHandler": "handlers",
     "BaseStreamHandler": "handlers",
     "Checkpoint": "checkpoint",
+    "CheckpointConflictError": "checkpoint_errors",
+    "CheckpointLeaseHeldError": "checkpoint_errors",
     "CheckpointManager": "checkpoint",
     "CheckpointStore": "checkpoint",
     "ExecutionPlan": "parallel",
@@ -152,6 +159,7 @@ _EXPORTS: Final[dict[str, str]] = {
     "recovery_sweep_loop": "recovery",
     "run_recovery_cycle": "recovery",
     "sanitize_tool_output": "tool_output",
+    "set_resume_tool_resolver": "checkpoint_inputs",
     "set_run_event_broadcaster": "run_events",
     "step_key": "checkpoint",
     "stream_run_events": "run_events",
@@ -193,6 +201,9 @@ __all__ = [
     "InMemoryCheckpointStore",
     "list_runs",
     "step_key",
+    "CheckpointConflictError",
+    "CheckpointLeaseHeldError",
+    "set_resume_tool_resolver",
     # State history / time-travel
     "fork_run",
     "get_state",

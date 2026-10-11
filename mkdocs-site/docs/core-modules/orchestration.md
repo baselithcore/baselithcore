@@ -806,9 +806,10 @@ retry. `baselith/core/orchestration/checkpoint.py` adds a durable checkpoint (wi
 by default in the app — see
 [below](#on-by-default-orchestrator_checkpoint_enabled-and-the-approvals-api)): a
 JSON-serializable snapshot of run state (query, intent, budget, trajectory,
-per-step results) persisted to a pluggable `CheckpointStore`, plus a
-`CheckpointManager` that makes each tool step idempotent via deterministic
-replay (modelled on LangGraph's checkpointer / Temporal's event history).
+plugin data, the request inputs, per-step results) persisted to a pluggable
+`CheckpointStore`, plus a `CheckpointManager` that makes each tool step
+idempotent via deterministic replay (modelled on LangGraph's checkpointer /
+Temporal's event history).
 
 Wire a store into the orchestrator; `process()` then persists run state and
 supports `resume`:
@@ -828,6 +829,83 @@ await orch.process("analyze X", run_id="run-42")
 # counters continue from the snapshot instead of resetting.
 await orch.process("analyze X", run_id="run-42", resume=True)
 ```
+
+**What a crash keeps, and what a resume restores.** Every step save writes the
+whole run state except the two collections that grow per step, to which it
+appends — so the stored run after step *n* is exactly what a full save would
+have written, on every backend:
+
+| Restored on resume | Not restored |
+|--------------------|--------------|
+| Recorded tool results (replayed, never re-executed) | Work in flight when the process died: a step whose result was not yet saved runs again (the [tool ledger](#cross-process-tool-idempotency-idempotencypy) is what dedupes an effectful one) |
+| Budget counters — iterations, tool calls, cost, tokens, context tokens — as of the last step save (the `LoopBudget` snapshot rides on every save, not only on completion) | The wall-clock deadline (`ORCHESTRATOR_LOOP_MAX_SECONDS`): it is per attempt and restarts |
+| Classified intent, `plugin_data`, trajectory, step counter | Live objects: tool callables, the memory manager, approval channels — rebuilt by the resuming process |
+| The request inputs (`Checkpoint.inputs`, below) | Secrets and raw attachment bytes — never captured |
+
+A replayed pass re-ticks the budget for the turns it replays, on top of the
+restored counters, so a resumed run is charged conservatively (it can hit a
+cap earlier, never later).
+
+**Request inputs (`checkpoint_inputs.py`).** A fresh run records a JSON-safe,
+size-bounded subset of the caller's context in `Checkpoint.inputs`
+(`capture_run_inputs`), and every resume path — the recovery sweep,
+`POST /approvals/{run_id}/resume`, a direct `process(..., resume=True)` —
+restores it (`restore_run_inputs`), filling only the keys the resuming caller
+left unset. Before this, a resume re-entered with nothing but the tenant, so a
+run started with `strategy="react"` and a tool list came back without either
+and quietly ran Tree-of-Thoughts.
+
+- **Kept:** any JSON-serializable value up to 64 KiB (256 KiB in total) —
+  strategy and engine knobs, `history_text` / history messages, attachment
+  *references* (paths, URLs, names, MIME types), user and conversation ids.
+- **Never kept:** keys naming a credential (`token`, `secret`, `password`,
+  `api_key`, `authorization`, `cookie`, … at any nesting depth), raw
+  attachment bytes (`attachment_data`, `image_data`), the runtime objects the
+  orchestrator rebuilds on every attempt, and `tenant_id` (the checkpoint
+  carries it; the resume caller binds it). What was skipped, and why, is
+  listed under `inputs["_dropped"]`.
+- **Tools** are callables and cannot be persisted: `react_tools` and
+  `tool_registry` are stored as names and rebuilt through the resolver you
+  install with `set_resume_tool_resolver(lambda name: tools.get(name))`.
+  A tool the resolver cannot find is listed under
+  `context["resume_unresolved_tools"]`, and the reasoning handler answers
+  `resume_tools_unresolved` instead of running a different engine.
+  `tool_calls` (plain dataclasses) round-trip.
+
+#### Concurrency: compare-and-swap writes and per-run leases
+
+**Writes are compare-and-swap on `version`.** `save` and `save_step` succeed
+only while the stored version still equals the writer's copy, then bump it; a
+stale writer gets `CheckpointConflictError` and nothing is written. The
+orchestrator turns a conflict into an error result
+(`{"error": true, "checkpoint_conflict": true}`) and **stops** — it does not
+call `fail()`, which would clobber the newer state. A fresh run whose `run_id`
+already exists raises the same error instead of overwriting the old run, and
+the stale-run sweep skips a run that moved after it read it. All three
+backends implement it (Postgres `... WHERE version = %s`, SQLite the same on
+its `version` column, memory in-process).
+
+**A lease decides who executes a run** (`checkpoint_lease.py`). Ownership used
+to be guessed from silence, so one LLM or tool call longer than
+`ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS` let a second worker resume a run
+that was still executing. Now each attempt has a unique `owner` id and holds
+`owner` + `lease_expires_at` on the checkpoint:
+
+| Step | What happens |
+|------|--------------|
+| Start | A fresh run is created already owned by this attempt |
+| Resume | `claim(run_id, owner, ttl)` — one conditional update that succeeds only when the run is unowned, its lease has expired, or the caller owns it. A run another live executor holds raises `CheckpointLeaseHeldError` before anything executes. Taking over from another owner bumps `version`, so the previous owner's next write loses its compare-and-swap |
+| Run | Every `run_step` save carries a fresh expiry, a heartbeat task renews it every third of `ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS` (default 60 s), and before executing a tool the manager proves it still owns the run — a worker that lost its lease stops before the next side effect, not after it |
+| End | `process()` stops the heartbeat and releases the lease (owner-conditional), whatever the outcome |
+
+Renewal never touches `updated_at`, so the [stale-run
+sweep](#stale-run-sweep-sweep_stale_runs) still sees a wedged loop as silent.
+Expiry is compared against each replica's clock, so replica clocks must agree
+to well within the lease length (NTP is enough). A store without the three
+optional lease methods (`claim` / `renew_lease` / `release_lease`) keeps
+working without leases. On Postgres the lease lives in the `owner` /
+`lease_expires_at` columns that [migration 013](db.md) adds; an SQLite file
+created by an older release gains its columns on open.
 
 !!! info "Who creates the table"
     `initialize()` skips its DDL when `DB_RUNTIME_DDL` is off — the
@@ -853,12 +931,15 @@ async def handle(self, query, context):
 
 | Component | Role |
 |-----------|------|
-| `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`) |
-| `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable` |
+| `Checkpoint` | JSON-serializable run snapshot (`to_dict`/`from_dict`); `inputs`, `owner`, `lease_expires_at` carry the request inputs and the lease |
+| `CheckpointStore` | Protocol: `save` / `load` / `delete` / `list_resumable`; `save` is compare-and-swap on `version`. Optional: `save_step`, and the lease trio `claim` / `renew_lease` / `release_lease` |
+| `CheckpointConflictError` / `CheckpointLeaseHeldError` | A stale write was refused / a run is owned by another live executor (`checkpoint_errors`) |
 | `InMemoryCheckpointStore` | In-process store for single-process use and tests (`checkpoint_memory`); copies state in and out; optional `max_entries` retained-run bound (`None` = unbounded, the constructor default) |
 | `PostgresCheckpointStore` | Durable `agent_checkpoints` (JSONB) backend |
 | `SQLiteCheckpointStore` | Durable single-file backend (`checkpoint_sqlite`) — stdlib `sqlite3`, WAL journal, blocking statements hopped off the event loop via `run_in_executor` |
-| `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail` |
+| `CheckpointManager` | Per-request façade: idempotent `run_step`, `complete`, `fail`; writes the `LoopBudget` snapshot with every save and holds the attempt's lease (heartbeat, fencing) |
+| `init_checkpoint` | Creates or claims-and-resumes the run, restores budget and inputs (`checkpoint_init`) |
+| `set_resume_tool_resolver` | Installs the `name -> tool` lookup resumed runs use to rebuild `react_tools` / `tool_registry` (`checkpoint_inputs`) |
 
 `ReActAgent` applies `run_step` automatically: with a checkpoint attached
 (orchestrated runs pass it via `context["checkpoint"]`), every tool invocation
@@ -1196,8 +1277,12 @@ and the `/approvals` API. Set it to `false` to run without checkpointing:
 - `baselith/core/orchestration/checkpoint_factory.py` resolves a process-wide store —
   `ORCHESTRATOR_CHECKPOINT_BACKEND` picks `postgres`, `sqlite`, `memory`, or
   `auto` (the default: postgres when Postgres storage is enabled, else
-  memory). The app lifespan runs the store's idempotent schema init at
-  startup. When the boot reachability probe
+  memory). When `auto` lands on memory the factory logs a
+  `checkpoint_backend_not_durable` **warning** at boot: runs, paused approvals
+  and their recorded steps will not survive a restart, and crash recovery is
+  off. Set the backend to `sqlite` (or enable Postgres) for durable runs, or to
+  `memory` to accept it explicitly. The app lifespan runs the store's
+  idempotent schema init at startup. When the boot reachability probe
   ([`baselith.core.db.reachability`](db.md#postgresql-down-at-boot-one-probe-not-a-timeout-per-step))
   already saw PostgreSQL down, `initialize_default_checkpoint_store()` raises
   `CheckpointStoreUnavailableError` at once instead of waiting out
@@ -1231,7 +1316,9 @@ and the `/approvals` API. Set it to `false` to run without checkpointing:
     - `POST /approvals/{run_id}/decision` — record
       `{"approved": true|false, "approver": ..., "reason": ...}`.
     - `POST /approvals/{run_id}/resume` — re-enter the loop; the gate
-      consumes the recorded decision and the run continues or aborts.
+      consumes the recorded decision and the run continues or aborts. The
+      run's request inputs are restored like on any resume; **409** when
+      another executor holds the run's lease.
 
 #### Crash recovery (`ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`)
 
@@ -1240,11 +1327,27 @@ loop: `resume_interrupted_runs` consumes `list_resumable()` and re-enters
 runs left in the `running` state by a crash/restart (completed tool steps
 replay from the store, so recovery is idempotent). Runs paused
 `awaiting_approval` are never auto-resumed — they wait for the `/approvals`
-API. Set `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=true` to run one sweep
-as a background task at app startup (default off).
+API.
 
-**Orphans are failed even with resume off.** Auto resume stays opt-in because
-re-entering a run repeats LLM calls and side effects. With it off, the startup
+**On by default for a durable store.** `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP`
+unset (the default) starts the recovery loop when the resolved backend is
+`postgres` or `sqlite`, and not for `memory` (there is nothing to resume after
+a restart). `true` / `false` force it either way; `false` is the off switch.
+The loop sweeps every `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS`.
+
+**Which runs it resumes.** A `running` run whose [lease](#concurrency-compare-and-swap-writes-and-per-run-leases)
+is still live is skipped, however long it has been silent — its worker is in
+a long call, not dead. A run whose lease has expired is resumed at the next
+sweep, so a crashed worker's run is picked up roughly one lease length plus
+one sweep interval after the crash. The resume claims the lease atomically
+before anything executes; when two sweeps race, the loser gets
+`CheckpointLeaseHeldError` and reports the run as skipped. Only a run that
+carries no lease at all (written before the upgrade, or by a store without
+lease support) falls back to the old silence guard,
+`ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`.
+
+**Orphans are failed even with resume off.** With auto resume off (explicitly,
+or on the memory backend), the startup
 wiring runs `stale_sweep_loop` (`baselith/core/api/_recovery_startup.py`) instead: every
 `ORCHESTRATOR_RECOVERY_SWEEP_INTERVAL_SECONDS` it calls `sweep_stale_runs` and
 marks a `running` checkpoint whose last progress is older than
@@ -1255,14 +1358,16 @@ Before this, a run interrupted by a crash stayed `running` forever. Set
 `ORCHESTRATOR_RECOVERY_STALE_SWEEP_ENABLED=false` to restore that.
 
 **One sweep per fleet, not per worker.** With `WEB_CONCURRENCY > 1` (or
-multiple replicas) every worker runs the startup sweep, and an unguarded sweep
-re-entered the same interrupted runs once per worker — duplicate agent
-executions and duplicate LLM spend. `resume_interrupted_runs` therefore takes
+multiple replicas) every worker runs the sweep. The per-run claim is what
+guarantees a run executes once; the sweep-wide lock below only saves replicas
+from scanning the same page in parallel, which is why its failing open is
+harmless. `resume_interrupted_runs` takes
 a keyword-only `lock` (anything `DistributedLock`-compatible:
 `acquire(blocking=False)` / `release()`): a worker that loses the non-blocking
 race skips the sweep entirely and returns an empty report, while an
 acquisition *error* fails **open** — the sweep still runs, because recovery
-matters more than exclusion and the worst case is the old duplicate sweep. The
+matters more than exclusion, and with leases the worst case is two replicas
+scanning the same page: each run is still claimed by exactly one of them. The
 startup wiring in `baselith/core/api/_recovery_startup.py` (extracted from the app
 lifespan) passes the Redis-backed `DistributedLock` named
 `checkpoint_recovery_sweep` (TTL 60 s, `auto_renew=True` — resumed runs
@@ -1283,17 +1388,21 @@ stores written against the older signature keep working.
 **Incremental step persistence.** Stores may expose an optional
 `save_step(checkpoint, key, entry, trajectory_entry)` fast-path;
 `CheckpointManager.run_step` uses it when present and falls back to the full
-`save()` otherwise. Both shipped stores implement it.
-`PostgresCheckpointStore` uses `jsonb_set`, patching only the new step (plus
-the scalar bookkeeping fields) into the JSONB row — cumulative bytes written
-over an n-step run drop from O(n²) to O(n), and a `load()` after incremental
-writes is identical to one after full saves (see
+`save()` otherwise. All three shipped stores implement it, and all three
+persist the **same state** on a step save:
+`PostgresCheckpointStore` appends the new step and trajectory element with
+`jsonb_set` and merges every other top-level field (budget, `plugin_data`,
+inputs, status, lease, …) with `||`, so the accumulated steps never cross the
+wire again — cumulative bytes over an n-step run stay O(n) in steps, and a
+`load()` after incremental writes is identical to one after full saves (see
 [Runtime tuning](../advanced/runtime-tuning.md#checkpoint-serialization)).
-`InMemoryCheckpointStore` does the same in-process: only the new step entry
-and trajectory line are copied into the stored state (version/`updated_at`
-bookkeeping in lock-step with `save`), so cumulative copy work drops from
-O(n²) to O(n) over a run; history snapshots are still appended when enabled,
-and a run not yet in the store falls back to a full `save`.
+`InMemoryCheckpointStore` does the same in-process. `SQLiteCheckpointStore`
+rewrites the whole document (a single-file backend has no partial-update fast
+path worth the complexity). Earlier releases patched only the step
+bookkeeping on Postgres and memory and dropped `plugin_data` and the budget
+until the run finished; `test_checkpoint_store_contract.py` now drives the
+three backends through the same steps and a simulated crash and requires the
+identical recovered run.
 
 #### Stale-run sweep (`sweep_stale_runs`)
 

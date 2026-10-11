@@ -5,6 +5,10 @@ Follows the same conventions as ``baselith.core.storage.postgres``: the shared a
 connection pool from ``baselith.core.db.connection``, tenant-scoped rows, and idempotent
 ``CREATE TABLE IF NOT EXISTS`` self-initialization (no separate migration
 required).
+
+Writes are compare-and-swap on the ``version`` column and the per-run lease
+lives in the ``owner`` / ``lease_expires_at`` columns (migration 013); the SQL
+is in :mod:`baselith.core.orchestration.checkpoint_postgres_sql`.
 """
 
 from __future__ import annotations
@@ -26,7 +30,25 @@ from baselith.core.orchestration.checkpoint import (
     STATUS_RUNNING,
     Checkpoint,
 )
+from baselith.core.orchestration.checkpoint_errors import (
+    CheckpointConflictError,
+    CheckpointLeaseHeldError,
+)
 from baselith.core.orchestration.checkpoint_memory import summarize_run
+from baselith.core.orchestration.checkpoint_postgres_sql import (
+    _CLAIM,
+    _HISTORY_INSERT,
+    _HISTORY_LIST,
+    _HISTORY_LOAD,
+    _HISTORY_SNAPSHOT_FROM_LIVE,
+    _HISTORY_TRIM,
+    _LOAD,
+    _RELEASE,
+    _RENEW,
+    _STEP_UPDATE,
+    _UPSERT,
+    _run_list_query,
+)
 
 logger = get_logger(__name__)
 
@@ -37,11 +59,33 @@ CREATE TABLE IF NOT EXISTS agent_checkpoints (
     status TEXT NOT NULL DEFAULT 'running',
     data JSONB NOT NULL,
     version INTEGER NOT NULL DEFAULT 0,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    owner TEXT,
+    lease_expires_at DOUBLE PRECISION
 );
+ALTER TABLE agent_checkpoints ADD COLUMN IF NOT EXISTS owner TEXT;
+ALTER TABLE agent_checkpoints
+    ADD COLUMN IF NOT EXISTS lease_expires_at DOUBLE PRECISION;
 CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_resumable
     ON agent_checkpoints(tenant_id, status);
 """
+
+
+def _row_to_checkpoint(row: dict[str, Any]) -> Checkpoint:
+    """The JSONB document with the authoritative columns laid over it.
+
+    Lease statements update only the columns, so the document's copies of
+    ``version`` / ``owner`` / ``lease_expires_at`` may lag behind.
+    """
+    data = row["data"]
+    # psycopg returns JSONB as a parsed object; tolerate a raw string too.
+    if isinstance(data, str):
+        data = orjson.loads(data)
+    for column in ("version", "owner", "lease_expires_at"):
+        if column in row:
+            data[column] = row[column]
+    return Checkpoint.from_dict(data)
+
 
 # Immutable per-version snapshots (state history / time-travel). One row per
 # (run_id, version); the live agent_checkpoints row keeps being overwritten as
@@ -57,128 +101,6 @@ CREATE TABLE IF NOT EXISTS agent_checkpoint_history (
     PRIMARY KEY (run_id, version)
 );
 """
-
-_HISTORY_INSERT = """
-INSERT INTO agent_checkpoint_history (run_id, version, status, step, data)
-VALUES (%s, %s, %s, %s, %s)
-ON CONFLICT (run_id, version) DO NOTHING
-"""
-
-# Snapshot for the save_step fast-path: copy the just-patched live row
-# server-side, so no full-data payload crosses the wire and the O(n) write
-# property of save_step is preserved.
-_HISTORY_SNAPSHOT_FROM_LIVE = """
-INSERT INTO agent_checkpoint_history (run_id, version, status, step, data)
-SELECT run_id, version, status, COALESCE((data->>'step')::int, 0), data
-FROM agent_checkpoints WHERE run_id = %s
-ON CONFLICT (run_id, version) DO NOTHING
-"""
-
-# Keep only the newest N snapshots per run.
-_HISTORY_TRIM = """
-DELETE FROM agent_checkpoint_history
-WHERE run_id = %s AND version < (
-    SELECT COALESCE(MIN(version), 0) FROM (
-        SELECT version FROM agent_checkpoint_history
-        WHERE run_id = %s ORDER BY version DESC LIMIT %s
-    ) AS newest
-)
-"""
-
-_HISTORY_LIST = """
-SELECT version, status, step,
-       COALESCE((data->>'updated_at')::float8, EXTRACT(EPOCH FROM created_at))
-           AS updated_at
-FROM agent_checkpoint_history WHERE run_id = %s ORDER BY version ASC
-"""
-
-# Run listing for operator/read surfaces: any status, newest first. The live
-# row is the source (history rows are per-version copies of the same run).
-#
-# Two costs are designed out here. The heavy keys ``summarize_run`` discards
-# anyway (``steps``, ``trajectory``, ``plugin_data``, ``answer``) are stripped
-# server-side, so a 500-run page no longer ships every tool output of every run
-# to be parsed and thrown away (seeded runs: 427 kB -> 94 kB per page); only
-# the trajectory's length crosses the wire. And the filters are appended only
-# when given, instead of the ``(%s IS NULL OR col = %s)`` catch-all: once
-# psycopg prepares the statement (5th execution) Postgres may switch to a
-# generic plan, and a generic plan cannot use an index for a predicate that
-# might be ``NULL`` — EXPLAIN showed a seq scan over every tenant's runs.
-_RUN_LIST_SELECT = (
-    "SELECT data - 'steps' - 'trajectory' - 'plugin_data' - 'answer' AS data, "
-    "CASE WHEN jsonb_typeof(data->'trajectory') = 'array' "
-    "THEN jsonb_array_length(data->'trajectory') ELSE 0 END AS trajectory_length "
-    "FROM agent_checkpoints"
-)
-
-
-def _run_list_query(
-    tenant_id: str | None, status: str | None, limit: int
-) -> tuple[str, list[Any]]:
-    """Build the run-listing statement with only the filters actually given."""
-    where: list[str] = []
-    params: list[Any] = []
-    if tenant_id is not None:
-        where.append("tenant_id = %s")
-        params.append(tenant_id)
-    if status is not None:
-        where.append("status = %s")
-        params.append(status)
-    sql = _RUN_LIST_SELECT
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    params.append(limit)
-    return sql + " ORDER BY updated_at DESC LIMIT %s", params
-
-
-_HISTORY_LOAD = """
-SELECT data FROM agent_checkpoint_history WHERE run_id = %s AND version = %s
-"""
-
-_UPSERT = """
-INSERT INTO agent_checkpoints (run_id, tenant_id, status, data, version, updated_at)
-VALUES (%s, %s, %s, %s, %s, NOW())
-ON CONFLICT (run_id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    status = EXCLUDED.status,
-    data = EXCLUDED.data,
-    version = EXCLUDED.version,
-    updated_at = NOW()
-"""
-
-# Incremental step write: only the new step entry + trajectory element cross
-# the wire; the scalar bookkeeping fields inside `data` are patched in place so
-# a later load() sees exactly what a full save() would have produced. The
-# nested jsonb_set calls apply innermost-first to the OLD row value.
-_STEP_UPDATE = """
-UPDATE agent_checkpoints SET
-    data = jsonb_set(
-        jsonb_set(
-            jsonb_set(
-                jsonb_set(
-                    jsonb_set(
-                        jsonb_set(
-                            data,
-                            ARRAY['steps', %s], %s::jsonb, true
-                        ),
-                        '{trajectory}',
-                        COALESCE(data->'trajectory', '[]'::jsonb) || %s::jsonb,
-                        true
-                    ),
-                    '{step}', %s::jsonb, true
-                ),
-                '{status}', %s::jsonb, true
-            ),
-            '{version}', %s::jsonb, true
-        ),
-        '{updated_at}', %s::jsonb, true
-    ),
-    status = %s,
-    version = %s,
-    updated_at = NOW()
-WHERE run_id = %s
-"""
-
 
 # Above this size the JSON dump is pushed off the event loop: the checkpoint
 # re-serializes the whole accumulated steps map on every tool step, so long
@@ -237,14 +159,18 @@ class PostgresCheckpointStore:
             await cur.execute(_HISTORY_TRIM, (run_id, run_id, self._history_limit))
 
     async def save(self, checkpoint: Checkpoint) -> None:
-        """Upsert the checkpoint by ``run_id``.
+        """Insert, or update while the stored version is still ours (CAS).
 
         Bumps ``version``/``updated_at`` in lock-step with
         :class:`~baselith.core.orchestration.checkpoint.InMemoryCheckpointStore` so the
-        two stores are behaviourally interchangeable.
+        stores are behaviourally interchangeable.
+
+        Raises:
+            CheckpointConflictError: The stored version moved on.
         """
+        expected = checkpoint.version
         checkpoint.updated_at = time.time()
-        checkpoint.version += 1
+        checkpoint.version = expected + 1
         # orjson, strict mode (no ``default``): a non-JSON-serializable step
         # result fails loudly here exactly as stdlib json did. The previous
         # payload size decides whether this dump runs inline or in a thread —
@@ -264,8 +190,14 @@ class PostgresCheckpointStore:
                     checkpoint.status,
                     payload,
                     checkpoint.version,
+                    checkpoint.owner,
+                    checkpoint.lease_expires_at,
+                    expected,
                 ),
             )
+            if not cur.rowcount:
+                checkpoint.version = expected
+                raise CheckpointConflictError(checkpoint.run_id, expected)
             if self._history_enabled:
                 await cur.execute(
                     _HISTORY_INSERT,
@@ -286,28 +218,34 @@ class PostgresCheckpointStore:
         entry: dict[str, Any],
         trajectory_entry: dict[str, Any],
     ) -> None:
-        """Persist ONE new step without re-serializing the whole checkpoint.
+        """Persist ONE new step without re-serializing the accumulated steps.
 
         ``CheckpointManager.run_step`` calls this after mutating the in-memory
-        checkpoint (steps/trajectory/step/status). Cumulative bytes written
-        over an n-step run drop from O(n²) to O(n). Version/updated_at
-        bookkeeping stays in lock-step with :meth:`save`; when the row does
-        not exist yet (first step of a fresh run) it falls back to the full
-        upsert.
+        checkpoint. Only the new step and trajectory line are appended; every
+        other field (budget, plugin data, inputs, lease, …) is merged in, so
+        a later load() equals one after a full save. Cumulative bytes written
+        over an n-step run stay O(n) in steps. Version/updated_at bookkeeping
+        stays in lock-step with :meth:`save`. When nothing matched (no row
+        yet, or a version conflict) it falls back to the full upsert, which
+        inserts the first row or raises :class:`CheckpointConflictError`.
         """
+        expected = checkpoint.version
         new_updated_at = time.time()
-        new_version = checkpoint.version + 1
+        new_version = expected + 1
+        head = checkpoint.head_dict()
+        head["version"] = new_version
+        head["updated_at"] = new_updated_at
         params = (
+            orjson.dumps(head).decode(),
             key,
             orjson.dumps(entry).decode(),
             orjson.dumps([trajectory_entry]).decode(),
-            orjson.dumps(checkpoint.step).decode(),
-            orjson.dumps(checkpoint.status).decode(),
-            orjson.dumps(new_version).decode(),
-            orjson.dumps(new_updated_at).decode(),
             checkpoint.status,
             new_version,
+            checkpoint.owner,
+            checkpoint.lease_expires_at,
             checkpoint.run_id,
+            expected,
         )
         async with get_async_cursor() as cur:
             await cur.execute(_STEP_UPDATE, params)
@@ -320,24 +258,71 @@ class PostgresCheckpointStore:
             checkpoint.version = new_version
             checkpoint.updated_at = new_updated_at
             return
-        # No row yet — first persist of this run goes through the full path
-        # (which does its own version/updated_at bookkeeping).
+        # No row yet (first persist of this run) or a stale version: the full
+        # path inserts the former and raises on the latter.
         await self.save(checkpoint)
 
     async def load(self, run_id: str) -> Checkpoint | None:
         """Load a checkpoint by ``run_id``, or None if absent."""
         async with get_async_cursor(row_factory=dict_row) as cur:
-            await cur.execute(
-                "SELECT data FROM agent_checkpoints WHERE run_id = %s", (run_id,)
-            )
+            await cur.execute(_LOAD, (run_id,))
             row = await cur.fetchone()
         if not row or not isinstance(row, dict):
             return None
-        data = row["data"]
-        # psycopg returns JSONB as a parsed object; tolerate a raw string too.
-        if isinstance(data, str):
-            data = orjson.loads(data)
-        return Checkpoint.from_dict(data)
+        return _row_to_checkpoint(row)
+
+    async def claim(
+        self,
+        run_id: str,
+        owner: str,
+        lease_seconds: float,
+        *,
+        now: float | None = None,
+    ) -> Checkpoint | None:
+        """Take the run's lease (see ``checkpoint_lease``); None when absent.
+
+        One conditional ``UPDATE ... RETURNING``: exactly one of two racing
+        claimants matches. Only a refused claim pays the second round trip
+        that tells "held" from "absent".
+
+        Raises:
+            CheckpointLeaseHeldError: Another owner's lease is still live.
+        """
+        current = time.time() if now is None else now
+        async with get_async_cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                _CLAIM,
+                (owner, owner, current + lease_seconds, run_id, owner, current),
+            )
+            row = await cur.fetchone()
+            if not row or not isinstance(row, dict):
+                await cur.execute(_LOAD, (run_id,))
+                held = await cur.fetchone()
+                if not held or not isinstance(held, dict):
+                    return None
+                raise CheckpointLeaseHeldError(
+                    run_id, held.get("owner"), held.get("lease_expires_at")
+                )
+        return _row_to_checkpoint(row)
+
+    async def renew_lease(
+        self,
+        run_id: str,
+        owner: str,
+        lease_seconds: float,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Extend ``owner``'s lease; False when the run is no longer theirs."""
+        expires = (time.time() if now is None else now) + lease_seconds
+        async with get_async_cursor() as cur:
+            await cur.execute(_RENEW, (expires, run_id, owner))
+            return bool(cur.rowcount)
+
+    async def release_lease(self, run_id: str, owner: str) -> None:
+        """Clear the lease if ``owner`` still holds it."""
+        async with get_async_cursor() as cur:
+            await cur.execute(_RELEASE, (run_id, owner))
 
     async def delete(self, run_id: str) -> None:
         """Remove a checkpoint (e.g. after successful completion)."""
@@ -374,10 +359,7 @@ class PostgresCheckpointStore:
             row = await cur.fetchone()
         if not row or not isinstance(row, dict):
             return None
-        data = row["data"]
-        if isinstance(data, str):
-            data = orjson.loads(data)
-        return Checkpoint.from_dict(data)
+        return _row_to_checkpoint(row)
 
     async def list_runs(
         self,

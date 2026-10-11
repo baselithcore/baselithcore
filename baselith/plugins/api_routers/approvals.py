@@ -33,6 +33,7 @@ from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     ApprovalPrincipal,
+    CheckpointLeaseHeldError,
     record_approval_decision,
 )
 from baselith.core.orchestration.checkpoint_factory import get_default_checkpoint_store
@@ -228,7 +229,7 @@ async def decide(
 @router.post(
     "/{run_id}/resume",
     response_model=RunResumed,
-    responses=problem_responses(401, 404, 500, 503),
+    responses=problem_responses(401, 404, 409, 500, 503),
 )
 async def resume(run_id: str) -> dict[str, Any]:
     """Resume a checkpointed run (typically after a recorded decision).
@@ -241,6 +242,11 @@ async def resume(run_id: str) -> dict[str, Any]:
     request carries whatever tenant the admin credentials resolve to, and a
     resumed run inheriting it would read and write another tenant's memory
     and storage. Same binding the crash-recovery sweep applies.
+
+    The request inputs the run started with (strategy, tool names, history,
+    attachment references…) are restored from the checkpoint by the
+    orchestrator, exactly as on a crash-recovery resume. A run another
+    executor is still running (live lease) answers **409** and is untouched.
     """
     store = _require_store()
     checkpoint = await store.load(run_id)
@@ -262,6 +268,10 @@ async def resume(run_id: str) -> dict[str, Any]:
         )
     except HTTPException:
         raise
+    except CheckpointLeaseHeldError as exc:
+        raise HTTPException(
+            status_code=409, detail=f"Run '{run_id}' is being executed elsewhere."
+        ) from exc
     except Exception as exc:
         logger.error("approval_resume_failed run=%s error=%s", run_id, exc)
         # The exception text can carry provider/storage internals; it stays in

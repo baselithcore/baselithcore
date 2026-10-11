@@ -42,7 +42,7 @@
       },
       "AgentCardResponse": {
         "additionalProperties": true,
-        "description": "The agent card as served at the discovery endpoints.\n\nMirrors :meth:`core.a2a.agent_card.AgentCard.to_dict`; unknown members are\npassed through untouched.",
+        "description": "The agent card as served at the discovery endpoints.\n\nMirrors :meth:`baselith.core.a2a.agent_card.AgentCard.to_dict`; unknown members are\npassed through untouched.",
         "properties": {
           "capabilities": {
             "additionalProperties": true,
@@ -1466,7 +1466,7 @@
         "type": "object"
       },
       "PluginCompatibility": {
-        "description": "Installed plugins checked against the target core version.\n\n``checked`` is False when the check cannot be computed honestly here:\nplugin manifests declare ``min_core_version``/``max_core_version`` against\n``core._version``, and a downstream distribution versions that file\nindependently of the public core release (``reason`` says so).",
+        "description": "Installed plugins checked against the target core version.\n\n``checked`` is False when the check cannot be computed honestly here:\nplugin manifests declare ``min_core_version``/``max_core_version`` against\n``baselith.core._version``, and a downstream distribution versions that file\nindependently of the public core release (``reason`` says so).",
         "properties": {
           "checked": {
             "title": "Checked",
@@ -2768,7 +2768,7 @@
         "type": "object"
       },
       "SystemUpdate": {
-        "description": "Status of the running core against the public core project's releases.\n\n``installed_version`` is the public core release the running tree\ncorresponds to (``core._core_version.CORE_VERSION``), never a downstream\ndistribution's own version, and ``repo`` is the public core repository.\n``upgrade_guide_url`` is the operator's upgrade instructions\n(``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration\nwhenever the report is served. ``upgrade_path`` is computed by the check\nfrom the published releases: the stops, in order, of an upgrade that\ncrosses a major version (the latest release of each major on the way, then\nthe latest release), empty for a direct upgrade. ``upgrade`` is the\nversion-specific instructions for this deployment's installation method,\nstamped when served and never cached. Notice only: nothing is ever\ninstalled from this data.",
+        "description": "Status of the running core against the public core project's releases.\n\n``installed_version`` is the public core release the running tree\ncorresponds to (``baselith.core._core_version.CORE_VERSION``), never a downstream\ndistribution's own version, and ``repo`` is the public core repository.\n``upgrade_guide_url`` is the operator's upgrade instructions\n(``SYSTEM_UPGRADE_GUIDE_URL``), stamped from the current configuration\nwhenever the report is served. ``upgrade_path`` is computed by the check\nfrom the published releases: the stops, in order, of an upgrade that\ncrosses a major version (the latest release of each major on the way, then\nthe latest release), empty for a direct upgrade. ``upgrade`` is the\nversion-specific instructions for this deployment's installation method,\nstamped when served and never cached. Notice only: nothing is ever\ninstalled from this data.",
         "properties": {
           "advisories": {
             "default": [],
@@ -3022,7 +3022,7 @@
         "type": "object"
       },
       "UpgradeInstructions": {
-        "description": "How to upgrade this deployment to the next core release.\n\n``target_version`` is the release the steps install: the first stop of\n``path`` when the jump crosses a major version (upgrade one stop at a\ntime), otherwise the latest release. ``path`` lists every stop in order,\nending at the latest release, and is empty for a direct upgrade.\n``custom_text`` is the operator's own procedure (method ``custom``) with\nits placeholders filled in: untrusted text, to be shown without raw HTML.\n``distribution`` names the downstream distribution this deployment runs\n(``core._version.__distribution__``); its steps are then only a pointer to\nthe operator's own procedure, since the public core procedure would\nreplace the distribution with the public release. ``image`` is the\npublished container image of the target release, which the Docker steps\nname (null for the other methods).",
+        "description": "How to upgrade this deployment to the next core release.\n\n``target_version`` is the release the steps install: the first stop of\n``path`` when the jump crosses a major version (upgrade one stop at a\ntime), otherwise the latest release. ``path`` lists every stop in order,\nending at the latest release, and is empty for a direct upgrade.\n``custom_text`` is the operator's own procedure (method ``custom``) with\nits placeholders filled in: untrusted text, to be shown without raw HTML.\n``distribution`` names the downstream distribution this deployment runs\n(``baselith.core._version.__distribution__``); its steps are then only a pointer to\nthe operator's own procedure, since the public core procedure would\nreplace the distribution with the public release. ``image`` is the\npublished container image of the target release, which the Docker steps\nname (null for the other methods).",
         "properties": {
           "checklist": {
             "default": [],
@@ -3533,7 +3533,7 @@
       },
       "BearerAuth": {
         "bearerFormat": "JWT",
-        "description": "Access token issued by core.auth (AuthManager.create_token).",
+        "description": "Access token issued by baselith.core.auth (AuthManager.create_token).",
         "scheme": "bearer",
         "type": "http"
       },
@@ -5436,7 +5436,7 @@
     "/approvals/{run_id}/resume": {
       "post": {
         "deprecated": true,
-        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.",
+        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.\n\nThe request inputs the run started with (strategy, tool names, history,\nattachment references\u2026) are restored from the checkpoint by the\norchestrator, exactly as on a crash-recovery resume. A run another\nexecutor is still running (live lease) answers **409** and is untouched.",
         "operationId": "resume_approvals__run_id__resume_post",
         "parameters": [
           {
@@ -5489,6 +5489,21 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -10264,7 +10279,7 @@
     },
     "/v1/approvals/{run_id}/resume": {
       "post": {
-        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.",
+        "description": "Resume a checkpointed run (typically after a recorded decision).\n\nCompleted tool steps replay from the checkpoint; the approval gate\nconsumes the recorded decision and the run continues or aborts.\n\nThe run is re-entered under the tenant that **owns the checkpoint**, not\nthe operator's ambient tenant: this route is admin-authenticated, so the\nrequest carries whatever tenant the admin credentials resolve to, and a\nresumed run inheriting it would read and write another tenant's memory\nand storage. Same binding the crash-recovery sweep applies.\n\nThe request inputs the run started with (strategy, tool names, history,\nattachment references\u2026) are restored from the checkpoint by the\norchestrator, exactly as on a crash-recovery resume. A run another\nexecutor is still running (live lease) answers **409** and is untouched.",
         "operationId": "resume_v1_approvals__run_id__resume_post",
         "parameters": [
           {
@@ -10317,6 +10332,21 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

@@ -9,6 +9,14 @@ re-enters interrupted `running` runs via ``process(run_id=..., resume=True)``
 
 Runs paused ``awaiting_approval`` are intentionally left alone: they are
 waiting for a human decision (the /approvals API), not for a restart.
+
+Ownership is decided by the per-run lease
+(:mod:`baselith.core.orchestration.checkpoint_lease`), not guessed from
+silence: a run is only re-entered once its lease has expired, and the resume
+itself claims the lease atomically before anything executes, so two sweeps
+racing for the same run resolve to one executor. Silence is only consulted for
+a run that carries no lease at all (a store without lease support, or a row
+written before the upgrade).
 """
 
 from __future__ import annotations
@@ -24,6 +32,11 @@ from baselith.core.orchestration.checkpoint import (
     STATUS_RUNNING,
     CheckpointStore,
 )
+from baselith.core.orchestration.checkpoint_errors import (
+    CheckpointConflictError,
+    CheckpointLeaseHeldError,
+)
+from baselith.core.orchestration.checkpoint_lease import lease_is_live
 
 logger = get_logger(__name__)
 
@@ -104,13 +117,10 @@ async def resume_interrupted_runs(
             loses the non-blocking race skips the sweep entirely. Acquisition
             errors fail OPEN (the sweep still runs): recovery matters more
             than exclusion, and the worst case is today's duplicate sweep.
-        min_idle_seconds: Skip runs whose last progress is newer than this —
-            a run that is still moving is still owned by someone, and
-            re-entering it would duplicate its side effects. ``None`` (the
-            default) keeps the historical unguarded behaviour for a one-shot
-            boot sweep, where nothing is executing yet;
-            :func:`run_recovery_cycle` always passes a threshold because it
-            runs while the process is serving traffic.
+        min_idle_seconds: For a run that carries **no lease**, skip it while
+            its last progress is newer than this. ``None`` (the default)
+            applies no silence guard. A leased run ignores it: a live lease
+            means skip, an expired one means resume.
 
     Returns:
         RecoveryReport listing resumed, failed (run_id → error) and skipped
@@ -163,12 +173,16 @@ async def resume_interrupted_runs(
             if checkpoint is None or checkpoint.status != STATUS_RUNNING:
                 report.skipped.append(run_id)
                 continue
-            # Recent progress means a worker still owns this run. The sweep is
-            # periodic now, so without this guard it re-entered runs that were
-            # mid-execution and ran the same agent loop a second time —
-            # duplicated tool side effects and duplicated LLM spend, which is
-            # exactly what crash recovery exists to avoid.
-            if min_idle_seconds is not None:
+            # A live lease means some worker is executing this run right now,
+            # however long its current LLM or tool call has been silent.
+            if lease_is_live(checkpoint):
+                report.skipped.append(run_id)
+                continue
+            # No lease information at all: fall back to the silence guard.
+            # The sweep is periodic, so without it a lease-less run that was
+            # mid-execution would be re-entered and its agent loop run twice.
+            unleased = getattr(checkpoint, "lease_expires_at", None) is None
+            if min_idle_seconds is not None and unleased:
                 silence = time.time() - last_progress_at(checkpoint)
                 if silence < min_idle_seconds:
                     report.skipped.append(run_id)
@@ -190,6 +204,10 @@ async def resume_interrupted_runs(
                 await _process_as_tenant(orchestrator, checkpoint, run_id)
                 report.resumed.append(run_id)
                 logger.info("recovery_resumed run=%s", run_id)
+            except CheckpointLeaseHeldError:
+                # Another worker claimed it between our read and our claim.
+                report.skipped.append(run_id)
+                logger.debug("recovery_skip_claimed run=%s", run_id)
             except Exception as exc:
                 # One poisoned run must not block the rest of the sweep.
                 report.failed[run_id] = str(exc)
@@ -269,7 +287,12 @@ async def sweep_stale_runs(
                 f"stale: no progress for {silence:.0f}s "
                 f"(threshold {max_age_seconds:.0f}s)"
             )
-            await store.save(checkpoint)
+            try:
+                await store.save(checkpoint)
+            except CheckpointConflictError:
+                # The run moved after we read it: not stale after all.
+                logger.debug("stale_sweep_skip_moved run=%s", run_id)
+                continue
             report.stale.append(run_id)
             logger.warning("stale_run_failed run=%s silence=%.0fs", run_id, silence)
     return report
@@ -311,11 +334,10 @@ async def run_recovery_cycle(
             resume=True)``.
         store: The shared checkpoint store.
         stale_after_seconds: Progress-silence threshold for the stale sweep.
-        resume_after_seconds: Progress-silence threshold before a run is
-            re-entered. ``None`` reads ``recovery_resume_after_seconds`` from
-            the orchestration settings. A cycle runs while the process is
-            serving traffic, so this guard is what keeps it from re-entering a
-            run that is still executing.
+        resume_after_seconds: Progress-silence threshold before a run that
+            carries no lease is re-entered. ``None`` reads
+            ``recovery_resume_after_seconds`` from the orchestration settings.
+            Leased runs are governed by their lease instead.
         tenant_id: Optional tenant scope.
         lock: Optional cross-replica mutex for the resume pass.
 

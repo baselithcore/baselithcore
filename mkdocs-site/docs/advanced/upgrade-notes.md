@@ -523,6 +523,47 @@ it in its plugin configuration must remove the entry.
 
 ## Operations
 
+### Durable runs resume automatically, under a per-run lease
+
+Four changes to checkpointed runs an operator will notice
+([Orchestration › Durable checkpointing](../core-modules/orchestration.md#durable-checkpointing-resume)):
+
+- **Auto resume is on for a durable store.**
+  `ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP` is now unset by default, which
+  starts the recovery loop when the checkpoint backend resolves to `postgres`
+  or `sqlite` (it stays off for `memory`). Runs a crash or restart left
+  `running` are re-entered — their completed tool steps replay, the rest of the
+  loop runs again, including LLM calls. Set it to `false` to keep the previous
+  behaviour (only the fail-only stale sweep).
+- **A lease, not silence, decides ownership.** Each executing attempt holds
+  `owner` + `lease_expires_at` on its checkpoint, renews it on every tool step
+  and from a heartbeat (`ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS`, default 60),
+  and the sweep resumes a run only once its lease has expired — after a crash,
+  about one lease length plus one sweep interval later. A long LLM or tool call
+  is no longer mistaken for a dead worker. `ORCHESTRATOR_RECOVERY_RESUME_AFTER_SECONDS`
+  now only applies to runs without a lease (in flight across the upgrade).
+  Replica clocks must agree to well within the lease length.
+- **Migration 013** adds the nullable `owner` and `lease_expires_at` columns to
+  `agent_checkpoints` (catalog-only, no rewrite). Run it before the new code
+  serves traffic; with `DB_SCHEMA_CHECK` at its production default a stale
+  schema refuses to start anyway. SQLite checkpoint files are upgraded in place
+  on open.
+- **Writes are compare-and-swap.** A checkpoint write from a stale copy now
+  raises `CheckpointConflictError` instead of overwriting newer state, and the
+  run stops with `{"error": true, "checkpoint_conflict": true}`. Calling
+  `process(run_id=X)` **without** `resume=True` for an `X` that already exists
+  raises it too (it used to overwrite the old run). Code that saved a brand-new
+  `Checkpoint(run_id=X)` over an existing run must load it first.
+  `POST /approvals/{run_id}/resume` answers **409** while another executor
+  holds the run.
+
+Also new: the budget snapshot is saved with every tool step (a crash no longer
+resets the caps), the request inputs (strategy, tool names, history,
+attachment references; never secrets) are restored on every resume — install
+`set_resume_tool_resolver` so a resumed ReAct run can rebuild its tools — and
+the boot log warns `checkpoint_backend_not_durable` when
+`ORCHESTRATOR_CHECKPOINT_BACKEND=auto` falls back to the in-memory store.
+
 ### Production refuses to start on a stale schema (`DB_SCHEMA_CHECK`)
 
 With `APP_ENV=production` and `DB_SCHEMA_CHECK` unset, startup now **aborts**

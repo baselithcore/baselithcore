@@ -653,6 +653,10 @@ Checked with `EXPLAIN (ANALYZE, BUFFERS)` against a seeded
 `updated_at` is deliberately **not** indexed on `tool_invocations` or
 `agent_checkpoints`: it is rewritten on every tool completion and every
 checkpoint step, and an index on it would turn each of those updates non-HOT.
+The same goes for the run-lease columns migration 013 adds to
+`agent_checkpoints` (`owner`, `lease_expires_at`): the lease heartbeat rewrites
+`lease_expires_at` every third of a lease, and recovery reads it only for the
+handful of rows `list_resumable` already returned.
 The ledger sweep therefore bounds `created_at` as well — `created_at` is never
 later than `updated_at`, so the extra predicate removes nothing and turns a
 full-table seq scan (3 354 buffers) into an index range scan (3 buffers). The

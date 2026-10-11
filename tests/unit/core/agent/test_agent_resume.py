@@ -149,10 +149,12 @@ class TestCheckpointResume:
         """Without an explicit ``run_id`` the checkpoint's is used for the ledger."""
         effects = _Effects()
         ledger = InMemoryToolLedger()
-        store = InMemoryCheckpointStore()
 
         for _ in range(2):
-            # A brand-new checkpoint each time: only the ledger can dedupe.
+            # A brand-new checkpoint (and store) each time: only the ledger can
+            # dedupe. One store would refuse the second fresh copy of the run
+            # as a stale write.
+            store = InMemoryCheckpointStore()
             checkpoint = Checkpoint(run_id="run-shared", query="q")
             await store.save(checkpoint)
             await Agent(

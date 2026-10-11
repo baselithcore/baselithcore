@@ -9,7 +9,8 @@ a decision recorded through the API is visible to the orchestrator that
 resumes the run.
 
 Enabled by default: the 'auto' backend resolves to Postgres when Postgres
-storage is enabled, else a bounded in-memory store. Setting
+storage is enabled, else a bounded in-memory store — and says so with a
+warning, because an in-memory store loses every run on restart. Setting
 ``ORCHESTRATOR_CHECKPOINT_ENABLED=false`` resolves to ``None`` and the
 orchestrator runs without checkpointing.
 """
@@ -32,11 +33,24 @@ _resolved = False
 _initialized = False
 _lock = threading.Lock()
 
+_MEMORY_UNDER_AUTO_WARNING = (
+    "checkpoint_backend_not_durable: ORCHESTRATOR_CHECKPOINT_BACKEND=auto "
+    "resolved to the in-memory store because Postgres storage is disabled. "
+    "Runs, paused approvals and their recorded steps will NOT survive a "
+    "restart, and crash recovery is off. Enable Postgres or set "
+    "ORCHESTRATOR_CHECKPOINT_BACKEND=sqlite for durable runs, or "
+    "ORCHESTRATOR_CHECKPOINT_BACKEND=memory to accept this explicitly."
+)
 
-def _resolve_backend() -> str:
+
+def _configured_backend() -> str:
     from baselith.core.config.orchestration import get_orchestration_config
 
-    backend = get_orchestration_config().checkpoint_backend.strip().lower()
+    return get_orchestration_config().checkpoint_backend.strip().lower()
+
+
+def _resolve_backend() -> str:
+    backend = _configured_backend()
     if backend == "auto":
         try:
             from baselith.core.config.storage import get_storage_config
@@ -72,6 +86,8 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
         history_enabled = config.checkpoint_history_enabled
         history_limit = config.checkpoint_history_limit
         backend = _resolve_backend()
+        if backend == "memory" and _configured_backend() == "auto":
+            logger.warning(_MEMORY_UNDER_AUTO_WARNING)
         if backend == "postgres":
             from baselith.core.orchestration.checkpoint_postgres import (
                 PostgresCheckpointStore,
@@ -108,6 +124,27 @@ def get_default_checkpoint_store() -> CheckpointStore | None:
         logger.info("checkpoint_store_resolved backend=%s", backend)
         _resolved = True
         return _store
+
+
+def is_durable_store(store: CheckpointStore | None) -> bool:
+    """Whether ``store`` keeps runs across a restart (anything but in-memory)."""
+    return store is not None and not isinstance(store, InMemoryCheckpointStore)
+
+
+def auto_resume_enabled(store: CheckpointStore | None) -> bool:
+    """Resolve ``checkpoint_resume_on_startup`` for ``store``.
+
+    An explicit ``true``/``false`` wins. Unset means "on when durable": a
+    per-run lease (see ``checkpoint_lease``) now decides who may execute a
+    run, so resuming an expired one cannot run it twice, and a durable store
+    is the only place an interrupted run can be resumed from.
+    """
+    from baselith.core.config.orchestration import get_orchestration_config
+
+    configured = get_orchestration_config().checkpoint_resume_on_startup
+    if configured is not None:
+        return bool(configured)
+    return is_durable_store(store)
 
 
 class CheckpointStoreUnavailableError(RuntimeError):
@@ -166,8 +203,10 @@ def reset_default_checkpoint_store() -> None:
 
 __all__ = [
     "CheckpointStoreUnavailableError",
+    "auto_resume_enabled",
     "get_default_checkpoint_store",
     "initialize_default_checkpoint_store",
     "is_default_checkpoint_store_initialized",
+    "is_durable_store",
     "reset_default_checkpoint_store",
 ]

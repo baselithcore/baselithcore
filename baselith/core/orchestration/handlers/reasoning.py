@@ -8,6 +8,8 @@ from typing import Any
 
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.autonomy import DESTRUCTIVE, ApprovalPendingError
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_inputs import UNRESOLVED_TOOLS_KEY
 from baselith.core.orchestration.enforcement import enforce_iteration
 from baselith.core.orchestration.handlers import BaseFlowHandler
 from baselith.core.reasoning.tot.engine import TreeOfThoughtsAsync
@@ -102,6 +104,20 @@ class ReasoningHandler(BaseFlowHandler):
                 return await self._run_react(query, context)
             if requested == "parallel_tools" and context.get("tool_calls"):
                 return await self._run_parallel_tools(query, context)
+            unresolved = context.get(UNRESOLVED_TOOLS_KEY)
+            if requested in TOOL_STRATEGIES and unresolved:
+                # A resumed run whose tools could not be rebuilt: answering
+                # with a different engine would be a different run.
+                return {
+                    "response": "This run cannot be resumed: its tools are "
+                    "not available in this process.",
+                    "error": True,
+                    "metadata": {
+                        "error": "resume_tools_unresolved",
+                        "requested_strategy": requested,
+                        "unresolved_tools": list(unresolved),
+                    },
+                }
             if requested in TOOL_STRATEGIES:
                 logger.warning(
                     "reasoning_strategy_inputs_missing strategy=%s; running ToT",
@@ -109,9 +125,9 @@ class ReasoningHandler(BaseFlowHandler):
                 )
             return await self._run_tot(query, context, requested)
 
-        except ApprovalPendingError:
-            # Durable HITL pause — not an error. Propagate so the execution
-            # mixin can surface the awaiting-approval response with run_id.
+        except (ApprovalPendingError, CheckpointConflictError):
+            # Durable HITL pause, or a run another executor now owns — not a
+            # reasoning error. Propagate so the execution mixin handles it.
             raise
         except Exception as e:
             logger.error(f"Error in Reasoning Handler: {e}")

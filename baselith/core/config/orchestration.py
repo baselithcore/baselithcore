@@ -87,8 +87,8 @@ class OrchestrationConfig(BaseSettings):
         default=300.0,
         gt=0,
         description="Interval between background crash-recovery sweeps "
-        "(resume interrupted runs + fail wedged ones) when "
-        "checkpoint_resume_on_startup is enabled.",
+        "(resume interrupted runs + fail wedged ones) when auto resume is on "
+        "(see checkpoint_resume_on_startup).",
     )
     recovery_stale_after_seconds: float = Field(
         default=1800.0,
@@ -107,10 +107,20 @@ class OrchestrationConfig(BaseSettings):
     recovery_resume_after_seconds: float = Field(
         default=300.0,
         gt=0,
-        description="Minimum progress silence before a 'running' checkpoint is "
-        "re-entered by the recovery sweep. Recent progress means some worker "
-        "still owns the run, and resuming it anyway would execute the same "
-        "agent loop twice. Keep it at or above the sweep interval.",
+        description="Minimum progress silence before the recovery sweep "
+        "re-enters a 'running' checkpoint that carries no lease (written by a "
+        "store without lease support, or before the upgrade). A leased run is "
+        "re-entered only once its lease has expired, whatever its silence.",
+    )
+    checkpoint_lease_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        description="Length of the per-run execution lease. The attempt "
+        "executing a run renews it on every tool step and from a heartbeat "
+        "every third of this interval; the recovery sweep resumes a run only "
+        "once its lease has expired, so a crashed worker's run is picked up "
+        "roughly this long after the crash. Replica clocks must agree to well "
+        "within it.",
     )
 
     # == Durable checkpointing / human-in-the-loop ==
@@ -140,16 +150,17 @@ class OrchestrationConfig(BaseSettings):
         "(durable runs without a Postgres instance; parent directories are "
         "created on first use).",
     )
-    checkpoint_resume_on_startup: bool = Field(
-        default=False,
+    checkpoint_resume_on_startup: bool | None = Field(
+        default=None,
         description="Start the background recovery sweeps: runs left in the "
         "'running' state by a crash/restart are re-entered, and runs that "
         "stopped making progress are marked failed. Sweeps repeat every "
         "recovery_sweep_interval_seconds (not just at startup); a run is only "
-        "re-entered once it has been silent for "
-        "recovery_resume_after_seconds, so one still executing is left alone. "
-        "Requires checkpoint_enabled; runs awaiting approval are never "
-        "auto-resumed.",
+        "re-entered once its lease (checkpoint_lease_seconds) has expired, so "
+        "one still executing is left alone. Unset (the default) turns it on "
+        "when the checkpoint backend is durable (postgres or sqlite) and off "
+        "for memory; true/false force it. Requires checkpoint_enabled; runs "
+        "awaiting approval are never auto-resumed.",
     )
     checkpoint_history_enabled: bool = Field(
         default=False,

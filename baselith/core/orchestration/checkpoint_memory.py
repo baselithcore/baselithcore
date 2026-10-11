@@ -19,6 +19,10 @@ from baselith.core.orchestration.checkpoint import (
     RESUMABLE_STATUSES,
     Checkpoint,
 )
+from baselith.core.orchestration.checkpoint_errors import (
+    CheckpointConflictError,
+    CheckpointLeaseHeldError,
+)
 
 _deepcopy = copy.deepcopy
 
@@ -136,17 +140,29 @@ class InMemoryCheckpointStore:
             self._store.pop(victim, None)
             self._history.pop(victim, None)
 
+    def _check_version(self, checkpoint: Checkpoint) -> dict[str, Any] | None:
+        """The stored row, after the compare-and-swap check on ``version``."""
+        stored = self._store.get(checkpoint.run_id)
+        if stored is not None and stored.get("version", 0) != checkpoint.version:
+            raise CheckpointConflictError(checkpoint.run_id, checkpoint.version)
+        return stored
+
+    def _snapshot(self, run_id: str, data: dict[str, Any]) -> None:
+        if self._history_enabled:
+            snapshots = self._history.setdefault(run_id, [])
+            snapshots.append(_copy_state(data))
+            if 0 < self._history_limit < len(snapshots):
+                del snapshots[: len(snapshots) - self._history_limit]
+
     async def save(self, checkpoint: Checkpoint) -> None:
+        """Insert, or overwrite while the stored version is still ours (CAS)."""
+        self._check_version(checkpoint)
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
         data = _copy_state(checkpoint.to_dict())
         self._store[checkpoint.run_id] = data
         self._evict_over_cap()
-        if self._history_enabled:
-            snapshots = self._history.setdefault(checkpoint.run_id, [])
-            snapshots.append(_copy_state(data))
-            if 0 < self._history_limit < len(snapshots):
-                del snapshots[: len(snapshots) - self._history_limit]
+        self._snapshot(checkpoint.run_id, data)
 
     async def save_step(
         self,
@@ -155,31 +171,77 @@ class InMemoryCheckpointStore:
         entry: dict[str, Any],
         trajectory_entry: dict[str, Any],
     ) -> None:
-        """Persist ONE new step without re-copying the whole checkpoint.
+        """Persist ONE new step without re-copying the accumulated steps.
 
         Same contract as the Postgres fast path: called after
-        ``CheckpointManager.run_step`` mutated the in-memory checkpoint;
-        version/updated_at bookkeeping stays in lock-step with :meth:`save`.
-        Cumulative copy work over an n-step run drops from O(n²) to O(n).
-        Falls back to a full :meth:`save` when the run is not stored yet.
+        ``CheckpointManager.run_step`` mutated the in-memory checkpoint. The
+        new step and trajectory line are appended and every other field
+        (budget, plugin data, inputs, lease, …) is rewritten, so the stored
+        state equals what a full :meth:`save` would produce. Cumulative copy
+        work over an n-step run stays O(n) in steps. Falls back to a full
+        :meth:`save` when the run is not stored yet.
         """
-        stored = self._store.get(checkpoint.run_id)
+        stored = self._check_version(checkpoint)
         if stored is None:
             await self.save(checkpoint)
             return
         checkpoint.updated_at = time.time()
         checkpoint.version += 1
+        stored.update(_copy_state(checkpoint.head_dict()))
         stored["steps"][key] = _copy_state(entry)
         stored["trajectory"].append(_copy_json_shaped(trajectory_entry))
-        stored["step"] = checkpoint.step
-        stored["status"] = checkpoint.status
-        stored["version"] = checkpoint.version
-        stored["updated_at"] = checkpoint.updated_at
-        if self._history_enabled:
-            snapshots = self._history.setdefault(checkpoint.run_id, [])
-            snapshots.append(_copy_state(stored))
-            if 0 < self._history_limit < len(snapshots):
-                del snapshots[: len(snapshots) - self._history_limit]
+        self._snapshot(checkpoint.run_id, stored)
+
+    async def claim(
+        self,
+        run_id: str,
+        owner: str,
+        lease_seconds: float,
+        *,
+        now: float | None = None,
+    ) -> Checkpoint | None:
+        """Take the run's lease (see ``checkpoint_lease``); None when absent.
+
+        Raises:
+            CheckpointLeaseHeldError: Another owner's lease is still live.
+        """
+        stored = self._store.get(run_id)
+        if stored is None:
+            return None
+        current = time.time() if now is None else now
+        holder, expires = stored.get("owner"), stored.get("lease_expires_at")
+        if holder not in (None, owner) and expires is not None and expires > current:
+            raise CheckpointLeaseHeldError(run_id, holder, expires)
+        if holder != owner:
+            # Fencing: a write still in flight from the previous owner must
+            # now lose its compare-and-swap.
+            stored["version"] = stored.get("version", 0) + 1
+        stored["owner"] = owner
+        stored["lease_expires_at"] = current + lease_seconds
+        return Checkpoint.from_dict(_copy_state(stored))
+
+    async def renew_lease(
+        self,
+        run_id: str,
+        owner: str,
+        lease_seconds: float,
+        *,
+        now: float | None = None,
+    ) -> bool:
+        """Extend ``owner``'s lease; False when the run is no longer theirs."""
+        stored = self._store.get(run_id)
+        if stored is None or stored.get("owner") != owner:
+            return False
+        current = time.time() if now is None else now
+        stored["lease_expires_at"] = current + lease_seconds
+        return True
+
+    async def release_lease(self, run_id: str, owner: str) -> None:
+        """Clear the lease if ``owner`` still holds it."""
+        stored = self._store.get(run_id)
+        if stored is not None and stored.get("owner") == owner:
+            stored["owner"] = None
+            stored["lease_expires_at"] = None
 
     async def load(self, run_id: str) -> Checkpoint | None:
         data = self._store.get(run_id)

@@ -578,7 +578,9 @@ ORCHESTRATOR_CONFIDENCE_THRESHOLD=0.6
 ORCHESTRATOR_CHECKPOINT_ENABLED=true
 ORCHESTRATOR_CHECKPOINT_BACKEND=auto              # 'postgres' | 'sqlite' | 'memory' | 'auto'
 ORCHESTRATOR_CHECKPOINT_SQLITE_PATH=data/checkpoints.db   # 'sqlite' backend only
-ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
+# Unset (default): auto-resume crashed runs on postgres/sqlite, never on memory.
+# ORCHESTRATOR_CHECKPOINT_RESUME_ON_STARTUP=false
+ORCHESTRATOR_CHECKPOINT_LEASE_SECONDS=60         # per-run ownership lease, renewed each step
 ORCHESTRATOR_CHECKPOINT_HISTORY_ENABLED=false
 ORCHESTRATOR_CHECKPOINT_HISTORY_LIMIT=200         # 0 = unlimited snapshots per run
 ORCHESTRATOR_CHECKPOINT_MEMORY_MAX_ENTRIES=1000   # retained-run cap, memory backend only

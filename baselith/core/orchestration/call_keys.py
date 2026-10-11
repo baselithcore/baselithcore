@@ -49,6 +49,7 @@ __all__ = [
     "call_step_key",
     "canonical_arguments",
     "derive_call_key",
+    "step_key",
 ]
 
 #: Version tag mixed into every content-addressed key. It domain-separates the
@@ -162,3 +163,29 @@ class CallOccurrences:
         occurrence = self._seen.get(identity, 0)
         self._seen[identity] = occurrence + 1
         return occurrence
+
+
+# Moved from ``checkpoint`` (module size cap); re-exported there.
+def _canonical_args_hash(args: Any) -> str:
+    """Stable short hash of tool args for the idempotency key.
+
+    Uses canonical JSON (sorted keys) so equal args always hash identically;
+    falls back to ``repr`` for values JSON can't encode.
+    """
+    try:
+        encoded = json.dumps(args, sort_keys=True, ensure_ascii=False, default=repr)
+    except (TypeError, ValueError):
+        encoded = repr(args)
+    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
+
+
+def step_key(cursor: int, tool_name: str, args: Any) -> str:
+    """Legacy positional key for a single tool step.
+
+    Superseded by :func:`baselith.core.orchestration.call_keys.call_step_key`: the
+    cursor made the key depend on the path the run took, so a resumed pass
+    that reached a recorded step at a different position re-executed it. Still
+    consulted by :meth:`CheckpointManager.run_step` as a fallback, so a
+    checkpoint written before the switch resumes as it always did.
+    """
+    return f"{cursor}:{tool_name}:{_canonical_args_hash(args)}"

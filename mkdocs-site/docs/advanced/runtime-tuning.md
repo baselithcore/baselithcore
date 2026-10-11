@@ -247,9 +247,10 @@ exactly as before.
 
 On top of that, per-tool-step persistence is now **incremental**:
 `CheckpointManager.run_step` calls the store's optional `save_step()`
-fast-path, which patches only the new step entry, its trajectory element and
-the scalar bookkeeping fields into the JSONB row (`jsonb_set`) instead of
-re-serializing the whole accumulated state. Cumulative bytes written over an
+fast-path, which appends only the new step entry and its trajectory element
+(`jsonb_set`) and merges the run's other top-level fields — budget,
+`plugin_data`, inputs, status, lease — with `||`, instead of re-serializing the
+whole accumulated state. Cumulative bytes written over an
 n-step run drop from O(n²) to O(n); a `load()` after incremental writes is
 byte-identical to one after full saves. Stores implementing only the
 `CheckpointStore` protocol (no `save_step`) keep working through the full

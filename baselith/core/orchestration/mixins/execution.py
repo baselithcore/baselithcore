@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Optional
 from baselith.core.context import set_plugin_context
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.autonomy import ApprovalPendingError
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_lease import end_checkpoint_attempt
 from baselith.core.orchestration.limits import (
     BudgetExceededError,
     LoopBudget,
@@ -28,6 +30,7 @@ from baselith.core.orchestration.mixins._context_assembly import (
 from baselith.core.orchestration.mixins._failure_paths import (
     handle_budget_exceeded,
     handle_cancellation,
+    handle_checkpoint_conflict,
     handle_handler_error,
 )
 from baselith.core.orchestration.mixins._flow_events import (
@@ -180,6 +183,7 @@ class ExecutionMixin:
         context["loop_budget"] = budget
         token = activate_budget(budget)
         guarded: dict[str, Any] | None = None
+        prior_checkpoint = context.get("checkpoint")
         try:
             result = await self._process_with_budget(
                 query, context, intent, budget, run_id, resume
@@ -190,6 +194,10 @@ class ExecutionMixin:
             guarded = await guard_output_async(result)
             return guarded
         finally:
+            # Stop this attempt's lease heartbeat and hand the run back —
+            # only for a manager this call created, never a caller's.
+            if context.get("checkpoint") is not prior_checkpoint:
+                await end_checkpoint_attempt(context.get("checkpoint"))
             deactivate_budget(token)
             emit_staged_flow_completed(context, guarded)
 
@@ -203,12 +211,17 @@ class ExecutionMixin:
         run_id: str | None,
         resume: bool,
     ) -> "CheckpointManager":
-        """Create or resume a checkpoint (body in ``checkpoint.init_checkpoint``)."""
-        from baselith.core.orchestration.checkpoint import init_checkpoint
+        """Create or resume a checkpoint and start its lease heartbeat.
 
-        return await init_checkpoint(
+        Body in :func:`~baselith.core.orchestration.checkpoint_init.init_checkpoint`.
+        """
+        from baselith.core.orchestration.checkpoint_init import init_checkpoint
+
+        manager = await init_checkpoint(
             store, query, context, intent, budget, run_id, resume
         )
+        manager.start_heartbeat()
+        return manager
 
     async def _process_with_budget(
         self,
@@ -391,6 +404,8 @@ class ExecutionMixin:
             return await handle_budget_exceeded(
                 e, intent, checkpoint_mgr, events_run_id
             )
+        except CheckpointConflictError as e:
+            return handle_checkpoint_conflict(e, intent, events_run_id)
         except Exception as e:
             return await handle_handler_error(
                 e, intent, checkpoint_mgr, events_run_id, start_time

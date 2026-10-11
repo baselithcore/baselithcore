@@ -23,14 +23,20 @@ checkpointer / Temporal's event history:
   readable: a miss on the new key falls back to the positional one.
 
 The store is pluggable: an in-memory implementation ships here for tests and
-single-process use; a Postgres-backed one lives in ``checkpoint_postgres`` for
-durability across process restarts.
+single-process use; Postgres (``checkpoint_postgres``) and SQLite
+(``checkpoint_sqlite``) backends survive process restarts.
+
+Concurrency is explicit. Every write is a compare-and-swap on ``version``: a
+writer holding a stale copy gets :class:`CheckpointConflictError` and the run
+stops instead of clobbering newer state. Who may execute a run is decided by a
+per-run lease (``owner`` + ``lease_expires_at``, see
+:mod:`baselith.core.orchestration.checkpoint_lease`), claimed atomically on
+start and resume, renewed on every step and by a heartbeat, released at the end
+of the attempt.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -38,13 +44,23 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from baselith.core.observability.agent_spans import tool_span
 from baselith.core.observability.logging import get_logger
-from baselith.core.orchestration.call_keys import CallOccurrences, call_step_key
+from baselith.core.orchestration.call_keys import (
+    CallOccurrences,
+    call_step_key,
+    step_key,
+)
+from baselith.core.orchestration.checkpoint_errors import (
+    CheckpointConflictError,
+    CheckpointLeaseHeldError,
+)
+from baselith.core.orchestration.checkpoint_lease import LeaseHolder
 
 if TYPE_CHECKING:  # re-exported below through the module __getattr__ shim
     from baselith.core.orchestration.checkpoint_approvals import (
         ApprovalPrincipal,
         record_approval_decision,
     )
+    from baselith.core.orchestration.checkpoint_init import init_checkpoint
     from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 
 logger = get_logger(__name__)
@@ -71,31 +87,6 @@ DEFAULT_RESUMABLE_LIMIT = 500
 MAX_RESUMABLE_LIMIT = 5000
 
 
-def _canonical_args_hash(args: Any) -> str:
-    """Stable short hash of tool args for the idempotency key.
-
-    Uses canonical JSON (sorted keys) so equal args always hash identically;
-    falls back to ``repr`` for values JSON can't encode.
-    """
-    try:
-        encoded = json.dumps(args, sort_keys=True, ensure_ascii=False, default=repr)
-    except (TypeError, ValueError):
-        encoded = repr(args)
-    return hashlib.sha256(encoded.encode()).hexdigest()[:16]
-
-
-def step_key(cursor: int, tool_name: str, args: Any) -> str:
-    """Legacy positional key for a single tool step.
-
-    Superseded by :func:`baselith.core.orchestration.call_keys.call_step_key`: the
-    cursor made the key depend on the path the run took, so a resumed pass
-    that reached a recorded step at a different position re-executed it. Still
-    consulted by :meth:`CheckpointManager.run_step` as a fallback, so a
-    checkpoint written before the switch resumes as it always did.
-    """
-    return f"{cursor}:{tool_name}:{_canonical_args_hash(args)}"
-
-
 @dataclass
 class Checkpoint:
     """A JSON-serializable snapshot of one agent-loop run.
@@ -108,8 +99,9 @@ class Checkpoint:
             re-run).
         status: ``running`` | ``completed`` | ``failed``.
         step: Highest replay cursor reached (progress indicator).
-        budget: ``LoopBudgetSnapshot`` as a dict; restored so caps continue
-            across resume rather than resetting to a full budget.
+        budget: ``LoopBudgetSnapshot`` as a dict, refreshed on every step
+            save; restored so caps continue across resume rather than
+            resetting to a full budget.
         trajectory: Ordered list of executed steps (audit / trajectory eval).
         plugin_data: Handler/plugin scratch state carried across resume.
         answer: Final answer when completed.
@@ -118,7 +110,12 @@ class Checkpoint:
         pending_approval: Human-in-the-loop pause payload when status is
             ``awaiting_approval``: the tool/category awaiting review plus, once
             recorded, the reviewer's ``decision``.
-        version: Monotonic counter for optimistic concurrency in the store.
+        inputs: JSON-safe subset of the request context, restored on resume
+            (see :mod:`baselith.core.orchestration.checkpoint_inputs`).
+        owner: Executor holding the run's lease, ``None`` when unowned.
+        lease_expires_at: Unix time the owner's lease runs out.
+        version: Compare-and-swap counter: a save succeeds only while the
+            stored version still equals this one.
         created_at / updated_at: Unix timestamps.
     """
 
@@ -135,6 +132,9 @@ class Checkpoint:
     error: str | None = None
     steps: dict[str, dict[str, Any]] = field(default_factory=dict)
     pending_approval: dict[str, Any] | None = None
+    inputs: dict[str, Any] = field(default_factory=dict)
+    owner: str | None = None
+    lease_expires_at: float | None = None
     version: int = 0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -158,7 +158,21 @@ class Checkpoint:
             "version": self.version,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            # Appended, not interleaved: the /runs state body keeps its order.
+            "inputs": self.inputs,
+            "owner": self.owner,
+            "lease_expires_at": self.lease_expires_at,
         }
+
+    def head_dict(self) -> dict[str, Any]:
+        """Every field but the two that grow per step (``steps``, ``trajectory``).
+
+        What an incremental step save rewrites besides the new step, so it
+        persists the same state a full save would (budget, plugin data, …).
+        """
+        head = self.to_dict()
+        del head["steps"], head["trajectory"]
+        return head
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Checkpoint:
@@ -181,6 +195,9 @@ _CHECKPOINT_FIELDS = {
     "error",
     "steps",
     "pending_approval",
+    "inputs",
+    "owner",
+    "lease_expires_at",
     "version",
     "created_at",
     "updated_at",
@@ -192,7 +209,12 @@ class CheckpointStore(Protocol):
     """Persistence contract for checkpoints."""
 
     async def save(self, checkpoint: Checkpoint) -> None:
-        """Insert or update the checkpoint (upsert by ``run_id``)."""
+        """Insert, or update while the stored version equals ``checkpoint.version``.
+
+        Bumps ``checkpoint.version`` on success. A store implementing the
+        concurrency contract raises :class:`CheckpointConflictError` when the
+        stored version moved on.
+        """
         ...
 
     async def load(self, run_id: str) -> Checkpoint | None:
@@ -216,17 +238,35 @@ class CheckpointStore(Protocol):
         ...
 
 
-class CheckpointManager:
+class CheckpointManager(LeaseHolder):
     """Runtime façade a handler uses to make its tool steps durable.
 
     Exposed to handlers on the orchestration context as ``context["checkpoint"]``.
     Wrap each tool invocation in :meth:`run_step`; call :meth:`complete` /
     :meth:`fail` at the end of the run.
+
+    Args:
+        store: The checkpoint store.
+        checkpoint: The run's state.
+        budget: The request's ``LoopBudget``; when given, its snapshot is
+            written with every save, so a crash never loses the counters.
+        owner: This attempt's lease owner id (``None``: no lease).
+        lease_seconds: Lease length the heartbeat and step saves renew.
     """
 
-    def __init__(self, store: CheckpointStore, checkpoint: Checkpoint) -> None:
+    def __init__(
+        self,
+        store: CheckpointStore,
+        checkpoint: Checkpoint,
+        *,
+        budget: Any | None = None,
+        owner: str | None = None,
+        lease_seconds: float | None = None,
+    ) -> None:
         self.store = store
         self.checkpoint = checkpoint
+        self.budget = budget
+        self._init_lease(owner, lease_seconds)
         # Replay cursor for the *current* pass: trajectory order, and the
         # legacy positional key. Reset to 0 each pass.
         self._cursor = 0
@@ -317,6 +357,8 @@ class CheckpointManager:
             )
             return recorded["result"]
 
+        # Fence the side effect: an attempt that lost its lease must not run it.
+        await self.ensure_lease()
         # The tool span attributes the call to whichever agent is running, so a
         # topology view can draw agent-to-tool edges. Replayed steps get no
         # span: nothing executed, and a zero-duration bar would misreport the
@@ -343,6 +385,8 @@ class CheckpointManager:
         self.checkpoint.trajectory.append(trajectory_entry)
         self.checkpoint.step = max(self.checkpoint.step, cursor + 1)
         self.checkpoint.status = STATUS_RUNNING
+        self._sync_budget()
+        self.extend_local_lease()
         # Stores may expose an incremental fast-path that writes only the new
         # step instead of re-serializing the whole accumulated state (which
         # made an n-step run O(n²) bytes over the wire). Optional by design:
@@ -355,22 +399,29 @@ class CheckpointManager:
         return result
 
     def update_budget(self, snapshot: Any) -> None:
-        """Record the latest budget snapshot on the checkpoint (not persisted)."""
+        """Record a budget snapshot on the checkpoint; the next save persists it."""
         if hasattr(snapshot, "__dict__"):
             self.checkpoint.budget = dict(snapshot.__dict__)
         elif isinstance(snapshot, dict):
             self.checkpoint.budget = dict(snapshot)
 
+    def _sync_budget(self) -> None:
+        """Copy the live budget counters onto the checkpoint before a save."""
+        if self.budget is not None:
+            self.update_budget(self.budget.snapshot())
+
     async def complete(self, answer: Any | None = None) -> None:
         """Mark the run completed and persist the final state."""
         self.checkpoint.status = STATUS_COMPLETED
         self.checkpoint.answer = answer
+        self._sync_budget()
         await self.store.save(self.checkpoint)
 
     async def fail(self, error: str) -> None:
         """Mark the run failed and persist, so it can be inspected or resumed."""
         self.checkpoint.status = STATUS_FAILED
         self.checkpoint.error = error
+        self._sync_budget()
         await self.store.save(self.checkpoint)
 
     async def await_approval(self, tool_name: str, category: str) -> None:
@@ -386,6 +437,7 @@ class CheckpointManager:
             "category": category,
             "requested_at": time.time(),
         }
+        self._sync_budget()
         await self.store.save(self.checkpoint)
 
     def approval_decision(self, tool_name: str, category: str) -> bool | None:
@@ -402,64 +454,16 @@ class CheckpointManager:
         return bool(pending["decision"].get("approved"))
 
 
-async def init_checkpoint(
-    store: CheckpointStore,
-    query: str,
-    context: dict[str, Any],
-    intent: str | None,
-    budget: Any,
-    run_id: str | None,
-    resume: bool,
-) -> CheckpointManager:
-    """Create a fresh checkpoint or resume an existing one.
-
-    On resume, restores the budget counters from the stored snapshot so caps
-    continue across the restart rather than resetting to a full budget.
-    (Extracted from the execution mixin for the module size cap.)
-    """
-    import uuid
-
-    tenant_id = context.get("tenant_id")
-    if resume and run_id:
-        existing = await store.load(run_id)
-        if existing is not None:
-            b = existing.budget or {}
-            budget.iterations = int(b.get("iterations", 0))
-            budget.tool_calls = int(b.get("tool_calls", 0))
-            budget.cost_usd = float(b.get("cost_usd", 0.0))
-            # Tokens are the counter a long run is most likely to be near, and
-            # dropping them handed the resumed run a full token cap — the one
-            # way a crash-loop could spend without bound. ``context_tokens``
-            # rides along so the allocation signal (and the token-pressure
-            # fallback that reads it) survives the restart too.
-            budget.tokens = int(b.get("tokens", 0))
-            budget.context_tokens = int(b.get("context_tokens", 0))
-            existing.status = STATUS_RUNNING
-            logger.info(
-                "checkpoint_resume run=%s steps=%d",
-                run_id,
-                len(existing.steps),
-            )
-            return CheckpointManager(store, existing)
-        logger.warning(
-            "checkpoint_resume_miss run=%s not found; starting fresh", run_id
-        )
-
-    checkpoint = Checkpoint(
-        run_id=run_id or uuid.uuid4().hex,
-        tenant_id=tenant_id,
-        query=query,
-        intent=intent,
-    )
-    await store.save(checkpoint)
-    return CheckpointManager(store, checkpoint)
-
-
-# The operator-side approval flow lives in ``checkpoint_approvals`` (module
-# size cap) and is re-exported here so ``from baselith.core.orchestration.checkpoint
-# import record_approval_decision`` keeps working. Deferred, like the in-memory
-# store below: both siblings import the contract from this module.
+# The operator-side approval flow lives in ``checkpoint_approvals`` and
+# ``init_checkpoint`` in ``checkpoint_init`` (module size cap); both are
+# re-exported here so ``from baselith.core.orchestration.checkpoint import
+# record_approval_decision`` keeps working. Deferred, like the in-memory store
+# below: the siblings import the contract from this module.
 def __getattr__(name: str) -> Any:  # pragma: no cover - import shim
+    if name == "init_checkpoint":
+        from baselith.core.orchestration.checkpoint_init import init_checkpoint
+
+        return init_checkpoint
     if name == "InMemoryCheckpointStore":
         from baselith.core.orchestration.checkpoint_memory import (
             InMemoryCheckpointStore,
@@ -483,6 +487,8 @@ __all__ = [
     "STATUS_RUNNING",
     "ApprovalPrincipal",
     "Checkpoint",
+    "CheckpointConflictError",
+    "CheckpointLeaseHeldError",
     "CheckpointManager",
     "CheckpointStore",
     "InMemoryCheckpointStore",

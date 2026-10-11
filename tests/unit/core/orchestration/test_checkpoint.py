@@ -454,8 +454,13 @@ class TestSaveStepFastPath:
         )
 
         cursor = MagicMock()
-        cursor.execute = AsyncMock()
-        cursor.rowcount = 0  # no existing row: first persist of the run
+
+        async def _execute(sql, params=None):
+            # No existing row: the step UPDATE matches nothing, the INSERT
+            # of the full upsert creates the row.
+            cursor.rowcount = 0 if sql.lstrip().startswith("UPDATE") else 1
+
+        cursor.execute = AsyncMock(side_effect=_execute)
         with patch(
             "baselith.core.orchestration.checkpoint_postgres.get_async_cursor",
             self._cursor_ctx(cursor),

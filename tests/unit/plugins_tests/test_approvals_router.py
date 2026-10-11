@@ -277,3 +277,69 @@ class TestResume:
     def test_resume_404_for_unknown_run(self, client):
         resp = client.post("/approvals/nope/resume")
         assert resp.status_code == 404
+
+
+class TestResumeDurability:
+    """The resume route goes through the orchestrator's restore and lease."""
+
+    @staticmethod
+    def _real_orchestrator(store, seen):
+        from baselith.core.orchestration.orchestrator import Orchestrator
+
+        class _Peek:
+            async def handle(self, query, context):
+                seen.update(context)
+                return {"response": "resumed"}
+
+        orch = Orchestrator(checkpoint_store=store, default_intent="test_intent")
+        orch._flow_handlers["test_intent"] = _Peek()
+        return orch
+
+    def test_resume_restores_the_inputs_the_run_started_with(
+        self, client, store, monkeypatch
+    ):
+        import anyio
+
+        async def _seed():
+            checkpoint = await _paused_run(store)
+            checkpoint.intent = "test_intent"
+            checkpoint.inputs = {"strategy": "bfs", "history_text": "user: earlier"}
+            await store.save(checkpoint)
+
+        anyio.run(_seed)
+        seen: dict = {}
+
+        class _ChatService:
+            agent = self._real_orchestrator(store, seen)
+
+        import baselith.core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _ChatService())
+        resp = client.post("/approvals/run-1/resume")
+
+        assert resp.status_code == 200
+        assert seen["strategy"] == "bfs"
+        assert seen["history_text"] == "user: earlier"
+
+    def test_resume_of_a_run_executing_elsewhere_is_409(
+        self, client, store, monkeypatch
+    ):
+        import anyio
+
+        async def _seed():
+            await _paused_run(store)
+            await store.claim("run-1", "another-worker", 600.0)
+
+        anyio.run(_seed)
+        seen: dict = {}
+
+        class _ChatService:
+            agent = self._real_orchestrator(store, seen)
+
+        import baselith.core.chat as chat_module
+
+        monkeypatch.setattr(chat_module, "chat_service", _ChatService())
+        resp = client.post("/approvals/run-1/resume")
+
+        assert resp.status_code == 409
+        assert seen == {}

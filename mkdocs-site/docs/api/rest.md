@@ -305,6 +305,11 @@ fetches — which removes that run from the listing — never makes the next pag
 skip or repeat an entry. The listing covers the 500 most recent pending runs;
 a fuller backlog logs `approvals_listing_window_full`.
 
+`POST /approvals/{run_id}/resume` answers `409` while another replica holds
+the run's lease (the run is still executing there); retry once the lease
+expires. A resumed run gets back its persisted inputs (strategy, tool names,
+history) and budget counters.
+
 Cursors are **opaque** — do not parse or construct them; the server may change
 the encoding. An invalid cursor returns `400`. Older operator surfaces keep
 their own scheme:
