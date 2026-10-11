@@ -109,21 +109,72 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
     assert call_args.query == "Hello Stream"
 
 
-def test_chat_run_id_follows_the_idempotency_key(client, mock_chat_service):
-    """A retry with the same Idempotency-Key is an attempt at the same run."""
+def _posted_run_ids(client, mock_chat_service, requests, user_ids):
+    """POST each (headers) in ``requests`` as the matching user; return run ids."""
+    from unittest.mock import patch
+
     mock_chat_service.handle_chat_async = AsyncMock(
         return_value=ChatResponse(answer="ok", sources=[])
     )
-    payload = {"query": "Hello"}
-    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-1"})
-    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-1"})
-    client.post("/chat", json=payload, headers={"Idempotency-Key": "k-2"})
-
-    ids = [
+    for headers, user_id in zip(requests, user_ids, strict=True):
+        with patch("baselith.core.context.get_current_user_id", return_value=user_id):
+            client.post("/chat", json={"query": "Hello"}, headers=headers)
+    return [
         c.kwargs["run_id"] for c in mock_chat_service.handle_chat_async.call_args_list
     ]
+
+
+def test_chat_run_id_follows_the_idempotency_key(client, mock_chat_service):
+    """A retry with the same Idempotency-Key is an attempt at the same run."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [
+            {"Idempotency-Key": "k-1"},
+            {"Idempotency-Key": "k-1"},
+            {"Idempotency-Key": "k-2"},
+        ],
+        ["alice", "alice", "alice"],
+    )
     assert ids[0] == ids[1] != ids[2]
     assert all(run_id.startswith("chat-") for run_id in ids)
+
+
+def test_chat_run_id_is_scoped_to_the_principal(client, mock_chat_service):
+    """Two users reusing a key never share a run, nor each other's answer."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"Idempotency-Key": "k-1"}, {"Idempotency-Key": "k-1"}],
+        ["alice", "bob"],
+    )
+    assert ids[0] != ids[1]
+
+
+@pytest.mark.parametrize("user_id", [None, "anonymous"])
+def test_anonymous_callers_never_get_a_replayable_run(
+    client, mock_chat_service, user_id
+):
+    """Every anonymous caller shares one principal id: a key from them would
+    let one caller read back another's recorded answer."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"Idempotency-Key": "k-1"}, {"Idempotency-Key": "k-1"}],
+        [user_id, user_id],
+    )
+    assert ids[0] != ids[1]
+
+
+def test_request_id_is_not_a_replay_key(client, mock_chat_service):
+    """X-Request-ID is client-chosen and echoed in responses and logs."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"X-Request-ID": "req-1"}, {"X-Request-ID": "req-1"}],
+        ["alice", "alice"],
+    )
+    assert ids[0] != ids[1]
 
 
 def test_chat_run_lease_held_elsewhere_answers_409(client, mock_chat_service):

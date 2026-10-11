@@ -7,7 +7,7 @@ and an RQ retry of an agent-run job started a new run from scratch, re-paying
 every LLM call and re-executing every effect the ledger could not match.
 
 :func:`derive_run_id` turns an entry point's own retry identity (an
-``Idempotency-Key`` / ``X-Request-ID`` header, an RQ job id) into a run id
+``Idempotency-Key`` header from an authenticated caller, an RQ job id) into a run id
 scoped to the tenant and principal, and :func:`process_with_stable_run_id`
 decides what an attempt under that id does:
 

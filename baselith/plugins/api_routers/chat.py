@@ -134,29 +134,35 @@ def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[st
     return headers
 
 
-def chat_run_id(request: Request) -> str:
-    """The stable run id of this chat request (see ``derive_run_id``).
+#: Principal ids that name nobody in particular. Every unauthenticated caller
+#: shares them, so they can never scope a replayable run.
+_SHARED_PRINCIPALS = frozenset({"", "anonymous"})
 
-    Built from the ``Idempotency-Key`` header when the client sent one, else
-    from the request id (a client-supplied ``X-Request-ID``, or the one the
-    request-id middleware generated), scoped to the tenant and the user: a
-    client retrying with the same key resumes the same durable run instead of
-    starting over, and two principals reusing a value never share a run.
+
+def chat_run_id(request: Request) -> str:
+    """The run id of this chat request (see ``derive_run_id``).
+
+    Only an explicit ``Idempotency-Key`` from an authenticated, non-anonymous
+    principal names a stable run, scoped to the tenant and that principal: a
+    retry with the same key resumes the same durable run, or gets back its
+    recorded answer. Anything else gets a fresh random id and never replays.
+    The ``X-Request-ID`` is not a replay key: the client chooses it, and it is
+    echoed in responses, logs and error reports, so treating it as one would
+    hand a recorded answer to whoever learns it. Anonymous callers all share
+    one principal id, so a key from them would let one read another's answer.
     """
     from baselith.core.context import get_current_tenant_id, get_current_user_id
     from baselith.core.orchestration.run_ids import derive_run_id
 
     key = request.headers.get("idempotency-key")
-    if key:
-        source = f"idempotency:{key}"
-    else:
-        request_id = request_id_ctx.get("-")
-        source = f"request:{request_id if request_id != '-' else uuid.uuid4().hex}"
+    principal = get_current_user_id()
+    if not key or principal is None or principal in _SHARED_PRINCIPALS:
+        return f"chat-{uuid.uuid4().hex}"
     return derive_run_id(
         "chat",
-        source,
+        f"idempotency:{key}",
         tenant_id=get_current_tenant_id(),
-        principal=get_current_user_id(),
+        principal=principal,
     )
 
 
@@ -170,10 +176,11 @@ async def chat(req: ChatRequest, request: Request, response: Response) -> ChatRe
     Main endpoint for querying the agent.
     Delegated to ChatService which handles retrieval, reranking, caching, and response generation.
 
-    The run is named by the request's ``Idempotency-Key`` (else its request
-    id): a retry with the same key resumes the durable run, or returns its
-    answer when it already finished. A retry while the first attempt still
-    executes elsewhere answers **409**.
+    An authenticated caller's ``Idempotency-Key`` names the run: a retry with
+    the same key resumes the durable run, or returns its answer when it
+    already finished. A retry while the first attempt still executes
+    elsewhere answers **409**. Without a key, or from an anonymous caller,
+    every request is a fresh run.
     """
     from baselith.core.orchestration.checkpoint_errors import (
         CheckpointLeaseHeldError,

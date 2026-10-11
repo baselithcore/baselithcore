@@ -940,12 +940,14 @@ service used to call `process()` without a `run_id`, and every RQ attempt of
 an agent-run job started a new run, so a retry re-paid every LLM call and the
 idempotency ledger had nothing to match.
 
-- **`POST /chat`** names its run after the request's `Idempotency-Key` header,
-  or else its request id (a client-supplied `X-Request-ID`, or the one the
-  request-id middleware generated), through
-  `derive_run_id("chat", key, tenant_id=…, principal=…)` — scoped to the
-  tenant and the user, so two principals reusing a header value never share
-  a run or each other's answers.
+- **`POST /chat`** names its run after the request's `Idempotency-Key`
+  header, through `derive_run_id("chat", key, tenant_id=…, principal=…)` —
+  scoped to the tenant and the user, so two principals reusing a key never
+  share a run or each other's answers. Only an authenticated, non-anonymous
+  principal gets a replayable run: every anonymous caller shares one
+  principal id. Without the key, or anonymously, the run id is random and a
+  retry starts over. `X-Request-ID` is not used: the client picks it, and
+  responses, logs and error reports echo it.
 - **RQ agent-run jobs** use the job id: every attempt of a job is the same run
   (`agent_job_run_id(job_id)`).
 

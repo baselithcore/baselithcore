@@ -575,12 +575,14 @@ Durability now reaches the entry points and runners that had none
   sweep on any replica resumes it at once. Only a cancellation outside a drain
   (client disconnect, explicit cancel, timeout) still fails it with
   `cancelled`. Its run-event stream now ends with `interrupted_by_shutdown`.
-- **`POST /chat` names its run.** The run id is derived from the request's
-  `Idempotency-Key` (else its `X-Request-ID`, else a generated one), scoped to
-  tenant and user. A client retrying with the same key resumes the run, or
-  gets the recorded answer of one that already completed, instead of starting
-  over; a retry while the first attempt still executes answers **409**. A key
-  reused for a different query starts a fresh run.
+- **`POST /chat` names its run.** For an authenticated, non-anonymous caller
+  the run id is derived from the request's `Idempotency-Key`, scoped to tenant
+  and user. A client retrying with the same key resumes the run, or gets the
+  recorded answer of one that already completed, instead of starting over; a
+  retry while the first attempt still executes answers **409**. A key reused
+  for a different query starts a fresh run. Without the header, or from an
+  anonymous caller, every request is a fresh run: `X-Request-ID` is never a
+  replay key, since the client picks it and responses and logs echo it.
 - **An RQ agent-run retry resumes its run.** Every attempt of a job runs under
   `agent_job_run_id(job_id)`, so completed steps replay and the tool ledger
   matches. When the recovery sweep finishes a run whose worker died, the
