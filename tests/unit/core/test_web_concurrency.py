@@ -11,9 +11,21 @@ from baselith.core.config.concurrency import (
 )
 
 
+def _owned_and_unset(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Unset *name* for this test and restore it afterwards.
+
+    ``delenv(..., raising=False)`` on an unset variable records nothing, so a
+    value the code under test writes into ``os.environ`` outlived the test (a
+    leaked BASELITH_WEB_CONCURRENCY=4 failed an unrelated boot-report test).
+    Setting it first makes monkeypatch own the variable.
+    """
+    monkeypatch.setenv(name, "")
+    monkeypatch.delenv(name)
+
+
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(WEB_CONCURRENCY_ENV, raising=False)
+    _owned_and_unset(monkeypatch, WEB_CONCURRENCY_ENV)
 
 
 def test_unset_means_single_process() -> None:
@@ -52,7 +64,7 @@ class TestSharedCpuThreads:
         from baselith.core.config.concurrency import THREAD_POOL_ENV_VARS
 
         for name in (*THREAD_POOL_ENV_VARS, "WEB_CONCURRENCY"):
-            monkeypatch.delenv(name, raising=False)
+            _owned_and_unset(monkeypatch, name)
 
     def test_workers_split_the_cpus(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import os
