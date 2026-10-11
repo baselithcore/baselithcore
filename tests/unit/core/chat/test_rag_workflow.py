@@ -170,12 +170,32 @@ class TestRagWorkflowHandler:
     def test_to_result(self, mock_service):
         state = AgentState(request=ChatRequest(query="test"))
         state.answer = "Test response"
-        state.doc_sources = [{"source": "doc1", "content": "text"}]
+        # The shape chat.context._extract_doc_source really produces.
+        state.doc_sources = [
+            {
+                "document_id": "d1",
+                "score": 0.8,
+                "title": "Guide",
+                "url": "https://docs/guide",
+                "source_type": "url",
+            },
+            {"document_id": "d2", "title": "notes.md", "path": "kb/notes.md"},
+        ]
+        state.context = "Fonte: https://docs/guide\n\nRetrieved text"
         state.guardrail_decision = GuardrailDecision(action="allow")
         state.clarification_reason = "More info needed"
 
         result = RagWorkflowHandler._to_result(state)
         assert result["response"] == "Test response"
-        assert result["sources"] == [{"source": "doc1", "content": "text"}]
+        assert result["sources"] == [
+            {
+                "source": "https://docs/guide",
+                "title": "Guide",
+                "document_id": "d1",
+                "score": 0.8,
+            },
+            {"source": "kb/notes.md", "title": "notes.md", "document_id": "d2"},
+        ]
+        assert result["context"] == state.context
         assert result["metadata"]["guardrail"] == "allow"
         assert result["metadata"]["clarification"] == "More info needed"

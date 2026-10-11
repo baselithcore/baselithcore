@@ -261,6 +261,18 @@ class TestBuildContextAndSources:
         assert "score" not in sources[0]
         assert "score_avg" not in sources[0]
 
+    @pytest.mark.parametrize("score", ["n/a", None, "", object()])
+    def test_unconvertible_score_does_not_raise(self, score):
+        """A string score used to raise TypeError on the floor comparison."""
+        hits = [
+            (_hit({"document_id": "a", "text": "A", "url": "https://a"}), 0.9),
+            (_hit({"document_id": "b", "text": "B", "url": "https://b"}), score),
+        ]
+        context, sources = _build(hits)
+        assert [s["document_id"] for s in sources] == ["a", "b"]
+        assert "score" not in sources[1]
+        assert "B" in context
+
     def test_fallback_readmits_hits_the_primary_pass_filtered(self):
         # Pass 1 keeps only "a" (empty text, no metadata) and "d" (empty):
         # "b" falls under the score floor, so no block survives and the

@@ -600,7 +600,8 @@ staged event. `process_stream` emits it once a stream completes
 patterns) always applies first. The **groundedness rail** then applies when
 enabled (`BASELITH_OUTPUT_GROUNDEDNESS=off` default | `annotate` | `block` —
 `baselith/core/orchestration/guard_groundedness.py`): a response whose result dict
-carries non-empty retrieved source material (`sources` or `context`) is
+carries non-empty retrieved source material (`sources` or `context`; a
+`sources` list of descriptors without text yields to `context`) is
 judged against it by `FaithfulnessEvaluator` — one extra LLM call per sourced
 response, which is why the default is off. `annotate` surfaces
 `{score, should_refine}` under `result["guardrails"]["groundedness"]`;

@@ -203,6 +203,12 @@ graph TD
     K --> L[Return with Sources]
 ```
 
+The handler's result carries `sources` (one entry per retrieved document:
+`source` — its URL or path —, `title`, `document_id` and, when ranked, its
+best `score`) and the assembled `context`, which the output groundedness rail
+judges the answer against. A retrieval hit whose score cannot be read as a
+number (`"n/a"`, `None`) is kept but ignored for ranking and the score floor.
+
 ### Backlog Planner
 
 `baselith/core/chat/workflow_planner.py` exposes `BacklogPlanner`, which mutates an

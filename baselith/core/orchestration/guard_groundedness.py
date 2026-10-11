@@ -62,8 +62,12 @@ def _sources_text(result: dict[str, Any]) -> str | None:
 
     ``sources`` entries may be plain strings or retrieval dicts (``content`` /
     ``text`` / ``snippet``); ``context`` is typically the raw RAG context
-    string. Returns None when the result carries no source material.
+    string. A ``sources`` list of descriptors with no text (title, URL, score)
+    is not source material when the result also carries ``context``: the
+    context wins, and the descriptors are used only as a last resort. Returns
+    None when the result carries no source material.
     """
+    fallback: str | None = None
     for key in _SOURCE_KEYS:
         value = result.get(key)
         if not value:
@@ -71,21 +75,27 @@ def _sources_text(result: dict[str, Any]) -> str | None:
         if isinstance(value, str):
             return value
         if isinstance(value, (list, tuple)):
-            parts: list[str] = []
+            texts: list[str] = []
+            described: list[str] = []
             for item in value:
                 if isinstance(item, dict):
                     text = (
                         item.get("content") or item.get("text") or item.get("snippet")
                     )
-                    parts.append(str(text) if text else str(item))
+                    if text:
+                        texts.append(str(text))
+                    else:
+                        described.append(str(item))
                 else:
-                    parts.append(str(item))
-            flattened = "\n\n".join(part for part in parts if part)
+                    texts.append(str(item))
+            flattened = "\n\n".join(part for part in texts if part)
             if flattened:
                 return flattened
+            if described and fallback is None:
+                fallback = "\n\n".join(described)
             continue
         return str(value)
-    return None
+    return fallback
 
 
 def _build_judge() -> Any:

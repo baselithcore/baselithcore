@@ -238,14 +238,20 @@ def build_context_and_sources(
     doc_scores: dict[str, float] = {}
     doc_score_lists: dict[str, list[float]] = {}
 
-    for hit, score in ranked_hits:
+    for hit, raw_score in ranked_hits:
+        # A reranker or store may hand back a non-numeric score ("n/a",
+        # None): it is ignored, neither recorded nor held to the floor.
+        try:
+            score: float | None = float(raw_score)
+        except (TypeError, ValueError):
+            score = None
         payload = getattr(hit, "payload", None) or {}
         doc_raw = payload.get("document_id")
         doc_key = str(doc_raw) if doc_raw is not None else str(getattr(hit, "id", ""))
         entry = doc_chunks.get(doc_key)
 
         if entry is None:
-            if score < min_rerank_score and doc_order:
+            if score is not None and score < min_rerank_score and doc_order:
                 continue
             if len(doc_order) >= MAX_DOCUMENTS:
                 continue
@@ -255,10 +261,8 @@ def build_context_and_sources(
             }
             doc_chunks[doc_key] = entry
             doc_order.append(doc_key)
-            try:
-                doc_scores[doc_key] = float(score)
-            except (TypeError, ValueError):
-                pass
+            if score is not None:
+                doc_scores[doc_key] = score
 
         chunk_index_int = _to_int(payload.get("chunk_index"))
         if chunk_index_int is not None:
@@ -282,10 +286,7 @@ def build_context_and_sources(
         if entry.get("primary_index") is None and chunk_index_int is not None:
             entry["primary_index"] = chunk_index_int
 
-        try:
-            score_float = float(score)
-        except (TypeError, ValueError):
-            score_float = None
+        score_float = score
         if score_float is not None:
             previous_score = doc_scores.get(doc_key)
             if previous_score is None or score_float > previous_score:

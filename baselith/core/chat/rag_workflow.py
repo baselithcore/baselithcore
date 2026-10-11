@@ -302,10 +302,11 @@ class RagWorkflowHandler:
     def _to_result(state: AgentState) -> dict[str, Any]:
         return {
             "response": state.answer or "",
-            "sources": [
-                {"source": s.get("source", ""), "content": s.get("content", "")}
-                for s in (state.doc_sources or [])
-            ],
+            # doc_sources entries (chat.context._extract_doc_source) carry a
+            # locator (url / path), a title, the document id and its best
+            # score; the retrieved text itself is the assembled context.
+            "sources": [_source_entry(s) for s in (state.doc_sources or [])],
+            "context": state.context,
             "metadata": {
                 "guardrail": (
                     state.guardrail_decision.action
@@ -315,6 +316,19 @@ class RagWorkflowHandler:
                 "clarification": state.clarification_reason,
             },
         }
+
+
+def _source_entry(doc: dict[str, Any]) -> dict[str, Any]:
+    """One result source from a ``doc_sources`` entry."""
+    locator = doc.get("url") or doc.get("path") or doc.get("title")
+    entry: dict[str, Any] = {
+        "source": str(locator or doc.get("document_id") or ""),
+        "title": doc.get("title"),
+        "document_id": doc.get("document_id"),
+    }
+    if doc.get("score") is not None:
+        entry["score"] = doc["score"]
+    return entry
 
 
 __all__ = ["AgentWorkflow", "RagWorkflow", "RagWorkflowHandler"]

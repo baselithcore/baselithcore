@@ -227,3 +227,20 @@ class TestSourceMaterial:
 
         assert result["response"] == "Paris is the capital."
         assert judge.calls == 0
+
+
+class TestSourcesText:
+    def test_context_wins_over_text_less_descriptors(self) -> None:
+        result = {
+            "sources": [{"source": "https://a", "title": "A"}],
+            "context": "the retrieved passage",
+        }
+        assert guard_groundedness._sources_text(result) == "the retrieved passage"
+
+    def test_textual_sources_still_win(self) -> None:
+        result = {"sources": [{"content": "chunk"}], "context": "ctx"}
+        assert guard_groundedness._sources_text(result) == "chunk"
+
+    def test_descriptors_are_the_last_resort(self) -> None:
+        text = guard_groundedness._sources_text({"sources": [{"title": "A"}]})
+        assert text is not None and "A" in text
