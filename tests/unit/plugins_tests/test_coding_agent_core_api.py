@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from baselith.core.agents.coding import CodeLanguage, CodingAgent
+from baselith.plugins.coding_agent import CodeLanguage, CodingAgent
 
 
 @pytest.fixture

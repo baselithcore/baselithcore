@@ -562,7 +562,7 @@ Every `Orchestrator.process` call passes through
 harmful-content patterns) with redaction counts surfaced under
 `result["guardrails"]`. The always-on loop path is deterministic and adds
 well under a millisecond at the default input cap; the opt-in LLM layers
-below supersede the deprecated `InputGuard.validate_async`.
+below superseded `InputGuard.validate_async`, removed in 1.0.
 
 The inbound gate is `guard_input_async` — a three-layer pipeline, cheapest
 first, each layer running only on what the previous one passed:

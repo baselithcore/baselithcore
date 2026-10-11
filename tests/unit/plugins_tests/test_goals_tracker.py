@@ -2,7 +2,7 @@ from datetime import UTC
 
 import pytest
 
-from baselith.core.goals.tracker import Goal, GoalStatus, GoalTracker
+from baselith.plugins.goals.tracker import Goal, GoalStatus, GoalTracker
 
 
 class TestGoal:

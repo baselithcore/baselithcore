@@ -1,8 +1,8 @@
 """Browser Agent plugin implementation.
 
-``baselith.plugins.browser_agent.agent`` is a frozen public import path: the
-``baselith.core.agents.browser_agent`` shim and ``scripts/check_architecture_boundaries.py``
-both encode it, and the SSRF suite patches ``agent.socket.getaddrinfo``. The
+``baselith.plugins.browser_agent.agent`` is a frozen public import path: it is
+where code that used the ``core.agents.browser_agent`` shim (removed in 1.0)
+now imports from, and the SSRF suite patches ``agent.socket.getaddrinfo``. The
 ``noqa: F401`` imports and the SSRF re-exports below keep that historic module
 surface bound here.
 """

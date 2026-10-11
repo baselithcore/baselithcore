@@ -257,7 +257,7 @@ upgrade, so nothing forces the rewrite.
 **Explanation**: that is the compatibility shim — `core.agents.browser_agent`
 imports `BrowserAgent` from `plugins.browser_agent.agent`, so both paths refer
 to the same class. Move to the plugin path anyway so your code does not depend
-on the deprecated layer:
+on the deprecated layer (1.0 removes `core.agents` and `core.goals`):
 
 ```python
 from plugins.browser_agent import BrowserAgent

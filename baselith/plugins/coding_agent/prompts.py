@@ -260,7 +260,7 @@ def explain_prompt(language: str, code: str) -> str:
     )
 
 
-# Pre-1.1 names, kept for callers that import them through baselith.core.agents.coding.prompts.
+# Pre-1.1 names, kept for callers that still import them from this module.
 def get_fix_prompt(language: str, code: str, error: str, context: str = "") -> str:
     """Deprecated alias of :func:`fix_prompt`."""
     return fix_prompt(language, code, error, context)

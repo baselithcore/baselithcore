@@ -144,7 +144,7 @@ Detection runs three complementary strategies in order, merging results:
 | **Memory Tiering** | `baselith.core.memory` | `baselith.ai/pattern-memory-tiering` |
 | **Evaluation** | `baselith.core.evaluation` | `baselith.ai/pattern-evaluation` |
 | **Task Queue** | `baselith.core.task_queue` | `baselith.ai/pattern-task-queue` |
-| **Goals** | `baselith.core.goals` | `baselith.ai/pattern-goals` |
+| **Goals** | `baselith.plugins.goals` | `baselith.ai/pattern-goals` |
 | **Orchestration** | `baselith.core.orchestration` | `baselith.ai/pattern-orchestration` |
 | **Knowledge Graph** | `baselith.core.graph` | `baselith.ai/pattern-knowledge-graph` |
 | **Multi-Tenancy** | `baselith.core.context` | `baselith.ai/pattern-multi-tenancy` |

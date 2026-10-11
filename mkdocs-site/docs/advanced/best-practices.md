@@ -123,7 +123,7 @@ The Sacred Core rule is the foundation of BaselithCore's architecture. Here's ho
 
 #### ❌ **Domain-Specific Agents in Core**
 
-**Example**: `baselith/core/agents/browser_agent.py`, `baselith/core/agents/coding/`
+**Example**: browser automation or code generation under `baselith/core/` (the old `core/agents/`, removed in 1.0)
 
 **Why it's wrong**: These implement specific agent behaviors (browser automation, code generation), not generic orchestration infrastructure.
 
@@ -377,7 +377,7 @@ The highest-priority Sacred Core violations have already been migrated out of `b
 
 | Legacy Area | Current State | Canonical Location |
 |-------------|---------------|--------------------|
-| `baselith/core/agents/` | Compatibility shims | `baselith/plugins/browser_agent/`, `baselith/plugins/coding_agent/` |
+| `core/agents/`, `core/goals/` | Removed in 1.0 | `baselith/plugins/browser_agent/`, `baselith/plugins/coding_agent/`, `baselith/plugins/goals/` |
 | `baselith/core/doc_sources/` | Compatibility shims | `baselith/plugins/document_sources/` |
 | `baselith/core/scraper/` | Compatibility shims | `baselith/plugins/web_scraper/` |
 | `baselith/core/routers/` | Compatibility shims | `baselith/plugins/api_routers/` |

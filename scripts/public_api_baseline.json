@@ -133,18 +133,6 @@
       "ToolCallFinished",
       "ToolCallStarted"
     ],
-    "baselith.core.agents": [
-      "BrowserAgent",
-      "CodingAgent"
-    ],
-    "baselith.core.agents.coding": [
-      "CodeExecutionResult",
-      "CodeLanguage",
-      "CodingAgent",
-      "CodingResult",
-      "CodingTaskType",
-      "register_coding_tools"
-    ],
     "baselith.core.api": [
       "AgentEvent",
       "EventType"
@@ -605,11 +593,6 @@
       "FineTuneResult",
       "FineTuningPipeline",
       "TrainingStatus"
-    ],
-    "baselith.core.goals": [
-      "Goal",
-      "GoalStatus",
-      "GoalTracker"
     ],
     "baselith.core.graph": [
       "GraphDb",
@@ -1339,10 +1322,6 @@
       "build_fallback_stream",
       "stream_answer"
     ],
-    "baselith.core.services.evaluation": [
-      "EvaluationService",
-      "get_evaluation_service"
-    ],
     "baselith.core.services.graph": [
       "GraphService"
     ],
@@ -1685,7 +1664,6 @@
     "baselith.core.a2a": "beta",
     "baselith.core.adversarial": "experimental",
     "baselith.core.agent": "stable",
-    "baselith.core.agents": "deprecated",
     "baselith.core.api": "stable",
     "baselith.core.auth": "beta",
     "baselith.core.bootstrap": "beta",
@@ -1703,7 +1681,6 @@
     "baselith.core.exploration": "experimental",
     "baselith.core.feature_flags": "beta",
     "baselith.core.finetuning": "experimental",
-    "baselith.core.goals": "deprecated",
     "baselith.core.graph": "beta",
     "baselith.core.guardrails": "beta",
     "baselith.core.human": "experimental",

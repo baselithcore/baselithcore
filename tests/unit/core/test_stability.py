@@ -26,7 +26,7 @@ class TestStabilityResolution:
     def test_a_package_resolves_to_its_declared_tier(self) -> None:
         assert stability_of("baselith.core.agent") is Stability.STABLE
         assert stability_of("baselith.core.swarm") is Stability.EXPERIMENTAL
-        assert stability_of("baselith.core.agents") is Stability.DEPRECATED
+        assert stability_of("baselith.core.scraper") is Stability.DEPRECATED
 
     def test_a_submodule_inherits_its_package(self) -> None:
         assert stability_of("baselith.core.memory.hybrid_search") is Stability.BETA

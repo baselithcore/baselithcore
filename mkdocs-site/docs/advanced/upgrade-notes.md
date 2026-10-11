@@ -39,6 +39,35 @@ facade (`from baselith import Agent`) is unchanged. A project with its own
 The full procedure, with the codemod, the compat package and the operator
 checklist, is in [Migrating to 1.0](migrating-to-1-0.md).
 
+### The `agents` and `goals` shims are gone
+
+`core.agents` and `core.goals` were deprecated in 0.39 with removal announced
+for 1.0, and every import has warned since. They are removed: neither
+`baselith.core.agents` / `baselith.core.goals` nor, through
+`baselith-core-compat`, `core.agents` / `core.goals` resolves any more.
+
+| Removed | Import instead |
+| --- | --- |
+| `core.agents.BrowserAgent`, `core.agents.browser_agent`, `browser_tools`, `browser_types` | `baselith.plugins.browser_agent` |
+| `core.agents.CodingAgent`, `core.agents.coding`, `coding_tools` | `baselith.plugins.coding_agent` |
+| `core.goals.Goal`, `GoalStatus`, `GoalTracker` | `baselith.plugins.goals` |
+
+The classes are the same objects the shims re-exported, so the import is the
+only change. The other three frozen shims (`doc_sources`, `routers`,
+`scraper`) stay, still `deprecated`, with no removal date announced.
+
+### Overdue deprecations are removed
+
+Two APIs announced for removal in 0.41.0 outlived their date; 1.0 removes
+them:
+
+- `InputGuard.validate_async()`: use the orchestrator's `guard_input_async`,
+  or `InputGuard.classify()` for an LLM verdict.
+- `baselith.core.services.evaluation` (its `EvaluationService` alias and
+  `get_evaluation_service()`): use `baselith.core.evaluation.EvaluationService`
+  and `baselith.core.evaluation.metrics.FaithfulnessEvaluator` /
+  `AnswerRelevancyEvaluator`.
+
 ---
 
 ## Security postures that are now fail-closed

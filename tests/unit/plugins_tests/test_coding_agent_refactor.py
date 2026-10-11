@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from baselith.core.agents.coding.agent import CodeLanguage, CodingAgent
+from baselith.plugins.coding_agent import CodeLanguage, CodingAgent
 
 
 @pytest.fixture
@@ -15,9 +15,13 @@ def mock_sandbox_service():
 
 @pytest.fixture
 def mock_llm_service():
-    with patch("baselith.core.services.llm.service.LLMService") as MockService:
-        service_instance = AsyncMock()
-        MockService.return_value = service_instance
+    # Patch the accessor the agent calls, not the class: get_llm_service()
+    # returns a process-wide instance, and one cached by an earlier test in
+    # the same worker would bypass a patched constructor.
+    service_instance = AsyncMock()
+    with patch(
+        "baselith.core.services.llm.get_llm_service", return_value=service_instance
+    ):
         yield service_instance
 
 

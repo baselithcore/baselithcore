@@ -13,10 +13,9 @@ Complex autonomous agents often need to maintain state about their progress towa
 !!! note "Core vs Plugin"
     This functionality is implemented as a plugin to ensure the core framework remains lightweight and agnostic. It serves as an opt-in component for agents that specifically require stateful goal tracking, adhering to the framework's modular architecture.
 
-!!! warning "`baselith.core.goals` is a deprecated shim"
-    The old import path `baselith.core.goals` still resolves to this plugin, but
-    importing it now emits a `DeprecationWarning` (deprecated since 0.39,
-    removed in 1.0). Import from `baselith.plugins.goals` instead.
+!!! warning "`core.goals` is removed"
+    The old `core.goals` shim over this plugin was deprecated in 0.39 and
+    removed in 1.0. Import from `baselith.plugins.goals`.
 
 ## Key Concepts
 

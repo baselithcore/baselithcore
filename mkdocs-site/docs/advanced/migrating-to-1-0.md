@@ -39,6 +39,7 @@ workaround. Since 1.0 the framework owns only the name it is published under.
 | Logger names | `core.x`, `plugins.p.x` | `baselith.core.x`, `baselith.plugins.p.x` |
 | Container paths | `/app/core`, `/app/plugins` | `/app/baselith/core`, `/app/baselith/plugins` |
 | Migrations | `core/db/migrations` | `baselith/core/db/migrations`, inside the package |
+| Deprecated shims | `core.agents`, `core.goals` (warned since 0.39) | **removed**: import `baselith.plugins.browser_agent`, `baselith.plugins.coding_agent`, `baselith.plugins.goals` |
 
 If your code only imports from the facade (`from baselith import …`), it needs
 no change. The import rewrite is mechanical, and two tools cover it: a codemod
@@ -47,7 +48,9 @@ working while you migrate.
 
 The rename is not the only change in 1.0 that a running deployment notices:
 MCP stdio servers now need an explicit allowlist, the MCP client refuses
-compressed responses, and a few calls raise where they used to pass. Read
+compressed responses, the `core.agents` and `core.goals` shims are removed
+(the compat package does not bring them back), and a few calls raise where
+they used to pass. Read
 [Upgrade Notes](upgrade-notes.md) before rolling forward.
 
 ## Option 1: rewrite your code with the codemod

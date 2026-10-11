@@ -376,8 +376,8 @@ async def process_user_input(user_input: str) -> str:
 - **Custom patterns**: operator-supplied regexes
 - **LLM verdict**: not part of `validate()`; the opt-in intent taxonomy
   (`classify`, `BASELITH_INPUT_GUARD_TAXONOMY`) runs in the orchestrator's
-  `guard_input_async`. `validate_async` is deprecated (since 0.40.0, removed
-  in 0.41.0)
+  `guard_input_async`. `validate_async`, deprecated since 0.40.0, is removed
+  in 1.0
 
 PII and harmful-content filtering happen on the **output** side
 (`OutputGuard`), and both guards run automatically on every

@@ -20,24 +20,13 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 FROZEN_CORE_PREFIXES = (
-    "baselith/core/agents/",
     "baselith/core/doc_sources/",
-    "baselith/core/goals/",
     "baselith/core/routers/",
     "baselith/core/scraper/",
 )
 
 LEGACY_CORE_FILE_ALLOWLIST = frozenset(
     {
-        "baselith/core/agents/__init__.py",
-        "baselith/core/agents/browser_agent.py",
-        "baselith/core/agents/browser_tools.py",
-        "baselith/core/agents/browser_types.py",
-        "baselith/core/agents/coding/__init__.py",
-        "baselith/core/agents/coding/agent.py",
-        "baselith/core/agents/coding/prompts.py",
-        "baselith/core/agents/coding/types.py",
-        "baselith/core/agents/coding_tools.py",
         "baselith/core/doc_sources/__init__.py",
         "baselith/core/doc_sources/filesystem.py",
         "baselith/core/doc_sources/labels.py",
@@ -49,8 +38,6 @@ LEGACY_CORE_FILE_ALLOWLIST = frozenset(
         "baselith/core/doc_sources/web.py",
         "baselith/core/doc_sources/web_constants.py",
         "baselith/core/doc_sources/web_parser.py",
-        "baselith/core/goals/__init__.py",
-        "baselith/core/goals/tracker.py",
         "baselith/core/routers/__init__.py",
         "baselith/core/routers/admin.py",
         "baselith/core/routers/chat.py",
@@ -93,17 +80,6 @@ LEGACY_CORE_FILE_ALLOWLIST = frozenset(
 )
 
 CORE_TO_PLUGIN_IMPORT_ALLOWLIST = {
-    "baselith/core/agents/browser_agent.py": {"baselith.plugins.browser_agent.agent"},
-    "baselith/core/agents/browser_tools.py": {"baselith.plugins.browser_agent.tools"},
-    "baselith/core/agents/browser_types.py": {"baselith.plugins.browser_agent.types"},
-    "baselith/core/agents/coding/__init__.py": {"baselith.plugins.coding_agent"},
-    "baselith/core/agents/coding/agent.py": {
-        "baselith.plugins.coding_agent.agent",
-        "baselith.plugins.coding_agent.types",
-    },
-    "baselith/core/agents/coding/prompts.py": {"baselith.plugins.coding_agent.prompts"},
-    "baselith/core/agents/coding/types.py": {"baselith.plugins.coding_agent.types"},
-    "baselith/core/agents/coding_tools.py": {"baselith.plugins.coding_agent.tools"},
     "baselith/core/doc_sources/__init__.py": {"baselith.plugins.document_sources"},
     "baselith/core/doc_sources/filesystem.py": {
         "baselith.plugins.document_sources.filesystem"
@@ -127,8 +103,6 @@ CORE_TO_PLUGIN_IMPORT_ALLOWLIST = {
     "baselith/core/doc_sources/web_parser.py": {
         "baselith.plugins.document_sources.web_parser"
     },
-    "baselith/core/goals/__init__.py": {"baselith.plugins.goals"},
-    "baselith/core/goals/tracker.py": {"baselith.plugins.goals.tracker"},
     "baselith/core/routers/admin.py": {"baselith.plugins.api_routers.admin"},
     "baselith/core/routers/chat.py": {"baselith.plugins.api_routers.chat"},
     "baselith/core/routers/console.py": {"baselith.plugins.api_routers.console"},

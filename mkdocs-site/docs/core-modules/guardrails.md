@@ -283,15 +283,14 @@ privilege on tools are for. False positives remain possible too: the patterns
 deliberately block role-play openers such as "you are now a …" / "ahora eres
 un …" in every covered language.
 
-### `validate_async` (deprecated)
+### `validate_async` (removed in 1.0)
 
 `validate_async(text)` ran `validate()` and then asked the LLM for a
 `SAFE`/`MALICIOUS` verdict. Nothing in the runtime ever called it: every
 request already crosses the orchestrator's `guard_input_async`, whose opt-in
-moderation and `classify` layers supersede it, and wiring it into the chat
-path would have added a default-on LLM call per request. It is deprecated
-since 0.40.0 (emits `DeprecationWarning`) and removed in 0.41.0; use
-`guard_input_async` (orchestrator) or `classify()` directly.
+moderation and `classify` layers supersede it. Deprecated since 0.40.0, it is
+removed in 1.0; use `guard_input_async` (orchestrator) or `classify()`
+directly.
 
 ### Intent taxonomy (`classify`)
 

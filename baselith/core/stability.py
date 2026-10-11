@@ -159,9 +159,7 @@ PACKAGE_STABILITY: Final[Mapping[str, Stability]] = {
     # FROZEN_CORE_PREFIXES: domain logic that predates the Sacred Core rule and
     # now belongs in a plugin. No new file is accepted in them; they exist so
     # existing imports keep resolving.
-    "baselith.core.agents": Stability.DEPRECATED,
     "baselith.core.doc_sources": Stability.DEPRECATED,
-    "baselith.core.goals": Stability.DEPRECATED,
     "baselith.core.routers": Stability.DEPRECATED,
     "baselith.core.scraper": Stability.DEPRECATED,
 }

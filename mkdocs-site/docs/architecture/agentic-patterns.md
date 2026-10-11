@@ -193,7 +193,7 @@ safe_output = output.filtered_output
 
 ### Goals
 
-**Module**: `baselith/plugins/goals/` (re-exported from `baselith/core/goals/` for backward compatibility)
+**Module**: `baselith/plugins/goals/`
 
 Goal tracking with progress and explicit success criteria. Moved to `plugins/` per the Core Sacro Rule (domain logic lives in plugins).
 
@@ -228,8 +228,8 @@ tracker.get_summary()  # {"total": ..., "completed": ..., "in_progress": ..., "f
 `FAILED`, `ABANDONED`); `tracker.get(goal_id)` returns the tracked `Goal` or
 `None`.
 
-!!! note "Backward Compatibility"
-    `baselith/core/goals/` still works as a re-export shim — existing imports are not broken.
+!!! note "No core shim"
+    The `core.goals` re-export shim was removed in 1.0; import `baselith.plugins.goals`.
 
 ---
 
@@ -896,7 +896,7 @@ score = await asyncio.to_thread(
 )
 ```
 
-`baselith.core.services.evaluation` is a deprecated shim over this package — see
+The old `baselith.core.services.evaluation` shim over this package was removed in 1.0 — see
 [Evaluation](../core-modules/evaluation.md).
 
 ---

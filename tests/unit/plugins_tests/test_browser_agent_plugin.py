@@ -1,19 +1,5 @@
-from baselith.core.agents.browser_agent import BrowserAgent as CoreBrowserAgent
-from baselith.core.agents.browser_tools import (
-    register_browser_tools as core_register_browser_tools,
-)
-from baselith.core.agents.browser_types import (
-    BrowserAgentResult as CoreBrowserAgentResult,
-)
-from baselith.plugins.browser_agent import BrowserAgent, register_browser_tools
+from baselith.plugins.browser_agent import BrowserAgent
 from baselith.plugins.browser_agent.plugin import BrowserAgentPlugin
-from baselith.plugins.browser_agent.types import BrowserAgentResult
-
-
-def test_legacy_core_imports_resolve_to_plugin_exports() -> None:
-    assert CoreBrowserAgent is BrowserAgent
-    assert core_register_browser_tools is register_browser_tools
-    assert CoreBrowserAgentResult is BrowserAgentResult
 
 
 def test_browser_agent_plugin_exposes_manifest_metadata() -> None:

@@ -27,9 +27,9 @@ The current split:
 | Tier | Packages |
 | --- | --- |
 | `stable` | `baselith`, `baselith.core.agent`, `baselith.core.api`, `baselith.core.config`, `baselith.core.plugins` |
-| `beta` | 39 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.auth`, `baselith.core.services`, … |
-| `experimental` | 18 packages — the cognitive and research surface: `baselith.core.swarm`, `baselith.core.meta`, `baselith.core.planning`, `baselith.core.skill_evolution`, … |
-| `deprecated` | `baselith.core.agents`, `baselith.core.doc_sources`, `baselith.core.goals`, `baselith.core.routers`, `baselith.core.scraper` — the domain shims frozen by the Sacred Core rule |
+| `beta` | 40 packages — the production infrastructure: `baselith.core.memory`, `baselith.core.orchestration`, `baselith.core.mcp`, `baselith.core.auth`, `baselith.core.services`, … |
+| `experimental` | 19 packages — the cognitive and research surface: `baselith.core.swarm`, `baselith.core.meta`, `baselith.core.planning`, `baselith.core.skill_evolution`, … |
+| `deprecated` | `baselith.core.doc_sources`, `baselith.core.routers`, `baselith.core.scraper` — the domain shims frozen by the Sacred Core rule |
 
 `python scripts/check_public_api.py --list` prints every package with its tier
 and symbol count.
@@ -117,10 +117,10 @@ It works on classes too, warning at construction, and appends a
 points at the caller, not at the framework.
 
 A whole deprecated package announces itself at import time instead, with the
-same wording: `baselith.core.agents` and `baselith.core.goals` emit a `DeprecationWarning` when
-imported (deprecated since 0.39, removed in 1.0; use the `browser_agent` /
-`coding_agent` and `goals` plugins). Decorating their re-exported classes would
-patch the plugin classes themselves and warn every plugin user.
+same wording: a module-level `warnings.warn(_deprecation_message(...))` in its
+`__init__.py`. Decorating the classes it re-exports would patch the plugin
+classes themselves and warn every plugin user. That is how `core.agents` and
+`core.goals` announced their removal from 0.39 until 1.0 removed them.
 
 ## What the gate reports
 

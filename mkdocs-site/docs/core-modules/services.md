@@ -2098,17 +2098,11 @@ service.aclose()` closes it together with the shared `httpx` client.
 
 ## Evaluation Service
 
-!!! warning "Deprecated — `baselith.core.services.evaluation` is a shim"
+!!! warning "Removed in 1.0 — `baselith.core.services.evaluation`"
     `baselith.core.services.evaluation` used to carry its own DeepEval wrapper, a
-    duplicate of `baselith/core/evaluation/` that nothing in the runtime imported. It
-    shared one set of metric objects across concurrent calls (so one call could
-    read another's score) and exported the LLM API key into `os.environ`.
-    `EvaluationService` and `get_evaluation_service` now remain only for one
-    deprecation cycle (announced in 0.40.0, removed in 0.41.0) and warn on use:
-    `EvaluationService` is a subclass of the live, event-driven
-    `baselith.core.evaluation.EvaluationService`, and its `evaluate_rag_response()`
-    delegates to `baselith.core.evaluation.metrics.FaithfulnessEvaluator` /
-    `AnswerRelevancyEvaluator` with fresh metric objects per call.
+    duplicate of `baselith/core/evaluation/` that nothing in the runtime imported.
+    It was deprecated in 0.40.0 and is removed in 1.0, together with its
+    `EvaluationService` alias and `get_evaluation_service()`.
 
 Use the live package instead — see [Evaluation](evaluation.md):
 

@@ -32,14 +32,11 @@ baselith/core/evaluation/               # the evaluation toolkit
 └── data/golden_qa.json        # bundled golden QA set
 ```
 
-!!! warning "`baselith.core.services.evaluation` is deprecated"
-    The former `baselith/core/services/evaluation/` DeepEval wrapper — a second class
-    named `EvaluationService` that nothing in the runtime used — is retired.
-    The package is now a deprecation shim (announced in 0.40.0, removed in
-    0.41.0): its `EvaluationService` subclasses the event-driven
-    `baselith.core.evaluation.EvaluationService` and keeps `evaluate_rag_response()`
-    backed by the metric evaluators below. See
-    [Services › Evaluation Service](services.md#evaluation-service).
+!!! warning "`baselith.core.services.evaluation` is removed"
+    The former `baselith/core/services/evaluation/` DeepEval wrapper, a second class
+    named `EvaluationService` that nothing in the runtime used, was deprecated
+    in 0.40.0 and is removed in 1.0. Use `baselith.core.evaluation.EvaluationService`
+    and the metric evaluators below.
 
 `metrics.py` holds `FaithfulnessEvaluator` and `AnswerRelevancyEvaluator`,
 thin wrappers around DeepEval's metrics (threshold default `0.7`, judge model

@@ -31,7 +31,7 @@ PATTERN_MAP: dict[str, str] = {
     "baselith.core.memory": "baselith.ai/pattern-memory-tiering",
     "baselith.core.evaluation": "baselith.ai/pattern-evaluation",
     "baselith.core.task_queue": "baselith.ai/pattern-task-queue",
-    "baselith.core.goals": "baselith.ai/pattern-goals",
+    "baselith.plugins.goals": "baselith.ai/pattern-goals",
     "baselith.core.orchestration": "baselith.ai/pattern-orchestration",
     "baselith.core.graph": "baselith.ai/pattern-knowledge-graph",
     "baselith.core.context": "baselith.ai/pattern-multi-tenancy",
@@ -57,7 +57,8 @@ def scan_source_files(plugin_dir: Path) -> list[str]:
 
     Reads every .py file in the plugin directory (non-recursive — avoids
     traversing test directories and vendored code) and checks for
-    ``from core.X …`` or ``import core.X`` import statements.
+    ``from <module> …`` or ``import <module>`` statements naming a
+    :data:`PATTERN_MAP` key (``baselith.core.X``, or ``baselith.plugins.goals``).
     """
     found: list[str] = []
     try:

@@ -1,9 +1,13 @@
 # Agentic Modules
 
-The historical `baselith/core/agents/` entrypoints are now **compatibility shims**. The canonical implementations of **BrowserAgent** and **CodingAgent** live in the official plugins `baselith/plugins/browser_agent/` and `baselith/plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
+**BrowserAgent** and **CodingAgent** live in the official plugins `baselith/plugins/browser_agent/` and `baselith/plugins/coding_agent/`, keeping the Sacred Core free from application-specific agent logic.
 
-!!! info "Current State"
-    Existing imports from `baselith.core.agents` remain supported for backward compatibility, but new code should prefer the plugin packages directly. Importing `baselith.core.agents` (like `baselith.core.goals`, the shim over `baselith.plugins.goals`) emits a `DeprecationWarning`: deprecated since 0.39, removed in 1.0.
+!!! info "The `core.agents` shim is removed"
+    The historical `core.agents` entrypoints (and `core.goals`, the shim over
+    `baselith.plugins.goals`) were deprecated in 0.39 and removed in 1.0.
+    Import from `baselith.plugins.browser_agent` and
+    `baselith.plugins.coding_agent`; see
+    [Upgrade Notes](../advanced/upgrade-notes.md#the-agents-and-goals-shims-are-gone).
 
 ## Module Structure
 
@@ -30,17 +34,6 @@ plugins/
 │   ├── evals/             # Fix-rate benchmark (python -m baselith.plugins.coding_agent.evals)
 │   └── plugin.py          # CodingAgentPlugin
 └── ...
-
-baselith/core/agents/
-├── browser_agent.py       # Backward-compatible shim
-├── browser_tools.py       # Backward-compatible shim
-├── browser_types.py       # Backward-compatible shim
-├── coding/                # Backward-compatible shim package
-│   ├── __init__.py
-│   ├── agent.py           # -> baselith.plugins.coding_agent.agent
-│   ├── prompts.py         # -> baselith.plugins.coding_agent.prompts
-│   └── types.py           # -> baselith.plugins.coding_agent.types
-└── coding_tools.py        # Backward-compatible shim
 ```
 
 ---
