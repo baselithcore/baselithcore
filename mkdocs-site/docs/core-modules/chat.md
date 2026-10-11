@@ -205,8 +205,10 @@ graph TD
 
 The handler's result carries `sources` (one entry per retrieved document:
 `source` — its URL or path —, `title`, `document_id` and, when ranked, its
-best `score`) and the assembled `context`, which the output groundedness rail
-judges the answer against. A retrieval hit whose score cannot be read as a
+best `score`). The assembled context goes to the output groundedness rail
+under the private `_grounding_context` key, which the output guard always
+removes: retrieved text never passed the PII filter, so it never reaches the
+caller. A retrieval hit whose score cannot be read as a
 number (`"n/a"`, `None`) is kept but ignored for ranking and the score floor.
 
 ### Backlog Planner

@@ -36,7 +36,9 @@ _MODE_ENV = "BASELITH_OUTPUT_GROUNDEDNESS"
 _THRESHOLD_ENV = "BASELITH_OUTPUT_GROUNDEDNESS_THRESHOLD"
 _THRESHOLD_DEFAULT = 0.6
 #: Result keys that may carry retrieved source material, in lookup order.
-_SOURCE_KEYS = ("sources", "context")
+#: ``_grounding_context`` is the private key handlers use for retrieved text
+#: that must reach the judge but never the caller (see guard_pipeline).
+_SOURCE_KEYS = ("sources", "context", "_grounding_context")
 _REFUSAL = (
     "I could not verify this response against the retrieved sources, so I am "
     "not asserting it. Please rephrase the question or provide more context."

@@ -304,9 +304,11 @@ class RagWorkflowHandler:
             "response": state.answer or "",
             # doc_sources entries (chat.context._extract_doc_source) carry a
             # locator (url / path), a title, the document id and its best
-            # score; the retrieved text itself is the assembled context.
+            # score. The retrieved text goes to the groundedness rail under
+            # the private key the output guard strips: it never passed the
+            # PII filter, so it must not reach the caller.
             "sources": [_source_entry(s) for s in (state.doc_sources or [])],
-            "context": state.context,
+            _GROUNDING_CONTEXT_KEY: state.context,
             "metadata": {
                 "guardrail": (
                     state.guardrail_decision.action
@@ -316,6 +318,11 @@ class RagWorkflowHandler:
                 "clarification": state.clarification_reason,
             },
         }
+
+
+#: guard_pipeline.GROUNDING_CONTEXT_KEY, spelled here so chat does not import
+#: the orchestration package; a test keeps the two equal.
+_GROUNDING_CONTEXT_KEY = "_grounding_context"
 
 
 def _source_entry(doc: dict[str, Any]) -> dict[str, Any]:

@@ -244,7 +244,22 @@ def _output_moderation_enabled() -> bool:
     )
 
 
+#: Result key a handler may use to hand the groundedness rail its retrieved
+#: text. Raw retrieved material is not output: it never passed the PII
+#: filter, so :func:`guard_output_async` always removes this key before the
+#: result leaves the orchestrator, whatever the rails decide.
+GROUNDING_CONTEXT_KEY = "_grounding_context"
+
+
 async def guard_output_async(result: dict[str, Any]) -> dict[str, Any]:
+    """Run the outbound rails, then drop the private grounding material."""
+    guarded = await _guard_output_rails(result)
+    guarded.pop(GROUNDING_CONTEXT_KEY, None)
+    result.pop(GROUNDING_CONTEXT_KEY, None)
+    return guarded
+
+
+async def _guard_output_rails(result: dict[str, Any]) -> dict[str, Any]:
     """Async outbound guard: PII filter, groundedness, content moderation.
 
     :func:`guard_output` (redaction, harmful patterns) always applies first.

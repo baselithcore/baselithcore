@@ -244,3 +244,39 @@ class TestSourcesText:
     def test_descriptors_are_the_last_resort(self) -> None:
         text = guard_groundedness._sources_text({"sources": [{"title": "A"}]})
         assert text is not None and "A" in text
+
+
+class TestGroundingContextNeverLeaves:
+    """Raw retrieved text skipped the PII filter: it must not reach callers."""
+
+    def test_the_key_names_agree(self) -> None:
+        from baselith.core.chat import rag_workflow
+        from baselith.core.orchestration.guard_pipeline import GROUNDING_CONTEXT_KEY
+
+        assert rag_workflow._GROUNDING_CONTEXT_KEY == GROUNDING_CONTEXT_KEY
+
+    @pytest.mark.parametrize("mode", ["off", "annotate"])
+    async def test_output_guard_strips_it(self, monkeypatch, mode) -> None:
+        from baselith.core.orchestration.guard_pipeline import (
+            GROUNDING_CONTEXT_KEY,
+            guard_output_async,
+        )
+
+        monkeypatch.setenv("BASELITH_OUTPUT_GROUNDEDNESS", mode)
+        judge = _StubJudge()
+        _install(monkeypatch, judge)
+        result = {
+            "response": "Rome.",
+            GROUNDING_CONTEXT_KEY: "jane.doe@example.com lives in Rome",
+        }
+        guarded = await guard_output_async(result)
+
+        assert GROUNDING_CONTEXT_KEY not in guarded
+        assert GROUNDING_CONTEXT_KEY not in result
+        if mode == "annotate":
+            # ...after the judge saw it.
+            assert judge.calls == 1
+
+    def test_the_rail_reads_it(self) -> None:
+        text = guard_groundedness._sources_text({"_grounding_context": "passage"})
+        assert text == "passage"

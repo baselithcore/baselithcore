@@ -196,6 +196,8 @@ class TestRagWorkflowHandler:
             },
             {"source": "kb/notes.md", "title": "notes.md", "document_id": "d2"},
         ]
-        assert result["context"] == state.context
+        # The raw retrieved text is for the groundedness rail only.
+        assert "context" not in result
+        assert result["_grounding_context"] == state.context
         assert result["metadata"]["guardrail"] == "allow"
         assert result["metadata"]["clarification"] == "More info needed"
