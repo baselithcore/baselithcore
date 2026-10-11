@@ -11,14 +11,15 @@ import logging
 from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class VectorStoreConfig(BaseSettings):
+class VectorStoreConfig(AliasedSettings):
     """
     Configuration for semantic database and indexing.
 

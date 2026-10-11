@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import Field, field_serializer
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 # Direct stdlib logger: config modules load before observability is set up.
@@ -75,7 +76,7 @@ class CacheConfig(BaseSettings):
     )
 
 
-class RedisCacheConfig(BaseSettings):
+class RedisCacheConfig(AliasedSettings):
     """
     Redis cache configuration.
 

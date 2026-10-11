@@ -9,15 +9,16 @@ is wrapped in :class:`~pydantic.SecretStr` so it never leaks via ``repr``/Sentry
 import logging
 
 from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 from baselith.core.transparency.disclosure import DEFAULT_DISCLOSURE_TEXT
 
 logger = logging.getLogger(__name__)
 
 
-class TransparencyConfig(BaseSettings):
+class TransparencyConfig(AliasedSettings):
     """Configuration for the Article 50 transparency subsystem."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

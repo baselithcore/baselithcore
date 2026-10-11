@@ -8,14 +8,15 @@ Opt-in and default-off so it adds no surface until enabled.
 import logging
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class PrivacyConfig(BaseSettings):
+class PrivacyConfig(AliasedSettings):
     """Configuration for the privacy / DSR subsystem."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

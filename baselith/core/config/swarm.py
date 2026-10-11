@@ -6,8 +6,9 @@ Team composition and the auction protocol agents use to bid for tasks.
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 
@@ -37,7 +38,7 @@ class TeamConfig(BaseModel):
     )
 
 
-class SwarmConfig(BaseSettings):
+class SwarmConfig(AliasedSettings):
     """Configuration for the swarm intelligence system."""
 
     model_config = SettingsConfigDict(

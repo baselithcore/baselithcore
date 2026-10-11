@@ -9,14 +9,15 @@ cost control. Opt-in and default-off.
 import logging
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class QuotaConfig(BaseSettings):
+class QuotaConfig(AliasedSettings):
     """Configuration for per-key usage quotas."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

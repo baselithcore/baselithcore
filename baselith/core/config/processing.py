@@ -8,15 +8,16 @@ import logging
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config._collections import csv_list
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class ProcessingConfig(BaseSettings):
+class ProcessingConfig(AliasedSettings):
     """
     Processing configuration for ingestion pipelines.
     """

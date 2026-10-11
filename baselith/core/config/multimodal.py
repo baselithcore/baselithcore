@@ -11,8 +11,9 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
@@ -21,7 +22,7 @@ from baselith.core.config.overrides import overridable
 logger = logging.getLogger(__name__)
 
 
-class VisionConfig(BaseSettings):
+class VisionConfig(AliasedSettings):
     """
     Configuration for multimodal Vision services (OCR, Image analysis).
     """
@@ -88,7 +89,7 @@ class VisionConfig(BaseSettings):
     )
 
 
-class VoiceConfig(BaseSettings):
+class VoiceConfig(AliasedSettings):
     """
     Configuration for Voice/Audio synthesis and recognition.
     """
@@ -287,7 +288,7 @@ class VoiceConfig(BaseSettings):
     )
 
 
-class FineTuningConfig(BaseSettings):
+class FineTuningConfig(AliasedSettings):
     """
     Configuration for model fine-tuning and adaptation pipelines.
     """

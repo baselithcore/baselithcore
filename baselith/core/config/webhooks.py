@@ -10,14 +10,15 @@ import logging
 from typing import Literal
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class WebhookConfig(BaseSettings):
+class WebhookConfig(AliasedSettings):
     """Configuration for outbound webhooks."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

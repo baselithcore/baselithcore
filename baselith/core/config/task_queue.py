@@ -6,12 +6,13 @@ Broker endpoint, worker concurrency and retry policy for deferred work.
 from typing import Annotated, Any
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config._collections import csv_list
 
 
-class TaskQueueConfig(BaseSettings):
+class TaskQueueConfig(AliasedSettings):
     """Configuration for task queue system.
 
     Environment variables are namespaced under ``TASK_QUEUE_`` (for example

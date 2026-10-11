@@ -9,8 +9,9 @@ import os
 from typing import Literal, Self
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class MCPServerSpec(BaseModel):
         return self
 
 
-class MCPConfig(BaseSettings):
+class MCPConfig(AliasedSettings):
     """
     Configuration for MCP Server and Client.
     """

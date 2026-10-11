@@ -41,6 +41,8 @@ from typing import Any, TypeVar, cast
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
+from baselith.core.config._aliased import AliasedSettings
+
 __all__ = ["active_override", "overridable", "override_config"]
 
 C = TypeVar("C")
@@ -53,7 +55,9 @@ _overrides: ContextVar[Mapping[type, object]] = ContextVar(
 
 #: Classes an override never answers for: they are bases of every settings
 #: class, so keying on them would make one override shadow all accessors.
-_NEVER_KEYED: frozenset[type] = frozenset({object, BaseModel, BaseSettings})
+_NEVER_KEYED: frozenset[type] = frozenset(
+    {object, BaseModel, BaseSettings, AliasedSettings}
+)
 
 
 def _keys_for(config: object) -> list[type]:

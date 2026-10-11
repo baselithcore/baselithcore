@@ -79,6 +79,16 @@ them:
   and `baselith.core.evaluation.metrics.FaithfulnessEvaluator` /
   `AnswerRelevancyEvaluator`.
 
+### Settings built in code honour aliased fields set by name
+
+`VoiceConfig(openai_api_key=...)`, `WebhookConfig(allow_internal=...)` and every
+other keyword named after an aliased field used to be dropped without an error:
+the instance silently took the environment's value (or the default) instead.
+They are now applied, and they win over the environment. Code that passed such
+a keyword and relied, unknowingly, on the environment value will now get the
+value it passed. Environment variables are unchanged: no new names bind. See
+[Configuration › Building a settings object in code](../core-modules/config.md#settings-in-code).
+
 ### Deprecations announced in 1.0 (removed in 2.0)
 
 Both keep working through 1.x; both name their removal version when used.

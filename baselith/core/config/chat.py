@@ -7,14 +7,15 @@ Moved out of ``baselith.core.config.services`` (module size cap), which re-expor
 import logging
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class ChatConfig(BaseSettings):
+class ChatConfig(AliasedSettings):
     """
     Configuration for the Chat orchestration engine.
 

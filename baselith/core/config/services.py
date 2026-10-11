@@ -13,7 +13,9 @@ import logging
 from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+
+from baselith.core.config._aliased import AliasedSettings
 
 # Re-exported for backwards compatibility: the multimodal schemas used to live
 # here, and `baselith.core.config` still resolves them through this module.
@@ -33,7 +35,7 @@ from baselith.core.config.overrides import overridable
 logger = logging.getLogger(__name__)
 
 
-class LLMConfig(BaseSettings):
+class LLMConfig(AliasedSettings):
     """
     Configuration for Large Language Model providers.
 

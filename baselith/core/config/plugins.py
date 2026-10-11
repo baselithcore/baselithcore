@@ -16,8 +16,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 # NOTE: Using direct logging.getLogger() here instead of baselith.core.observability.logging.get_logger()
@@ -103,7 +104,7 @@ def plugin_install_root(config: "PluginConfig | None" = None) -> Path:
     return candidate if candidate.is_absolute() else Path.cwd() / candidate
 
 
-class PluginConfig(BaseSettings):
+class PluginConfig(AliasedSettings):
     """
     Plugin system configuration.
 

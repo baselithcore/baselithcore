@@ -5,14 +5,15 @@ Events configuration.
 import logging
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class EventsConfig(BaseSettings):
+class EventsConfig(AliasedSettings):
     """
     Events configuration.
     """

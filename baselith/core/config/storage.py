@@ -15,8 +15,9 @@ from pydantic import (
     field_serializer,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config._pg_conninfo import merge_conninfo
 from baselith.core.config._pg_conninfo import transport_params as _transport_params
 from baselith.core.config.environment import is_production_env
@@ -74,7 +75,7 @@ def _redact_url(value: str | None) -> str | None:
         return "[REDACTED]"
 
 
-class StorageConfig(BaseSettings):
+class StorageConfig(AliasedSettings):
     """
     Storage configuration.
 

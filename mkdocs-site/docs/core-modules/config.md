@@ -306,6 +306,31 @@ with override_config(LLMConfig(provider="ollama", model="llama3"), StorageConfig
   captured at import time (a module-level `x = get_x_config()`) cannot see an
   override.
 
+### Building a settings object in code {#settings-in-code}
+
+A field that reads its value from an alias (`VOICE_OPENAI_API_KEY`,
+`WEBHOOK_ALLOW_INTERNAL`, …) also accepts its Python name as a keyword:
+
+```python
+from pydantic import SecretStr
+from baselith.core.config import override_config
+from baselith.core.config.multimodal import VoiceConfig
+
+with override_config(VoiceConfig(openai_api_key=SecretStr("sk-..."))):
+    ...
+```
+
+The keyword beats the environment, and a value given under the alias wins over
+one given by name. Every aliased class derives from `AliasedSettings`
+(`baselith.core.config._aliased`), which renames the keyword to the field's
+primary alias before validation. It deliberately does not set
+`populate_by_name`: in pydantic-settings that would also make the environment
+source read `<env_prefix><field_name>`, and for the classes whose aliases are
+complete variable names it would turn bare names such as `ENABLED` or
+`ALLOW_INTERNAL` into live settings. The environment names a class reads stay
+exactly the ones it declares. `tests/unit/core/config/test_aliased_settings.py`
+fails if a new aliased class drops keywords again.
+
 ---
 
 ## Configuration Modules

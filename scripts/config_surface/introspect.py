@@ -70,9 +70,14 @@ class Setting:
         return (self.env, *self.alternatives)
 
 
+#: Bases that make a class a settings class. ``AliasedSettings`` is
+#: ``BaseSettings`` with a constructor that accepts aliased fields by name.
+_SETTINGS_BASES = frozenset({"BaseSettings", "AliasedSettings"})
+
+
 def _is_settings_class(node: ast.ClassDef) -> bool:
     return any(
-        isinstance(base, ast.Name) and base.id == "BaseSettings" for base in node.bases
+        isinstance(base, ast.Name) and base.id in _SETTINGS_BASES for base in node.bases
     )
 
 

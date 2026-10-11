@@ -9,8 +9,9 @@ import os
 from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config._collections import csv_list
 from baselith.core.config._security_parsers import (
     coerce_to_secret_set,
@@ -25,7 +26,7 @@ from baselith.core.config.overrides import overridable
 logger = logging.getLogger(__name__)
 
 
-class SecurityConfig(BaseSettings):
+class SecurityConfig(AliasedSettings):
     """
     Security configuration.
     """

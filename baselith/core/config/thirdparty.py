@@ -11,14 +11,15 @@ it to be kept up to date).
 import logging
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config.overrides import overridable
 
 logger = logging.getLogger(__name__)
 
 
-class ThirdPartyRegisterConfig(BaseSettings):
+class ThirdPartyRegisterConfig(AliasedSettings):
     """Configuration for the DORA Register of Information subsystem."""
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

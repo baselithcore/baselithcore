@@ -11,8 +11,9 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
+from baselith.core.config._aliased import AliasedSettings
 from baselith.core.config._collections import csv_list
 from baselith.core.config.environment import is_production_env
 from baselith.core.config.overrides import overridable
@@ -47,7 +48,7 @@ def _resolve_service_version() -> str:
         return "0.0.0"
 
 
-class AppConfig(BaseSettings):
+class AppConfig(AliasedSettings):
     """
     Main application configuration schema.
 
