@@ -119,10 +119,12 @@ guard on the streaming path.
 `handle_chat_async` also takes two keyword-only arguments. `run_id` names the
 durable run the request is an attempt at: the orchestrator is called through
 `process_with_stable_run_id`, so a retry under the same id resumes the run's
-checkpoint, or returns the recorded answer of a run that already completed
+checkpoint, or returns the recorded answer of a run that already completed,
+through the same output guard as the first response
 (see [stable run ids](orchestration.md#stable-run-ids-for-chat-requests-and-queued-jobs)).
-`POST /chat` derives it from the `Idempotency-Key` header (else the request
-id), and the RQ agent-run job from its job id. `extra_context` adds entries to
+`POST /chat` derives it from the `Idempotency-Key` header of an authenticated
+caller (anything else runs fresh under a random id), and the RQ agent-run job
+from its job id. `extra_context` adds entries to
 the orchestration context — the queued job uses it to register its completion
 notifier. Both default to `None`: no stable id, nothing added.
 

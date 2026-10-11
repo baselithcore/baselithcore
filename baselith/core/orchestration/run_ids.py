@@ -13,7 +13,8 @@ decides what an attempt under that id does:
 
 * no checkpoint yet — a fresh run under the id;
 * a ``completed`` run — its recorded answer, without executing anything (a
-  retry after the response was lost);
+  retry after the response was lost), passed through the output guard again
+  because the checkpoint stores it as the handler returned it;
 * a ``running`` or ``failed`` run — ``resume=True``: recorded steps replay,
   the rest runs. A run whose lease another executor still holds raises
   :class:`~baselith.core.orchestration.checkpoint_errors.CheckpointLeaseHeldError`;
@@ -90,13 +91,21 @@ async def process_with_stable_run_id(
         fresh: dict[str, Any] = await orchestrator.process(query, context)
         return fresh
     if existing.status == STATUS_COMPLETED:
+        from baselith.core.orchestration.guard_pipeline import guard_output_async
+
         logger.info("stable_run_replayed run=%s", run_id)
-        return {
-            "response": existing.answer if existing.answer is not None else "",
-            "intent": existing.intent,
-            "run_id": run_id,
-            "replayed": True,
-        }
+        # The checkpoint records the handler's answer *before* process() runs
+        # the output guard, so the stored text is unredacted. A replay leaves
+        # through the same guard as the original response did.
+        replayed: dict[str, Any] = await guard_output_async(
+            {
+                "response": existing.answer if existing.answer is not None else "",
+                "intent": existing.intent,
+                "run_id": run_id,
+                "replayed": True,
+            }
+        )
+        return replayed
     if existing.status == STATUS_AWAITING_APPROVAL:
         pending = existing.pending_approval or {}
         return {

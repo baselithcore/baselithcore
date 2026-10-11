@@ -131,6 +131,28 @@ async def test_a_retry_of_a_completed_run_returns_its_answer_without_running() -
     assert handler.executed == ["first", "second"]
 
 
+class _LeakyHandler:
+    """Answers with text the output guard must redact."""
+
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        return {"response": "write to mario.rossi@example.com"}
+
+
+async def test_a_replayed_answer_goes_through_the_output_guard() -> None:
+    """The checkpoint records the handler's answer before the output guard
+    runs, so a replay that returned it as stored would hand an
+    Idempotency-Key retry the unredacted text."""
+    store = InMemoryCheckpointStore()
+    orch = _orchestrator(store, _LeakyHandler())
+
+    first = await process_with_stable_run_id(orch, "q", {}, "run-pii")
+    again = await process_with_stable_run_id(orch, "q", {}, "run-pii")
+
+    assert "mario.rossi@example.com" not in first["response"]
+    assert again["replayed"] is True
+    assert again["response"] == first["response"]
+
+
 async def test_a_paused_run_is_reported_not_resumed() -> None:
     store = InMemoryCheckpointStore()
     await store.save(

@@ -953,7 +953,9 @@ idempotency ledger had nothing to match.
 
 `process_with_stable_run_id(orchestrator, query, context, run_id)`
 (`run_ids.py`) decides what an attempt does: no checkpoint yet → a fresh run
-under the id; `completed` → its recorded answer, nothing executes;
+under the id; `completed` → its recorded answer, nothing executes, passed
+through the output guard again (the checkpoint stores the handler's answer
+from before the guard, so the stored text is unredacted);
 `running` / `failed` → `resume=True`; `awaiting_approval` → the pause,
 unchanged (decisions go through `/approvals`); a checkpoint recorded for a
 **different query** → left alone, the attempt runs fresh under a new id. A
