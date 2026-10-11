@@ -6,16 +6,18 @@ rolling-window mean, the reference mean and whether the intent is currently
 degraded. Mounted when ``EVAL_ONLINE_ENABLED`` is on; answers 503 while the
 service is not running (``EVAL_ENABLED`` off, or a failed start).
 
-The statistics are those of the worker serving the request: each worker
-monitors its own share of the sampled traffic. Fleet-wide views come from the
-``mas_eval_online_*`` metrics.
+``scope`` says whose traffic the window statistics cover. ``fleet`` when the
+fleet monitor is on (``CACHE_BACKEND=redis`` and ``EVAL_ONLINE_FLEET``) and
+Redis answered: every worker's sampled traffic, read from the shared windows.
+``worker`` otherwise: only the share the serving worker sampled. The sampling
+settings and ``queue_depth`` are always the serving worker's.
 
 Protected by the same admin Basic Auth as the admin router.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -43,9 +45,10 @@ class OnlineIntentWindow(BaseModel):
 
 
 class OnlineEvaluationSummary(BaseModel):
-    """The online evaluator's state on the serving worker."""
+    """The online evaluator's state, fleet-wide or on the serving worker."""
 
     running: bool
+    scope: Literal["fleet", "worker"]
     sample_rate: float
     judge_rate: float
     queue_depth: int
@@ -66,5 +69,5 @@ async def online_summary(request: Request) -> dict[str, Any]:
             detail="Online evaluation is not running "
             "(set EVAL_ENABLED=true and EVAL_ONLINE_ENABLED=true).",
         )
-    summary: dict[str, Any] = service.summary()
+    summary: dict[str, Any] = await service.online_summary()
     return summary

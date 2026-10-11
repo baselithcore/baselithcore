@@ -35,7 +35,9 @@ async def test_summary_reports_intent_windows() -> None:
 
     service = EvaluationService(
         event_bus=EventBus(),
-        config=EvaluationConfig(enabled=True, online_sample_rate=0.1),
+        config=EvaluationConfig(
+            enabled=True, online_sample_rate=0.1, online_fleet=False
+        ),
     )
     service.start()
     await service.process_sample(
@@ -43,6 +45,7 @@ async def test_summary_reports_intent_windows() -> None:
     )
     body = _client(service).get("/evaluation/online/summary").json()
     assert body["running"] is True and body["sample_rate"] == 0.1
+    assert body["scope"] == "worker"
     (row,) = body["intents"]
     assert row == {
         "intent": "qa",
@@ -53,6 +56,28 @@ async def test_summary_reports_intent_windows() -> None:
         "observed": 1,
         "degraded": False,
     }
+    await service.shutdown()
+
+
+async def test_summary_reports_the_fleet_when_one_is_shared() -> None:
+    from tests.unit.core.evaluation.fleet_fakes import FakeRedis, policy, worker
+
+    redis = FakeRedis()
+    shared = policy()
+    other_worker = worker(redis, [], "other", monitor=shared)
+    for _ in range(3):
+        await other_worker.record("qa", "checks", 0.5)
+    service = EvaluationService(
+        event_bus=EventBus(),
+        config=EvaluationConfig(enabled=True, online_sample_rate=0.1),
+        monitor=shared,
+        fleet=worker(redis, [], "serving", monitor=shared),
+    )
+    service.start()
+    body = _client(service).get("/evaluation/online/summary").json()
+    assert body["scope"] == "fleet"
+    (row,) = body["intents"]
+    assert (row["intent"], row["observed"], row["window_mean"]) == ("qa", 3, 0.5)
     await service.shutdown()
 
 

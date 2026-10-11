@@ -666,6 +666,9 @@ The shipped rules (`deploy/prometheus/alert-rules.yml`, group
 | `HighCpuUsage` | `process_cpu_seconds_total` rate > 80% | 5m | warning |
 | `HighMemoryUsage` | resident / virtual memory > 85% | 5m | warning |
 
+A second group, `baselith-core-quality`, pages on answer quality — see
+[Alerting on answer quality](#alerting-on-answer-quality).
+
 ```yaml title="deploy/prometheus/alert-rules.yml (excerpt)"
 groups:
   - name: baselith-core-alerts
@@ -686,6 +689,37 @@ groups:
         annotations:
           summary: "High API Latency on {{ $labels.instance }}"
 ```
+
+### Alerting on answer quality
+
+Online evaluation ([Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation))
+catches the failures no error alert sees: every request succeeds, the answers
+just got worse. Its rolling quality monitor decides (floor, trailing
+reference, hysteresis — the `EVAL_ONLINE_*` settings); the shipped rules page
+on its verdict rather than re-deriving a threshold:
+
+| Alert (compose / Helm) | Condition | For | Severity |
+|---|---|---|---|
+| `AnswerQualityDegraded` / `BaselithcoreAnswerQualityDegraded` | `max by (intent, source) (mas_eval_online_degraded) == 1` | 5m | warning |
+| `OnlineEvalMonitorFailing` / `BaselithcoreOnlineEvalMonitorFailing` | `rate(mas_eval_online_failures_total{stage=~"fleet\|monitor"}[10m]) > 0` | 15m | warning |
+
+The second alert exists because a blind monitor reads exactly like a healthy
+one: with the fleet monitor the windows live in Redis, and while Redis refuses
+the scores nothing degrades and nothing recovers. Both Helm alerts can be
+silenced through `prometheusRule.disabledAlerts`; with online evaluation off the
+series do not exist and the rules stay silent.
+
+With `CACHE_BACKEND=redis` the monitor is fleet-wide: one elected worker
+decides and every worker mirrors the verdict on the gauge, so the alert fires
+once per intent, not once per worker. The same transitions reach
+[webhook](../core-modules/webhooks.md) subscribers of `evaluation.degraded` /
+`evaluation.recovered` in `EVAL_ONLINE_WEBHOOK_TENANT` — the route to an
+on-call tool that does not go through Alertmanager.
+
+The **Agentic Metrics** dashboard (`grafana/dashboards/agentic-metrics.json`)
+has an *Online Evaluation Quality* row: the 15-minute mean check score per
+intent (`mas_eval_online_score`) and a state timeline of
+`mas_eval_online_degraded`.
 
 ### Notification Integration
 

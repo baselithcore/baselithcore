@@ -3,7 +3,8 @@
 Judge model, dataset location and thresholds for the trajectory-aware case
 evaluation and the CI replay runner, plus the online evaluation of production
 traffic (``EVAL_ONLINE_*``): sampling, the opt-in LLM judge rate, the rolling
-quality monitor and the opt-in result store.
+quality monitor (per process, or fleet-wide through Redis), the webhook tenant
+its transitions go to, and the opt-in result store.
 """
 
 from typing import Literal
@@ -121,6 +122,24 @@ class EvaluationConfig(BaseSettings):
         le=1.0,
         description="Hysteresis: a degraded intent recovers only this far "
         "inside the degradation boundary.",
+    )
+    online_fleet: bool = Field(
+        default=True,
+        description="Monitor quality across all workers through Redis when "
+        "CACHE_BACKEND=redis (one elected worker announces); off, or without "
+        "Redis, each worker monitors its own traffic.",
+    )
+    online_fleet_interval_seconds: float = Field(
+        default=15.0,
+        gt=0.0,
+        description="Seconds between two fleet monitor ticks; the elected "
+        "worker's lease expires after three missed ticks.",
+    )
+    online_webhook_tenant: str = Field(
+        default="default",
+        min_length=1,
+        description="Tenant whose webhook endpoints receive evaluation.degraded "
+        "and evaluation.recovered (the operators' tenant).",
     )
     online_store: Literal["none", "memory", "postgres"] = Field(
         default="none",

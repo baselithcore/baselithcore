@@ -14,9 +14,12 @@ deterministic sample of successful flows, off the request path:
    sampled flow; the LLM judge (``CompositeEvaluator``) additionally scores the
    ``EVAL_ONLINE_JUDGE_RATE`` share and emits ``EVALUATION_COMPLETED`` as before.
 4. **Metrics and monitor** — scores feed the ``mas_eval_online_*`` metrics and
-   a per-intent rolling :class:`~.online_monitor.QualityMonitor`; a degradation
-   (or recovery) emits ``EVALUATION_DEGRADED`` (``EVALUATION_RECOVERED``), logs,
-   and flips the ``mas_eval_online_degraded`` gauge.
+   a per-intent rolling :class:`~.online_monitor.QualityMonitor`. With Redis as
+   the cache backend the windows are fleet-wide and one elected worker decides
+   (:mod:`.online_fleet`); otherwise each worker decides over its own traffic.
+   A degradation (or recovery) is logged, emitted as ``EVALUATION_DEGRADED``
+   (``EVALUATION_RECOVERED``), delivered to webhook subscribers
+   (:mod:`.online_alerts`) and flips the ``mas_eval_online_degraded`` gauge.
 5. **Store** — opt-in persistence of the verdicts (:mod:`.online_store`), with
    a retention sweep.
 
@@ -24,7 +27,6 @@ Settings are read when :meth:`EvaluationService.start` runs, never at import.
 """
 
 import asyncio
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +34,9 @@ from baselith.core.config.evaluation import EvaluationConfig, get_evaluation_con
 from baselith.core.events import EventBus, EventNames, get_event_bus
 from baselith.core.observability.logging import get_logger
 
+from .online_alerts import SCOPE_FLEET, SCOPE_WORKER, TransitionAnnouncer
 from .online_checks import OnlineSample, run_online_checks
+from .online_fleet import FleetQualityMonitor, build_fleet_monitor
 from .online_metrics import (
     IntentLabeler,
     record_drop,
@@ -42,12 +46,13 @@ from .online_metrics import (
     record_score,
     set_degraded,
 )
-from .online_monitor import DEGRADED, QualityMonitor
+from .online_monitor import DEGRADED, MonitorTransition, QualityMonitor
 from .online_sampling import OnlineSampler
 from .online_store import (
     OnlineEvalRecord,
     OnlineEvalStore,
     build_online_store,
+    purge_expired,
     stored_text,
 )
 from .protocols import EvaluationResult, Evaluator
@@ -59,7 +64,6 @@ logger = get_logger(__name__)
 DEFAULT_MAX_CONCURRENT_EVALUATIONS = 8
 #: Seconds between two retention sweeps of the online store.
 RETENTION_SWEEP_INTERVAL_SECONDS = 3600.0
-_DAY_SECONDS = 86_400.0
 
 
 def _number(value: Any) -> float | None:
@@ -82,6 +86,8 @@ class EvaluationService:
             omitted.
         store: Result store; built from ``EVAL_ONLINE_STORE`` when omitted.
         monitor: Quality monitor; built from the settings when omitted.
+        fleet: Fleet-wide monitor; built when Redis is the cache backend and
+            ``EVAL_ONLINE_FLEET`` is on, when omitted.
     """
 
     def __init__(
@@ -93,6 +99,7 @@ class EvaluationService:
         config: EvaluationConfig | None = None,
         store: OnlineEvalStore | None = None,
         monitor: QualityMonitor | None = None,
+        fleet: FleetQualityMonitor | None = None,
     ) -> None:
         self.event_bus = event_bus or get_event_bus()
         self._evaluator = evaluator
@@ -100,6 +107,8 @@ class EvaluationService:
         self.config: EvaluationConfig | None = None
         self.store = store
         self.monitor = monitor
+        self.fleet = fleet
+        self.announcer = TransitionAnnouncer(self.event_bus)
         self._running = False
         self._max_concurrent = max_concurrent
         # Created lazily so the semaphore and queue bind to the running loop.
@@ -107,6 +116,7 @@ class EvaluationService:
         self._queue: asyncio.Queue[OnlineSample] | None = None
         self._workers: list[asyncio.Task[None]] = []
         self._sweeper: asyncio.Task[None] | None = None
+        self._fleet_task: asyncio.Task[None] | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._sampler = OnlineSampler(0.0)
         self._labeler = IntentLabeler(1)
@@ -157,6 +167,7 @@ class EvaluationService:
                 floor=config.online_quality_floor,
                 recovery_margin=config.online_recovery_margin,
             )
+        self.announcer.webhook_tenant = config.online_webhook_tenant
         if self.store is None:
             self.store = build_online_store(
                 config.online_store, max_records=config.online_store_max_records
@@ -176,13 +187,24 @@ class EvaluationService:
         )
 
     def _ensure_workers(self) -> None:
-        """Start the queue workers and the sweeper once a loop is running."""
+        """Start the queue workers, sweeper and fleet ticks once a loop runs."""
         if self._workers or not self._running or self.config is None:
             return
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return  # started outside a loop: deferred to the first event
+        if self.fleet is None and self.monitor is not None:
+            self.fleet = build_fleet_monitor(
+                enabled=self.config.online_fleet,
+                policy=self.monitor,
+                announce=self._announce_fleet,
+                interval_seconds=self.config.online_fleet_interval_seconds,
+            )
+        if self.fleet is not None:
+            self._fleet_task = asyncio.create_task(
+                self.fleet.run(), name="online-eval-fleet"
+            )
         self._queue = asyncio.Queue(maxsize=self.config.online_queue_size)
         self._workers = [
             asyncio.create_task(self._worker(), name=f"online-eval-{i}")
@@ -203,6 +225,7 @@ class EvaluationService:
             task.cancel()
         self._workers = []
         self._sweeper = None
+        self._fleet_task = None
         self._queue = None
         logger.info("EvaluationService stopped")
 
@@ -212,11 +235,14 @@ class EvaluationService:
         self.stop()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await asyncio.wait_for(self.announcer.drain(), timeout=5.0)
+        except TimeoutError:
+            logger.warning("online_eval_webhooks_undelivered_at_shutdown")
 
     def _background_tasks(self) -> list[asyncio.Task[None]]:
         tasks = list(self._workers)
-        if self._sweeper is not None:
-            tasks.append(self._sweeper)
+        tasks += [t for t in (self._sweeper, self._fleet_task) if t is not None]
         return tasks
 
     # -- intake (request path: never blocks) --------------------------------
@@ -339,25 +365,25 @@ class EvaluationService:
         )
 
     async def _observe(self, label: str, source: str, score: float) -> None:
-        """Feed the monitor; announce a degradation or recovery."""
+        """Feed the monitors; announce a transition this worker decided."""
+        if self.fleet is not None:
+            await self.fleet.record(label, source, score)
         if self.monitor is None:
             return
         try:
             transition = self.monitor.observe(label, source, score)
-            if transition is None:
+            # With a fleet monitor the elected worker announces, not this one;
+            # the local series only backs the summary while Redis is away.
+            if transition is None or self.fleet is not None:
                 return
-            degraded = transition.state == DEGRADED
-            set_degraded(label, source, degraded)
-            payload = transition.to_event()
-            if degraded:
-                logger.warning("online_eval_degraded", extra=payload)
-                await self.event_bus.emit(EventNames.EVALUATION_DEGRADED, payload)
-            else:
-                logger.info("online_eval_recovered", extra=payload)
-                await self.event_bus.emit(EventNames.EVALUATION_RECOVERED, payload)
+            set_degraded(label, source, transition.state == DEGRADED)
+            await self.announcer.announce(transition, SCOPE_WORKER)
         except Exception as exc:
             record_failure("monitor")
             logger.warning("online_eval_monitor_failed: %s", exc)
+
+    async def _announce_fleet(self, transition: MonitorTransition) -> None:
+        await self.announcer.announce(transition, SCOPE_FLEET)
 
     async def _persist(self, record: OnlineEvalRecord) -> None:
         if self.store is None:
@@ -425,29 +451,11 @@ class EvaluationService:
     # -- retention and read surface -------------------------------------------
 
     async def sweep_retention(self, now: float | None = None) -> int:
-        """Delete stored verdicts older than ``EVAL_ONLINE_RETENTION_DAYS``.
-
-        Args:
-            now: Reference time (unix seconds); defaults to the current time.
-
-        Returns:
-            The number of records deleted (0 when retention is off).
-        """
-        config = self.config or get_evaluation_config()
-        if self.store is None or config.online_retention_days <= 0:
+        """Purge verdicts past ``EVAL_ONLINE_RETENTION_DAYS``; the count removed."""
+        if self.store is None:
             return 0
-        cutoff = (now if now is not None else time.time()) - (
-            config.online_retention_days * _DAY_SECONDS
-        )
-        try:
-            removed = await self.store.purge_before(cutoff)
-        except Exception as exc:
-            record_failure("retention")
-            logger.warning("online_eval_retention_failed: %s", exc)
-            return 0
-        if removed:
-            logger.info("online_eval_retention_swept", extra={"removed": removed})
-        return removed
+        days = (self.config or get_evaluation_config()).online_retention_days
+        return await purge_expired(self.store, days, now)
 
     async def _sweep_loop(self) -> None:
         while True:
@@ -455,11 +463,30 @@ class EvaluationService:
             await asyncio.sleep(RETENTION_SWEEP_INTERVAL_SECONDS)
 
     def summary(self) -> dict[str, Any]:
-        """Sampling settings, queue depth and per-intent window statistics."""
+        """Sampling settings, queue depth and this worker's window statistics."""
         return {
             "running": self._running,
+            "scope": SCOPE_WORKER,
             "sample_rate": self._sampler.rate,
             "judge_rate": self._sampler.judge_rate,
             "queue_depth": self._queue.qsize() if self._queue is not None else 0,
             "intents": self.monitor.summary() if self.monitor is not None else [],
         }
+
+    async def online_summary(self) -> dict[str, Any]:
+        """:meth:`summary` with the fleet's windows when the fleet monitor answers.
+
+        ``scope`` says which: ``fleet`` (every worker's sampled traffic) or
+        ``worker`` (no fleet monitor, or Redis unreachable). Sampling settings
+        and the queue depth are always the serving worker's.
+        """
+        summary = self.summary()
+        if self.fleet is None:
+            return summary
+        try:
+            intents = await self.fleet.summary()
+        except Exception as exc:
+            record_failure("fleet")
+            logger.warning("online_eval_fleet_summary_failed: %s", exc)
+            return summary
+        return {**summary, "scope": SCOPE_FLEET, "intents": intents}

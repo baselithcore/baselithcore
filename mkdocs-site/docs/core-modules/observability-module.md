@@ -549,13 +549,19 @@ or `judge`:
 | `mas_eval_online_score` | Histogram | `intent`, `source` | Score (0-1) of each evaluated sample |
 | `mas_eval_online_quality_total` | Counter | `intent`, `source`, `quality` | Verdicts by quality level |
 | `mas_eval_online_flags_total` | Counter | `intent`, `flag` | Failed deterministic checks (`empty`, `too_short`, `refusal`, `guard_blocked`, `ungrounded`) |
-| `mas_eval_online_failures_total` | Counter | `stage` | Steps that raised (`checks`, `judge`, `store`, `retention`, `monitor`, `pipeline`) |
+| `mas_eval_online_failures_total` | Counter | `stage` | Steps that raised (`checks`, `judge`, `store`, `retention`, `monitor`, `pipeline`, `fleet` — the shared Redis windows, `webhook` — a degradation webhook emission) |
 | `mas_eval_online_dropped_total` | Counter | `reason` | Sampled flows dropped because the queue was full (`queue_full`) |
 | `mas_eval_online_degraded` | Gauge | `intent`, `source` | `1` while the rolling quality monitor holds the series degraded |
 
-The gauge uses `multiprocess_mode="livemax"`: each worker monitors its own
-share of the traffic, so a series reads degraded while any live worker sees it
-degraded. A sustained non-zero `rate(mas_eval_online_dropped_total[5m])` means
+The gauge uses `multiprocess_mode="livemax"`. With the fleet monitor
+(`CACHE_BACKEND=redis`, `EVAL_ONLINE_FLEET`) every worker mirrors the shared
+fleet state on each tick, so all workers report the same value; without it each
+worker monitors its own share of the traffic and a series reads degraded while
+any live worker sees it degraded. Either way `max by (intent, source)` is the
+right aggregation, and it is what the shipped `AnswerQualityDegraded` alerts use
+(see [Observability › Alerting on answer quality](../advanced/observability.md#alerting-on-answer-quality)).
+A sustained non-zero `rate(mas_eval_online_failures_total{stage="fleet"}[10m])`
+means the fleet monitor cannot reach Redis and is announcing nothing. A sustained non-zero `rate(mas_eval_online_dropped_total[5m])` means
 `EVAL_ONLINE_QUEUE_SIZE`/`EVAL_ONLINE_WORKERS` are too small for the sample
 rate (or the judge is slow).
 

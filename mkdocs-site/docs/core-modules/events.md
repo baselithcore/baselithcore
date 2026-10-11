@@ -227,8 +227,8 @@ async def auto_generate_report(data):
 | `FLOW_STARTED`         | Orchestrator      | intent, query                |
 | `FLOW_COMPLETED`       | Orchestrator      | intent, query, response (the guarded text the user received), context, duration_ms, success, run_id, tenant_id, cost_usd, tokens, guardrails (when a guard acted), streamed (streamed answers) — on failure: intent, duration_ms, success=False, error, run_id |
 | `EVALUATION_COMPLETED` | EvaluationService | score, quality, feedback     |
-| `EVALUATION_DEGRADED`  | EvaluationService | intent, source, window_mean, reference_mean, floor, samples, reason |
-| `EVALUATION_RECOVERED` | EvaluationService | intent, source, window_mean, reference_mean, floor, samples |
+| `EVALUATION_DEGRADED`  | EvaluationService (the elected worker under the fleet monitor) | intent, source, state, window_mean, reference_mean, floor, samples, reason, scope (`fleet` / `worker`); also delivered as the `evaluation.degraded` webhook |
+| `EVALUATION_RECOVERED` | EvaluationService (the elected worker under the fleet monitor) | intent, source, state, window_mean, reference_mean, floor, samples, reason=`recovered`, scope; also the `evaluation.recovered` webhook |
 | `EXPERIENCE_RECORDED`  | ContinuousLearner | action, reward               |
 | `PLUGIN_LOADED`        | PluginRegistry    | name, action                 |
 | `AGENT_FAILED`         | Agent runtime     | error, source, context       |

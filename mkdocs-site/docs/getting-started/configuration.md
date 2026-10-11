@@ -234,6 +234,8 @@ Declared in `baselith.core.config.evaluation`.
 | `EVAL_MODEL` | `str` | `gpt-4-turbo-preview` |  |
 | `EVAL_ONLINE_DEGRADATION_THRESHOLD` | `float` | `0.15` | Drop of the windowed mean below the reference mean that marks an intent degraded. |
 | `EVAL_ONLINE_ENABLED` | `bool` | `False` | Start online evaluation of production flows at boot (also needs EVAL_ENABLED). |
+| `EVAL_ONLINE_FLEET` | `bool` | `True` | Monitor quality across all workers through Redis when CACHE_BACKEND=redis (one elected worker announces); off, or without Redis, each worker monitors its own traffic. |
+| `EVAL_ONLINE_FLEET_INTERVAL_SECONDS` | `float` | `15.0` | Seconds between two fleet monitor ticks; the elected worker's lease expires after three missed ticks. |
 | `EVAL_ONLINE_INTENT_SAMPLE_RATES` | `dict[str, float]` | *computed* | Per-intent sample-rate overrides, as JSON (e.g. {"qa_docs": 0.2}). |
 | `EVAL_ONLINE_JUDGE_RATE` | `float` | `0.0` | Fraction of all flows also scored by the LLM judge, capped at the sample rate. 0 keeps the judge off. |
 | `EVAL_ONLINE_MAX_INTENTS` | `int` | `50` | Distinct intent label values on the online metrics; further intents are reported as 'other'. |
@@ -248,6 +250,7 @@ Declared in `baselith.core.config.evaluation`.
 | `EVAL_ONLINE_STORE` | `Literal['none', 'memory', 'postgres']` | `none` | Where online evaluation results are persisted. |
 | `EVAL_ONLINE_STORE_MAX_RECORDS` | `int` | `10000` | Records kept by the in-memory store (oldest evicted). |
 | `EVAL_ONLINE_STORE_RAW_TEXT` | `bool` | `False` | Also store the redacted query and response text. |
+| `EVAL_ONLINE_WEBHOOK_TENANT` | `str` | `default` | Tenant whose webhook endpoints receive evaluation.degraded and evaluation.recovered (the operators' tenant). |
 | `EVAL_ONLINE_WINDOW` | `int` | `50` | Recent scores per intent in the quality monitor's window. |
 | `EVAL_ONLINE_WORKERS` | `int` | `2` | Concurrent online evaluations (and judge calls) in flight. |
 | `EVAL_OPENAI_API_KEY` :material-key: | `SecretStr \| None` | *empty* | SecretStr so a repr()/log/Sentry capture of the settings object can never print the key (project-wide credential rule). |
@@ -1051,4 +1054,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-710 settings documented.
+713 settings documented.

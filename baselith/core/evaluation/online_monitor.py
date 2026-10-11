@@ -16,13 +16,17 @@ series is degraded its reference mean is frozen at the value it had when it
 degraded, so a long incident cannot drag the reference down until the bad
 state looks normal and "recovers" on its own.
 
-The monitor is per process: with several workers each watches its own share
-of the sampled traffic.
+:class:`QualityMonitor` keeps the series in process memory, so with several
+workers each watches its own share of the traffic. The decision itself is
+:meth:`QualityMonitor.assess`, a pure function of the scores and the series
+state, which :mod:`.online_fleet` applies to windows shared through Redis to
+monitor the whole fleet.
 """
 
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +52,7 @@ class MonitorTransition:
         return {
             "intent": self.intent,
             "source": self.source,
+            "state": self.state,
             "window_mean": round(self.window_mean, 4),
             "reference_mean": (
                 round(self.reference_mean, 4)
@@ -107,14 +112,65 @@ class QualityMonitor:
             self._series[key] = series
         return series
 
-    def _means(self, series: _Series) -> tuple[float, int, float | None]:
-        """``(window mean, window size, reference mean or None)``."""
-        scores = list(series.history)
+    def window_stats(self, scores: Sequence[float]) -> tuple[float, int, float | None]:
+        """``(window mean, window size, reference mean or None)`` of *scores*.
+
+        Args:
+            scores: The series, oldest first (non-empty).
+        """
+        scores = list(scores)[-(self.window + self.reference_window) :]
         recent = scores[-self.window :]
         older = scores[: -self.window] if len(scores) > self.window else []
         window_mean = sum(recent) / len(recent)
         reference = sum(older) / len(older) if len(older) >= self.min_samples else None
         return window_mean, len(recent), reference
+
+    def assess(
+        self,
+        intent: str,
+        source: str,
+        scores: Sequence[float],
+        *,
+        since_transition: int,
+        degraded: bool,
+        frozen_reference: float | None,
+    ) -> MonitorTransition | None:
+        """Decide whether a series changes state; mutates nothing.
+
+        Args:
+            intent: The (label-capped) intent.
+            source: ``checks`` or ``judge``.
+            scores: The series' scores, oldest first.
+            since_transition: Scores observed since the last state change.
+            degraded: Whether the series is currently degraded.
+            frozen_reference: The reference mean frozen when it degraded.
+
+        Returns:
+            The transition, or ``None`` when the state holds.
+        """
+        if not scores:
+            return None
+        window_mean, size, reference = self.window_stats(scores)
+        if size < self.min_samples or since_transition < self.min_samples:
+            return None
+        if degraded:
+            if not self._recovered(window_mean, frozen_reference):
+                return None
+            return self._transition(
+                intent,
+                source,
+                RECOVERED,
+                window_mean,
+                size,
+                frozen_reference,
+                "recovered",
+            )
+        reason = self._degradation_reason(window_mean, reference)
+        if reason is None:
+            return None
+        return self._transition(
+            intent, source, DEGRADED, window_mean, size, reference, reason
+        )
 
     def observe(
         self, intent: str, source: str, score: float
@@ -133,23 +189,21 @@ class QualityMonitor:
         series.history.append(float(score))
         series.observed += 1
         series.since_transition += 1
-        window_mean, size, reference = self._means(series)
-        if size < self.min_samples or series.since_transition < self.min_samples:
-            return None
-        if series.degraded:
-            reference = series.frozen_reference
-            return self._maybe_recover(
-                intent, source, series, window_mean, size, reference
-            )
-        reason = self._degradation_reason(window_mean, reference)
-        if reason is None:
-            return None
-        series.degraded = True
-        series.frozen_reference = reference
-        series.since_transition = 0
-        return self._transition(
-            intent, source, DEGRADED, window_mean, size, reference, reason
+        transition = self.assess(
+            intent,
+            source,
+            series.history,
+            since_transition=series.since_transition,
+            degraded=series.degraded,
+            frozen_reference=series.frozen_reference,
         )
+        if transition is not None:
+            series.degraded = transition.state == DEGRADED
+            series.frozen_reference = (
+                transition.reference_mean if series.degraded else None
+            )
+            series.since_transition = 0
+        return transition
 
     def _degradation_reason(
         self, window_mean: float, reference: float | None
@@ -160,25 +214,12 @@ class QualityMonitor:
             return "below_reference"
         return None
 
-    def _maybe_recover(
-        self,
-        intent: str,
-        source: str,
-        series: _Series,
-        window_mean: float,
-        size: int,
-        reference: float | None,
-    ) -> MonitorTransition | None:
+    def _recovered(self, window_mean: float, reference: float | None) -> bool:
         margin = self.recovery_margin
         if self.floor is not None and window_mean < self.floor + margin:
-            return None
-        if reference is not None and reference - window_mean > self.threshold - margin:
-            return None
-        series.degraded = False
-        series.frozen_reference = None
-        series.since_transition = 0
-        return self._transition(
-            intent, source, RECOVERED, window_mean, size, reference, "recovered"
+            return False
+        return not (
+            reference is not None and reference - window_mean > self.threshold - margin
         )
 
     def _transition(
@@ -202,27 +243,52 @@ class QualityMonitor:
             reason=reason,
         )
 
+    def series_row(
+        self,
+        intent: str,
+        source: str,
+        scores: Sequence[float],
+        *,
+        observed: int,
+        degraded: bool,
+        frozen_reference: float | None,
+    ) -> dict[str, Any]:
+        """One row of :meth:`summary` for a series held anywhere.
+
+        Args:
+            intent: The intent label.
+            source: ``checks`` or ``judge``.
+            scores: The series' scores, oldest first (non-empty).
+            observed: Scores observed over the series' life.
+            degraded: Whether the series is degraded.
+            frozen_reference: The reference mean frozen when it degraded.
+        """
+        window_mean, size, reference = self.window_stats(scores)
+        if degraded:
+            reference = frozen_reference
+        return {
+            "intent": intent,
+            "source": source,
+            "window_mean": round(window_mean, 4),
+            "window_samples": size,
+            "reference_mean": round(reference, 4) if reference is not None else None,
+            "observed": observed,
+            "degraded": degraded,
+        }
+
     def summary(self) -> list[dict[str, Any]]:
         """Per-series window statistics, sorted by intent then source."""
-        rows: list[dict[str, Any]] = []
-        for (intent, source), series in sorted(self._series.items()):
-            window_mean, size, reference = self._means(series)
-            if series.degraded:
-                reference = series.frozen_reference
-            rows.append(
-                {
-                    "intent": intent,
-                    "source": source,
-                    "window_mean": round(window_mean, 4),
-                    "window_samples": size,
-                    "reference_mean": round(reference, 4)
-                    if reference is not None
-                    else None,
-                    "observed": series.observed,
-                    "degraded": series.degraded,
-                }
+        return [
+            self.series_row(
+                intent,
+                source,
+                series.history,
+                observed=series.observed,
+                degraded=series.degraded,
+                frozen_reference=series.frozen_reference,
             )
-        return rows
+            for (intent, source), series in sorted(self._series.items())
+        ]
 
 
 __all__ = ["DEGRADED", "RECOVERED", "MonitorTransition", "QualityMonitor"]

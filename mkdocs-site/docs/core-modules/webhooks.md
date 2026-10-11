@@ -100,9 +100,17 @@ Framework components emit through the same seam:
 | `agent.completed` | The async agent-run job when a queued run finishes (see [Task Queue › Async agent runs](task-queue.md#async-agent-runs-agentasync)) | `task_id`, `answer`, `metadata` |
 | `agent.failed` | The async agent-run job when a queued run raises | `task_id`, `error` |
 | `workflow.failed` (conventional — the name is the workflow's `on_failure` field) | `WorkflowScheduler` when a scheduled run fails — the scheduler is not started by the default app (see [Workflows › Scheduled workflows](workflows.md#scheduled-workflows-workflowscheduler)) | `workflow_id`, `workflow_name`, `schedule`, `status`, `error` |
+| `evaluation.degraded` | The online-evaluation quality monitor when an intent's answer quality degrades — once per fleet with `CACHE_BACKEND=redis`, once per worker otherwise (see [Evaluation › Routing degradations to operators](evaluation.md#routing-degradations)) | `intent`, `source`, `state`, `window_mean`, `reference_mean`, `floor`, `samples`, `reason`, `scope` |
+| `evaluation.recovered` | The same monitor when the intent recovers past the hysteresis margin | same as `evaluation.degraded`, `reason: "recovered"` |
 
 All framework emissions are best-effort: a webhook outage never fails the run
 that triggered it.
+
+The `evaluation.*` events describe the deployment, not one tenant's request,
+so they go to the endpoints of a single operator tenant,
+`EVAL_ONLINE_WEBHOOK_TENANT` (default `default`): register the on-call
+endpoint from that tenant with `event_types` `["evaluation.degraded",
+"evaluation.recovered"]` (or `*`).
 
 ### Management API
 

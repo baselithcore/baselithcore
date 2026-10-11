@@ -598,6 +598,111 @@
       ],
       "title": "Latency Trends",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 104,
+      "panels": [],
+      "title": "⚖️ Online Evaluation Quality",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Mean online-evaluation score of the sampled answers per intent (deterministic checks), from mas_eval_online_score. Needs EVAL_ENABLED and EVAL_ONLINE_ENABLED.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.6 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 33 },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "min"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "asc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (intent) (rate(mas_eval_online_score_sum{job=\"baselith-core\", source=\"checks\"}[15m])) / sum by (intent) (rate(mas_eval_online_score_count{job=\"baselith-core\", source=\"checks\"}[15m]))",
+          "legendFormat": "{{intent}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Answer Quality by Intent (15m mean score)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "The quality monitor's verdict (mas_eval_online_degraded), the series the AnswerQualityDegraded alerts page on. With CACHE_BACKEND=redis every worker mirrors the fleet state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 80, "lineWidth": 0 },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "green", "index": 0, "text": "OK" },
+                "1": { "color": "red", "index": 1, "text": "Degraded" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 33 },
+      "id": 12,
+      "options": {
+        "alignValue": "center",
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "never",
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (intent, source) (mas_eval_online_degraded{job=\"baselith-core\"})",
+          "legendFormat": "{{intent}} ({{source}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Degraded Intents",
+      "type": "state-timeline"
     }
   ],
   "refresh": "5s",

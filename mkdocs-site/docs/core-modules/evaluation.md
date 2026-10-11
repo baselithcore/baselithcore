@@ -24,6 +24,8 @@ baselith/core/evaluation/               # the evaluation toolkit
 ├── online_checks.py           # cheap deterministic checks (no LLM)
 ├── online_metrics.py          # mas_eval_online_* recording, intent label cap
 ├── online_monitor.py          # QualityMonitor: rolling windows + hysteresis
+├── online_fleet.py            # FleetQualityMonitor: Redis-shared windows, one elected announcer
+├── online_alerts.py           # TransitionAnnouncer: log, event bus, webhooks
 ├── online_store.py            # OnlineEvalStore protocol, in-memory store
 ├── online_store_postgres.py   # PostgresOnlineEvalStore (migration 013)
 ├── prompt_eval.py             # PromptEvaluator / EvalCase
@@ -125,7 +127,7 @@ service = EvaluationService(
     store=InMemoryOnlineEvalStore(),
 )
 service.start()             # subscribes; spawns the workers on the running loop
-print(service.summary())    # sample/judge rate, queue depth, per-intent windows
+print(await service.online_summary())  # rates, queue depth, windows, scope
 await service.shutdown()    # unsubscribes and cancels the workers
 ```
 
@@ -188,8 +190,9 @@ nothing.
 windowed mean falls below `EVAL_ONLINE_QUALITY_FLOOR` (unset by default) or
 more than `EVAL_ONLINE_DEGRADATION_THRESHOLD` (0.15) below the reference mean.
 A degradation logs a warning, emits `EVALUATION_DEGRADED`
-(`intent`, `source`, `window_mean`, `reference_mean`, `floor`, `samples`,
-`reason` = `below_floor` / `below_reference`) and sets
+(`intent`, `source`, `state`, `window_mean`, `reference_mean`, `floor`,
+`samples`, `reason` = `below_floor` / `below_reference`, and `scope` =
+`fleet` / `worker`), is delivered to webhook subscribers and sets
 `mas_eval_online_degraded{intent,source}` to 1.
 
 Hysteresis keeps it from flapping: a degraded series recovers (emitting
@@ -197,10 +200,65 @@ Hysteresis keeps it from flapping: a degraded series recovers (emitting
 `EVAL_ONLINE_RECOVERY_MARGIN` (0.05) *inside* both boundaries, at least
 `EVAL_ONLINE_MIN_SAMPLES` scores must arrive between two state changes, and the
 reference mean is frozen while degraded, so a long incident cannot drag the
-reference down until it looks normal. The monitor is per process: each worker
-watches its own share of the traffic. Alert on the gauge or subscribe to the
-event; a quality degradation is not routed into the regulatory incident
-subsystem (`baselith.core.incidents`), which records reportable incidents.
+reference down until it looks normal. The decision is
+`QualityMonitor.assess()`, a pure function of a series' scores and state, so
+the per-process monitor and the fleet monitor below apply the same rules.
+
+### Fleet-wide monitoring (`online_fleet.py`) {#fleet-monitoring}
+
+With several workers (`WEB_CONCURRENCY`, or replicas) a per-process monitor
+sees only the share of the traffic its worker sampled, and every worker that
+crosses a threshold announces it. When `CACHE_BACKEND=redis` and
+`EVAL_ONLINE_FLEET` is on (the default), `EvaluationService` builds a
+`FleetQualityMonitor` on the cache Redis instead:
+
+- **Every worker records.** Each score is pushed onto its series' Redis list
+  (`<CACHE_REDIS_PREFIX>:eval_online:scores:…`, newest first, trimmed to
+  window + reference) and counted on the series' state hash, in one pipelined
+  round trip from the evaluation worker — never from the request path.
+- **One worker decides.** Every `EVAL_ONLINE_FLEET_INTERVAL_SECONDS` (15) each
+  worker ticks. The one holding the `eval_online_monitor`
+  [`DistributedLock`](resilience.md) lease (taken non-blocking, renewed every
+  tick, expiring after three missed ticks) reads every series, applies
+  `assess()` to the fleet window and announces each transition **once**; when
+  it dies, another worker takes the lease within three ticks and inherits the
+  shared state, including a degraded series' frozen reference.
+- **Transitions are compare-and-set.** A Lua script writes a state change only
+  if the series is still in the state it was decided from, and only the writer
+  that applied it announces — so two workers that briefly both believe they
+  lead (a lease lapsing under a paused holder) cannot announce it twice.
+- **Every worker mirrors the gauge** from the shared state on each tick, so
+  `mas_eval_online_degraded` is the fleet's verdict on every scrape target and
+  survives a change of leader.
+
+Series keys expire after seven days without a score. Redis failures count in
+`mas_eval_online_failures_total{stage="fleet"}` and never reach a request;
+while Redis is unreachable nothing is announced — no worker falls back to
+announcing its own share, which would bring back one event per worker. In
+fleet mode each worker still keeps its in-process series, but only to answer
+the summary while Redis is away. Without Redis as the cache backend, or with
+`EVAL_ONLINE_FLEET=false`, each worker monitors and announces its own traffic
+(`scope: "worker"`).
+
+### Routing degradations to operators (`online_alerts.py`) {#routing-degradations}
+
+`TransitionAnnouncer` sends each transition down every channel the framework
+has for it:
+
+| Channel | What arrives | Who sees it |
+| --- | --- | --- |
+| Log | `online_eval_degraded` (warning) / `online_eval_recovered` (info) | log pipeline |
+| Event bus | `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED` | subscribers in the announcing process |
+| Webhooks | event types `evaluation.degraded` / `evaluation.recovered` | endpoints of `EVAL_ONLINE_WEBHOOK_TENANT` (default `default`) subscribed to them, when `WEBHOOKS_ENABLED` |
+| Prometheus | `mas_eval_online_degraded` | the `AnswerQualityDegraded` alert rules shipped in `deploy/` |
+
+The webhook payload is the event payload above. Delivery (signing, retries,
+dead-lettering — see [Webhooks](webhooks.md)) runs as a background task, so a
+slow subscriber never holds up the announcement; a failed emission counts as
+`stage="webhook"`. The alert rules and a Grafana row are described in
+[Observability › Alerting on answer quality](../advanced/observability.md#alerting-on-answer-quality).
+A quality degradation is not routed into the regulatory incident subsystem
+(`baselith.core.incidents`), which records reportable incidents.
 
 ### Result store (opt-in)
 
@@ -222,15 +280,20 @@ sweep runs as the `system` maintenance identity.
 
 With `EVAL_ONLINE_ENABLED`, the `api_routers` plugin mounts
 `GET /v1/evaluation/online/summary` behind the admin Basic Auth: the sample and
-judge rates, the queue depth and the per-intent window statistics of the
-worker that serves the request (503 while the service is not running).
+judge rates, the queue depth and the per-intent window statistics (503 while
+the service is not running). `scope` says whose traffic the windows cover:
+`fleet` when the fleet monitor is on and Redis answered (every worker's
+sampled traffic, read from the shared windows), `worker` otherwise (the share
+the serving worker sampled). The rates and the queue depth are always the
+serving worker's.
 
 ### Event flow
 
 `FLOW_COMPLETED` → `EvaluationService` (sample → checks → optional judge) →
 `EVALUATION_COMPLETED` (judged flows) → `OptimizationLoop` → `auto_tune()` →
 `OPTIMIZATION_COMPLETED`; and `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED`
-from the monitor.
+(plus the `evaluation.degraded` / `evaluation.recovered` webhooks) from the
+monitor — once per fleet when the fleet monitor is on.
 
 ---
 

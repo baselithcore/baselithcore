@@ -23,6 +23,9 @@ def _config(**kw: Any) -> EvaluationConfig:
         "enabled": True,
         "online_sample_rate": 1.0,
         "online_retention_days": 0,
+        # Per-process monitor: independent of CACHE_BACKEND in the environment
+        # (the fleet monitor has its own tests in test_online_fleet.py).
+        "online_fleet": False,
     }
     fields.update(kw)
     return EvaluationConfig(**fields)

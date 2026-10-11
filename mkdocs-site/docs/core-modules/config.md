@@ -1095,6 +1095,8 @@ print(config.online_enabled)       # False  (EVAL_ONLINE_ENABLED; needs EVAL_ENA
 print(config.online_sample_rate)   # 0.05   (EVAL_ONLINE_SAMPLE_RATE)
 print(config.online_judge_rate)    # 0.0    (EVAL_ONLINE_JUDGE_RATE: LLM judge off)
 print(config.online_store)         # "none" (EVAL_ONLINE_STORE: none | memory | postgres)
+print(config.online_fleet)         # True   (EVAL_ONLINE_FLEET: fleet-wide monitor when CACHE_BACKEND=redis)
+print(config.online_webhook_tenant)  # "default" (EVAL_ONLINE_WEBHOOK_TENANT: who gets evaluation.* webhooks)
 ```
 
 Every field is in the [generated reference](../getting-started/configuration.md#evaluation-configuration-eval_);

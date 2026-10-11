@@ -8,7 +8,8 @@ coherence, faithfulness).
 The event-driven ``EvaluationService`` evaluates a deterministic sample of
 production flows online: cheap deterministic checks on every sampled flow, an
 opt-in LLM-judge rate on top, Prometheus metrics, a per-intent rolling quality
-monitor and an opt-in result store.
+monitor (fleet-wide through Redis when it is the cache backend) whose
+transitions reach logs, events and webhooks, and an opt-in result store.
 
 Also includes the Prompt Regression Testing harness (prompt_eval) for
 running structured eval cases against system prompts — see §2.6 of
@@ -28,6 +29,8 @@ from baselith.core.evaluation.fairness import (
     evaluate_fairness,
 )
 from baselith.core.evaluation.judges import CompositeEvaluator, RelevanceEvaluator
+from baselith.core.evaluation.online_alerts import TransitionAnnouncer
+from baselith.core.evaluation.online_fleet import FleetQualityMonitor
 from baselith.core.evaluation.online_monitor import QualityMonitor
 from baselith.core.evaluation.online_store import (
     InMemoryOnlineEvalStore,
@@ -63,6 +66,8 @@ __all__ = [
     "ConsensusEvaluator",
     # Online evaluation of production traffic
     "QualityMonitor",
+    "FleetQualityMonitor",
+    "TransitionAnnouncer",
     "OnlineEvalRecord",
     "OnlineEvalStore",
     "InMemoryOnlineEvalStore",

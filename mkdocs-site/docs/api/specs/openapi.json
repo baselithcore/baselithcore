@@ -1150,7 +1150,7 @@
         "type": "object"
       },
       "OnlineEvaluationSummary": {
-        "description": "The online evaluator's state on the serving worker.",
+        "description": "The online evaluator's state, fleet-wide or on the serving worker.",
         "properties": {
           "intents": {
             "items": {
@@ -1174,10 +1174,19 @@
           "sample_rate": {
             "title": "Sample Rate",
             "type": "number"
+          },
+          "scope": {
+            "enum": [
+              "fleet",
+              "worker"
+            ],
+            "title": "Scope",
+            "type": "string"
           }
         },
         "required": [
           "running",
+          "scope",
           "sample_rate",
           "judge_rate",
           "queue_depth",
@@ -5560,7 +5569,7 @@
     "/chat": {
       "post": {
         "deprecated": true,
-        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nThe run is named by the request's ``Idempotency-Key`` (else its request\nid): a retry with the same key resumes the durable run, or returns its\nanswer when it already finished. A retry while the first attempt still\nexecutes elsewhere answers **409**.",
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nAn authenticated caller's ``Idempotency-Key`` names the run: a retry with\nthe same key resumes the durable run, or returns its answer when it\nalready finished. A retry while the first attempt still executes\nelsewhere answers **409**. Without a key, or from an anonymous caller,\nevery request is a fresh run.",
         "operationId": "chat_chat_post",
         "requestBody": {
           "content": {
@@ -10417,7 +10426,7 @@
     },
     "/v1/chat": {
       "post": {
-        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nThe run is named by the request's ``Idempotency-Key`` (else its request\nid): a retry with the same key resumes the durable run, or returns its\nanswer when it already finished. A retry while the first attempt still\nexecutes elsewhere answers **409**.",
+        "description": "Main endpoint for querying the agent.\nDelegated to ChatService which handles retrieval, reranking, caching, and response generation.\n\nAn authenticated caller's ``Idempotency-Key`` names the run: a retry with\nthe same key resumes the durable run, or returns its answer when it\nalready finished. A retry while the first attempt still executes\nelsewhere answers **409**. Without a key, or from an anonymous caller,\nevery request is a fresh run.",
         "operationId": "chat_v1_chat_post",
         "requestBody": {
           "content": {

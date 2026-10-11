@@ -670,6 +670,21 @@ the guarded text the user received (PII redacted), not the handler's raw
 answer, and streamed answers emit it too (`streamed: true`). See
 [Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation).
 
+### The online quality monitor is fleet-wide under Redis
+
+With `CACHE_BACKEND=redis`, online evaluation's quality monitor now aggregates
+every worker's sampled traffic through Redis, and one elected worker announces
+each transition: `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED` arrive **once
+per fleet** instead of once per worker that crossed the line, on the event bus
+of the elected worker only. Their payload gains `state` and `scope`
+(`fleet` / `worker`), and both are also delivered as the `evaluation.degraded` /
+`evaluation.recovered` webhooks to the endpoints of `EVAL_ONLINE_WEBHOOK_TENANT`
+(default `default`) when `WEBHOOKS_ENABLED` is on. `GET
+/v1/evaluation/online/summary` reports the fleet's windows and says so in a new
+`scope` field. Set `EVAL_ONLINE_FLEET=false` to keep the per-worker monitor;
+without Redis as the cache backend nothing changes. See
+[Evaluation › Fleet-wide monitoring](../core-modules/evaluation.md#fleet-monitoring).
+
 ### Metrics and spans follow the OpenTelemetry GenAI conventions
 
 - The Prometheus label `gen_ai_system` on the `gen_ai_client_*` metrics is

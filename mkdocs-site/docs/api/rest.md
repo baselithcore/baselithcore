@@ -72,8 +72,9 @@ WebSocket chat channel (`/v1/chat/ws`, see below).
 
 `GET /v1/evaluation/online/summary` (admin Basic Auth, mounted with
 `EVAL_ONLINE_ENABLED`) reports the online evaluator's sample and judge rates,
-queue depth and per-intent rolling-window quality on the serving worker; 503
-while the service is not running. See
+queue depth and per-intent rolling-window quality — fleet-wide when Redis is
+the cache backend, else the serving worker's, as its `scope` field (`fleet` /
+`worker`) says; 503 while the service is not running. See
 [Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation).
 
 The unprefixed copies are **deprecated**: their operations carry

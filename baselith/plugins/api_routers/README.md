@@ -12,6 +12,6 @@ This plugin is the canonical home for:
 - metrics
 - status
 - console SPA routing
-- online evaluation summary (`GET /v1/evaluation/online/summary`, behind `EVAL_ONLINE_ENABLED`)
+- online evaluation summary (`GET /v1/evaluation/online/summary`, behind `EVAL_ONLINE_ENABLED`; fleet-wide when Redis is the cache backend, with a `scope` field saying so)
 
 The `baselith/core/routers/*` modules remain as backward-compatible shims during the Sacred Core migration.

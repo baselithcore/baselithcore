@@ -21,10 +21,16 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from baselith.core.observability.logging import get_logger
 from baselith.core.observability.redaction import redact_text
+
+from .online_metrics import record_failure
+
+logger = get_logger(__name__)
 
 #: Characters of query/response text a record may keep (after redaction).
 MAX_STORED_TEXT = 4000
+_DAY_SECONDS = 86_400.0
 #: Characters handed to the redactor: bounds its regex work on huge answers.
 _REDACT_INPUT_CAP = 2 * MAX_STORED_TEXT
 
@@ -135,6 +141,34 @@ class InMemoryOnlineEvalStore:
         return len(self._records)
 
 
+async def purge_expired(
+    store: OnlineEvalStore, retention_days: int, now: float | None = None
+) -> int:
+    """Delete the records older than *retention_days* (``0`` keeps everything).
+
+    Args:
+        store: The store to sweep.
+        retention_days: ``EVAL_ONLINE_RETENTION_DAYS``.
+        now: Reference time (unix seconds); defaults to the current time.
+
+    Returns:
+        The number of records deleted; 0 when retention is off or the sweep
+        failed (counted as ``mas_eval_online_failures_total{stage="retention"}``).
+    """
+    if retention_days <= 0:
+        return 0
+    cutoff = (now if now is not None else time.time()) - retention_days * _DAY_SECONDS
+    try:
+        removed = await store.purge_before(cutoff)
+    except Exception as exc:
+        record_failure("retention")
+        logger.warning("online_eval_retention_failed: %s", exc)
+        return 0
+    if removed:
+        logger.info("online_eval_retention_swept", extra={"removed": removed})
+    return removed
+
+
 def build_online_store(
     kind: str, *, max_records: int = 10_000
 ) -> OnlineEvalStore | None:
@@ -170,5 +204,6 @@ __all__ = [
     "OnlineEvalRecord",
     "OnlineEvalStore",
     "build_online_store",
+    "purge_expired",
     "stored_text",
 ]
