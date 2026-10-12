@@ -299,6 +299,19 @@ def test_a_breaking_change_cuts_a_major_release() -> None:
     assert {"breaking": True, "release": "major"} in release_rules["releaseRules"]
 
 
+def test_release_notes_drop_session_trailers() -> None:
+    """A trailer after a ``BREAKING CHANGE:`` footer reads as part of the note.
+
+    conventional-commits-parser appends every later footer line to the note's
+    text, so the 1.0.0 release notes carried each commit's session trailer
+    under "BREAKING CHANGES". ``commentChar`` drops lines starting with it
+    before parsing; commit-analyzer needs no such option, because a trailer
+    never creates a note of its own.
+    """
+    notes = _plugin_config(_releaserc(), "@semantic-release/release-notes-generator")
+    assert notes["parserOpts"]["commentChar"] == "Claude-Session:"
+
+
 def test_coverage_gate_is_not_parked_below_the_real_number() -> None:
     """A gate several points low permits a silent regression."""
     text = PYTEST_INI.read_text(encoding="utf-8")
