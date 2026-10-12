@@ -9,14 +9,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.services.llm._stream_fallback import open_stream
-from core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm._stream_fallback import open_stream
+from baselith.core.services.llm.exceptions import LLMProviderError
 
 
 def _make_service(provider="ollama", fallback_chain="openai:gpt-4o-mini"):
     """LLMService with a mocked provider and a configured fallback chain."""
-    from core.config.services import LLMConfig
-    from core.services.llm.service import LLMService
+    from baselith.core.config.services import LLMConfig
+    from baselith.core.services.llm.service import LLMService
 
     config = LLMConfig(
         provider=provider, model="llama3.2", fallback_chain=fallback_chain
@@ -74,7 +74,8 @@ class TestOpenStream:
         secondary.provider.generate_stream = _chunks("saved")
 
         with patch(
-            "core.services.llm._stream_fallback._clone_service", return_value=secondary
+            "baselith.core.services.llm._stream_fallback._clone_service",
+            return_value=secondary,
         ):
             stream, serving, provider, model = await open_stream(
                 service, "p", "llama3.2", {}
@@ -86,13 +87,15 @@ class TestOpenStream:
 
     async def test_budget_errors_never_fall_through(self):
         """A request out of budget must not spend more of it on a second provider."""
-        from core.services.llm.exceptions import BudgetExceededError
+        from baselith.core.services.llm.exceptions import BudgetExceededError
 
         service = _make_service()
         service.provider.generate_stream = _failing(BudgetExceededError("cap"))
 
         with (
-            patch("core.services.llm._stream_fallback._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm._stream_fallback._clone_service"
+            ) as clone,
             pytest.raises(BudgetExceededError),
         ):
             await open_stream(service, "p", "llama3.2", {})
@@ -106,7 +109,7 @@ class TestOpenStream:
 
         with (
             patch(
-                "core.services.llm._stream_fallback._clone_service",
+                "baselith.core.services.llm._stream_fallback._clone_service",
                 return_value=secondary,
             ),
             pytest.raises(LLMProviderError, match="secondary down"),
@@ -132,11 +135,11 @@ class TestOpenStream:
 
         with (
             patch(
-                "core.services.llm._stream_fallback._breaker_open",
+                "baselith.core.services.llm._stream_fallback._breaker_open",
                 side_effect=lambda name: name == "ollama",
             ),
             patch(
-                "core.services.llm._stream_fallback._clone_service",
+                "baselith.core.services.llm._stream_fallback._clone_service",
                 return_value=secondary,
             ),
         ):
@@ -152,7 +155,9 @@ class TestOpenStream:
         service.provider.generate_stream = _failing(ConnectionError("down"))
 
         with (
-            patch("core.services.llm._stream_fallback._clone_service") as clone,
+            patch(
+                "baselith.core.services.llm._stream_fallback._clone_service"
+            ) as clone,
             pytest.raises(LLMProviderError, match="down"),
         ):
             await open_stream(service, "p", "llama3.2", {})

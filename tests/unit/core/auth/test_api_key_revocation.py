@@ -3,9 +3,9 @@
 import hashlib
 from unittest.mock import AsyncMock
 
-from core.auth.api_keys import APIKeyValidator
-from core.auth.types import AuthRole
-from core.config.security import SecurityConfig
+from baselith.core.auth.api_keys import APIKeyValidator
+from baselith.core.auth.types import AuthRole
+from baselith.core.config.security import SecurityConfig
 
 
 def _validator_with_redis(redis) -> APIKeyValidator:

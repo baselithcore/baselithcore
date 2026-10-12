@@ -13,9 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.vectorstore import VectorStoreConfig
-from core.services.vectorstore.exceptions import VectorStoreError
-from core.services.vectorstore.providers.pgvector_provider import PgVectorProvider
+from baselith.core.config.vectorstore import VectorStoreConfig
+from baselith.core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.services.vectorstore.providers.pgvector_provider import (
+    PgVectorProvider,
+)
 
 pytestmark = [pytest.mark.unit]
 
@@ -37,14 +39,14 @@ def _patched(cursor):
         yield cursor
 
     return patch(
-        "core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
+        "baselith.core.services.vectorstore.providers.pgvector_provider.get_async_cursor",
         _ctx,
     )
 
 
 def _config(**kwargs):
     return patch(
-        "core.services.vectorstore.providers.pgvector_provider.get_vectorstore_config",
+        "baselith.core.services.vectorstore.providers.pgvector_provider.get_vectorstore_config",
         return_value=VectorStoreConfig(**kwargs),
     )
 

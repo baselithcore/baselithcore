@@ -2,10 +2,14 @@
 
 import pytest
 
-import core.config.mcp as mcp_config_module
-from core.mcp.server import MCPServer
-from core.mcp.types import MCPTool
-from core.orchestration.autonomy import DESTRUCTIVE, AutonomyLevel, AutonomyPolicy
+import baselith.core.config.mcp as mcp_config_module
+from baselith.core.mcp.server import MCPServer
+from baselith.core.mcp.types import MCPTool
+from baselith.core.orchestration.autonomy import (
+    DESTRUCTIVE,
+    AutonomyLevel,
+    AutonomyPolicy,
+)
 
 
 async def _noop() -> str:

@@ -1,0 +1,461 @@
+"""
+Chat Service implementation.
+
+This module provides the central entry point for conversational AI interactions.
+It coordinates multiple internal components:
+1. Orchestrator: The brain that selects agents and handles intent.
+2. History Manager: Manages chat sessions and conversation context.
+3. NLP Utilities: (Embedder/Reranker) used for semantic processing during RAG.
+4. Observability: Tracks request metrics and latencies.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections.abc import AsyncIterator, Iterator
+from typing import TYPE_CHECKING, Any, TypeAlias
+
+from baselith.core.models.chat import ChatRequest, ChatResponse
+from baselith.core.observability.logging import get_logger
+from baselith.core.services.chat.exceptions import ChatServiceError
+from baselith.core.services.chat.utils.conversation import (
+    HISTORY_TEXT_KEY,
+    build_chat_memory,
+    conversation_key,
+    is_recordable,
+    load_history,
+    record_turn,
+)
+from baselith.core.services.chat.utils.guard import validate_input
+from baselith.core.services.chat.utils.history import CacheProtocol, ChatHistoryManager
+from baselith.core.services.chat.utils.metrics import record_chat_metric
+from baselith.core.utils.concurrency import drain_async_iterator
+
+if TYPE_CHECKING:
+    from sentence_transformers import (  # type: ignore[import-untyped]
+        CrossEncoder,
+        SentenceTransformer,
+    )
+
+    from baselith.core.nlp import CachedEmbedder, LazyEmbedder, LazyReranker
+    from baselith.core.orchestration.protocols import OrchestratorProtocol
+
+    # The service only needs `.encode(...)`: both the raw model and the
+    # framework's caching wrapper satisfy that contract.
+    EmbedderLike: TypeAlias = SentenceTransformer | CachedEmbedder | LazyEmbedder
+    RerankerLike: TypeAlias = CrossEncoder | LazyReranker
+
+logger = get_logger(__name__)
+
+
+class ChatServiceConfig:
+    """
+    Configuration parameters for tuning the Chat Service behavior.
+    """
+
+    def __init__(
+        self,
+        *,
+        initial_search_k: int = 40,
+        final_top_k: int = 6,
+        streaming_enabled: bool = True,
+        embedder_model: str = "all-MiniLM-L6-v2",
+        reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        history_enabled: bool = True,
+        history_max_turns: int = 10,
+        memory_enabled: bool = False,
+    ) -> None:
+        """
+        Args:
+            initial_search_k: Number of candidates to fetch from vector DB.
+            final_top_k: Number of results to keep after re-ranking.
+            streaming_enabled: Global toggle for token-by-token output.
+            embedder_model: ID of the sentence-transformer used for embeddings.
+            reranker_model: ID of the cross-encoder used for semantic validation.
+            history_enabled: If True, tracks conversation state across turns.
+            history_max_turns: Maximum context window for historical memory.
+            memory_enabled: Give the orchestrator long-term ``AgentMemory``.
+        """
+        self.initial_search_k = initial_search_k
+        self.final_top_k = final_top_k
+        self.streaming_enabled = streaming_enabled
+        self.embedder_model = embedder_model
+        self.reranker_model = reranker_model
+        self.history_enabled = history_enabled
+        self.history_max_turns = history_max_turns
+        self.memory_enabled = memory_enabled
+
+
+class ChatService:
+    """
+    High-level service for managing conversational interactions.
+
+    This class serves as a Facade over the complex orchestration, retrieval,
+    and memory systems, providing a simple API for sync, async, and streaming chat.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: ChatServiceConfig | None = None,
+        embedder: EmbedderLike | None = None,
+        reranker: RerankerLike | None = None,
+        response_cache: CacheProtocol | None = None,
+        precheck_cache: CacheProtocol | None = None,
+        rerank_cache: CacheProtocol | None = None,
+        history_manager: ChatHistoryManager | None = None,
+        plugin_registry: Any | None = None,
+    ) -> None:
+        """
+        Initialize ChatService with its core dependencies.
+
+        Args:
+            config: Operational configuration settings.
+            embedder: Pre-initialized embedding model (lazy-loaded if None).
+            reranker: Pre-initialized re-ranking model (lazy-loaded if None).
+            response_cache: Optional cache interface for storing final chat answers.
+            precheck_cache: Optional opt-in pre-retrieval answer cache. When
+                supplied, the RAG pipeline probes it right after history load
+                and skips retrieval entirely on a hit; ``None`` disables the
+                layer (the default). See ``baselith.core.chat.precheck``.
+            rerank_cache: Optional cache for intermediate re-ranking results.
+            history_manager: Coordinator for conversation persistence.
+            plugin_registry: Mandatory registry containing available tools/agents.
+        """
+        self.config = config or ChatServiceConfig()
+        self.plugin_registry = plugin_registry
+
+        # Internal state/dependencies.
+        self._embedder = embedder
+        self._reranker = reranker
+        self.response_cache = response_cache
+        self.precheck_cache = precheck_cache
+        self.rerank_cache = rerank_cache
+        self._history_manager = history_manager
+
+        # Layout constants.
+        self.newline = "\n"
+        self.double_newline = "\n\n"
+        self.section_separator = "\n\n---\n\n"
+
+        # Dynamically loaded components.
+        self._agent: Any | None = None
+        self._last_sources: dict[str, set[str]] = {}
+
+    @property
+    def embedder(self) -> EmbedderLike:
+        """
+        Access the embedding model, initializing it from the framework context if missing.
+        """
+        if self._embedder is None:
+            try:
+                from baselith.core.nlp import get_embedder
+
+                self._embedder = get_embedder(self.config.embedder_model)
+            except ImportError as e:
+                raise ChatServiceError(
+                    "NLP module not reachable. Verify baselith.core.nlp installation."
+                ) from e
+        return self._embedder
+
+    @property
+    def reranker(self) -> RerankerLike:
+        """
+        Access the re-ranking model with lazy initialization.
+        """
+        if self._reranker is None:
+            try:
+                from baselith.core.nlp import get_reranker
+
+                self._reranker = get_reranker(self.config.reranker_model)
+            except ImportError as e:
+                raise ChatServiceError(
+                    "Re-ranking module not reachable. Verify dependencies."
+                ) from e
+        return self._reranker
+
+    @property
+    def history_manager(self) -> ChatHistoryManager:
+        """
+        Access the history coordinator, ensuring a default instance exists.
+        """
+        if self._history_manager is None:
+            self._history_manager = ChatHistoryManager(
+                cache=None,
+                max_turns=self.config.history_max_turns,
+            )
+        return self._history_manager
+
+    def _history_key(self, req: ChatRequest) -> str | None:
+        """Storage key for this request's conversation; ``None`` = stateless."""
+        if not self.config.history_enabled:
+            return None
+        return conversation_key(req.conversation_id)
+
+    @property
+    def agent(self) -> OrchestratorProtocol:
+        """
+        Access the main Orchestrator 'agent'.
+
+        Typed as the protocol rather than ``Any``: the only two members this
+        service touches are ``process`` and ``process_stream``, which is
+        exactly what ``OrchestratorProtocol`` declares. It was ``Any``, and
+        that is what let `handle_chat_stream` return an async generator from a
+        method annotated ``Iterator[str]`` without mypy noticing.
+
+        This agent is responsible for breaking down the query into tasks
+        and coordinating sub-agents. Requires `plugin_registry`.
+        """
+        if self._agent is None:
+            if self.plugin_registry is None:
+                raise ChatServiceError(
+                    "Orchestrator requires active plugin_registry. "
+                    "Initialize ChatService with a valid registry instance."
+                )
+
+            try:
+                from baselith.core.orchestration import Orchestrator
+                from baselith.core.orchestration.checkpoint_factory import (
+                    get_default_checkpoint_store,
+                )
+
+                # None unless ORCHESTRATOR_CHECKPOINT_ENABLED: with a store,
+                # runs checkpoint durably and approval gates pause
+                # (awaiting_approval + /approvals API) instead of failing.
+                self._agent = Orchestrator(
+                    plugin_registry=self.plugin_registry,
+                    checkpoint_store=get_default_checkpoint_store(),
+                    memory_manager=self._build_memory_manager(),
+                )
+                logger.info(
+                    "ChatService bound to baselith.core.orchestration.Orchestrator"
+                )
+            except ImportError as e:
+                raise ChatServiceError(
+                    f"Orchestration layer missing: {e}. Check baselith/core/orchestration path."
+                ) from e
+
+        return self._agent
+
+    def _build_memory_manager(self) -> Any | None:
+        """Long-term memory for the orchestrator (see ``build_chat_memory``)."""
+        if not self.config.memory_enabled:
+            return None
+        return build_chat_memory()
+
+    def handle_chat(self, req: ChatRequest) -> ChatResponse:
+        """
+        Process a standard conversational request synchronously.
+
+        WARNING: Blocking call. Use `handle_chat_async` in high-concurrency
+        environments (like FastAPI) to avoid event loop starvation.
+
+        Args:
+            req: Structured request containing query and conversation metadata.
+
+        Returns:
+            ChatResponse: Structured response with answer and citation sources.
+        """
+        start = time.perf_counter()
+        try:
+            self._record_metric("chat_requests_total", route="sync")
+
+            # Defensive event loop check.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                raise RuntimeError(
+                    "Attempted synchronous chat execution from an async context. "
+                    "Call `handle_chat_async` instead."
+                )
+
+            # Validate input using Guardrails
+            validate_input(req.query)
+
+            # Execution context for the orchestrator.
+            context = {
+                "conversation_id": req.conversation_id,
+                "rag_only": req.rag_only,
+                "kb_label": req.kb_label,
+            }
+
+            # Run the underlying async orchestrator in a temporary loop.
+            result = asyncio.run(self.agent.process(req.query, context))
+
+            return ChatResponse(
+                answer=result.get("response", "")
+                or result.get("error", "Generation failed"),
+                metadata=result.get("metadata", {}),
+                sources=result.get("sources"),
+                conversation_id=req.conversation_id,
+            )
+        except Exception:
+            self._record_metric("chat_request_errors_total", route="sync")
+            raise
+        finally:
+            self._record_metric(
+                "chat_request_latency", route="sync", value=time.perf_counter() - start
+            )
+
+    def handle_chat_stream(self, req: ChatRequest) -> Iterator[str]:
+        """
+        Process a conversational request as a synchronous stream.
+
+        WARNING: Blocking call, like :meth:`handle_chat`. Use
+        :meth:`handle_chat_stream_async` from any async context.
+
+        This used to `return self.agent.process_stream(...)` directly. That is
+        an ASYNC generator, so the returned object satisfied the annotation
+        only because the orchestrator is typed ``Any``; iterating it with a
+        plain ``for`` raised ``'async_generator' object is not iterable`` at the
+        call site, a long way from the cause. Every test passed because they all
+        inject a mock whose ``process_stream`` is a sync generator — the one
+        shape production never has.
+
+        It now drives the async path on a private event loop, the same bridge
+        :meth:`handle_chat` uses for the non-streaming case, and delegates to
+        :meth:`handle_chat_stream_async` so the guardrails, metrics, the
+        streaming-disabled fallback and the error stream have exactly one
+        implementation.
+
+        Args:
+            req: Chat request payload.
+
+        Returns:
+            Iterator[str]: Iterator yielding response tokens or segments.
+
+        Raises:
+            RuntimeError: If called from a thread that already runs an event
+                loop. Driving a loop from inside a running one is impossible,
+                and blocking a request thread for a whole stream would be wrong
+                even if it were not.
+        """
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is not None and running.is_running():
+            raise RuntimeError(
+                "Attempted synchronous chat streaming from an async context. "
+                "Call `handle_chat_stream_async` instead."
+            )
+
+        return drain_async_iterator(lambda: self.handle_chat_stream_async(req))
+
+    async def handle_chat_async(
+        self,
+        req: ChatRequest,
+        *,
+        run_id: str | None = None,
+        extra_context: dict[str, Any] | None = None,
+    ) -> ChatResponse:
+        """
+        Process a conversational request asynchronously.
+
+        Preferred method for modern web servers.
+
+        Args:
+            req: Chat request payload.
+            run_id: Stable id of the run this request is an attempt at (see
+                :func:`~baselith.core.orchestration.run_ids.derive_run_id`).
+                A retry under the same id resumes the run's checkpoint — or
+                returns its answer when it already completed — instead of
+                starting over. ``None`` runs a fresh, unnamed run.
+            extra_context: Additional orchestration-context entries (e.g. a
+                queued job's completion notifier), captured with the run's
+                inputs.
+
+        Returns:
+            ChatResponse: Structured response model.
+        """
+        start = time.perf_counter()
+        try:
+            self._record_metric("chat_requests_total", route="async_sync")
+            # Validate input using Guardrails
+            validate_input(req.query)
+
+            history_key = self._history_key(req)
+            turns, history_text = await load_history(self.history_manager, history_key)
+            context = {
+                "conversation_id": req.conversation_id,
+                "rag_only": req.rag_only,
+                "kb_label": req.kb_label,
+                HISTORY_TEXT_KEY: history_text,
+                **(extra_context or {}),
+            }
+
+            # Async execution of the orchestration pipeline.
+            if run_id is not None:
+                from baselith.core.orchestration.run_ids import (
+                    process_with_stable_run_id,
+                )
+
+                result = await process_with_stable_run_id(
+                    self.agent, req.query, context, run_id
+                )
+            else:
+                result = await self.agent.process(req.query, context)
+            if is_recordable(result):
+                await record_turn(
+                    self.history_manager,
+                    history_key,
+                    turns,
+                    req.query,
+                    result["response"],
+                )
+
+            return ChatResponse(
+                answer=result.get("response", ""),
+                metadata=result.get("metadata", {}),
+                sources=result.get("sources"),
+                conversation_id=req.conversation_id,
+            )
+        except Exception:
+            self._record_metric("chat_request_errors_total", route="async_sync")
+            raise
+        finally:
+            self._record_metric(
+                "chat_request_latency",
+                route="async_sync",
+                value=time.perf_counter() - start,
+            )
+
+    async def handle_chat_stream_async(
+        self, req: ChatRequest, *, run_id: str | None = None
+    ) -> AsyncIterator[str]:
+        """
+        Process a conversational request as an asynchronous stream.
+
+        Uses the orchestrator's native async stream to avoid per-chunk
+        executor hops on the hot path.
+
+        Args:
+            req: Chat request payload.
+            run_id: Stable id of the streamed run this request is an attempt
+                at (see :func:`~baselith.core.orchestration.run_ids.derive_run_id`).
+                With one, a completed run replays its recorded answer, an
+                interrupted one resumes (recorded steps replay, the answer is
+                regenerated), and the returned stream is a
+                :class:`~baselith.core.services.chat.stream_session.ChatStream`
+                naming the attempt's ``mode``. ``None`` streams a run nobody
+                can resume by id.
+
+        Raises:
+            CheckpointLeaseHeldError: ``run_id`` is still streaming elsewhere.
+        """
+        from baselith.core.services.chat.stream_session import open_chat_stream
+
+        return await open_chat_stream(self, req, run_id)
+
+    def _record_metric(
+        self, name: str, route: str = "", value: float | None = None
+    ) -> None:
+        """Update the chat Prometheus metrics (see ``utils.metrics``)."""
+        record_chat_metric(name, route, value)
+
+
+__all__ = ["ChatService", "ChatServiceConfig"]

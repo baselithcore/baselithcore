@@ -10,8 +10,11 @@ from prometheus_client.openmetrics.exposition import (
     generate_latest as generate_openmetrics,
 )
 
-from core.config.observability import ObservabilityConfig, reset_observability_config
-from core.observability.metric_context import (
+from baselith.core.config.observability import (
+    ObservabilityConfig,
+    reset_observability_config,
+)
+from baselith.core.observability.metric_context import (
     TENANT_OTHER,
     TENANT_UNKNOWN,
     ExemplarHistogram,
@@ -35,7 +38,7 @@ def _clean_config():
 def _config(**kwargs):
     """Patch the observability config singleton for one test."""
     return patch(
-        "core.observability.metric_context.get_observability_config",
+        "baselith.core.observability.metric_context.get_observability_config",
         return_value=ObservabilityConfig(**kwargs),
     )
 
@@ -73,7 +76,7 @@ class TestResolveTenantLabel:
     def test_missing_tenant_is_unknown(self):
         with (
             _config(metrics_tenant_label_allowlist={"acme"}),
-            patch("core.context.get_current_tenant_id", return_value=""),
+            patch("baselith.core.context.get_current_tenant_id", return_value=""),
         ):
             assert resolve_tenant_label("") == TENANT_UNKNOWN
             assert resolve_tenant_label(None) == TENANT_UNKNOWN
@@ -81,14 +84,17 @@ class TestResolveTenantLabel:
     def test_falls_back_to_ambient_tenant_context(self):
         with (
             _config(metrics_tenant_label_allowlist={"acme"}),
-            patch("core.context.get_current_tenant_id", return_value="acme"),
+            patch("baselith.core.context.get_current_tenant_id", return_value="acme"),
         ):
             assert resolve_tenant_label() == "acme"
 
     def test_tenant_context_error_never_propagates(self):
         with (
             _config(metrics_tenant_label_allowlist={"acme"}),
-            patch("core.context.get_current_tenant_id", side_effect=RuntimeError("x")),
+            patch(
+                "baselith.core.context.get_current_tenant_id",
+                side_effect=RuntimeError("x"),
+            ),
         ):
             assert resolve_tenant_label() == TENANT_UNKNOWN
 
@@ -113,7 +119,7 @@ class TestTenantLabeledCounter:
         registry, wrapped = self._counter()
         with (
             _config(metrics_tenant_label_allowlist={"acme"}),
-            patch("core.context.get_current_tenant_id", return_value="acme"),
+            patch("baselith.core.context.get_current_tenant_id", return_value="acme"),
         ):
             wrapped.labels("anthropic", "claude-opus-5").inc(1.5)
         assert (
@@ -284,7 +290,7 @@ class TestExemplarHistogram:
         with (
             _config(),
             patch(
-                "core.observability.metric_context.current_exemplar",
+                "baselith.core.observability.metric_context.current_exemplar",
                 return_value={"trace_id": "z" * 200},  # over the 128-rune cap
             ),
         ):
@@ -342,13 +348,13 @@ class TestExemplarHistogram:
 
 class TestShippedMetricsAreInstrumented:
     def test_gen_ai_cost_counter_carries_a_tenant_label(self):
-        from core.observability.metrics import GEN_AI_COST_USD
+        from baselith.core.observability.metrics import GEN_AI_COST_USD
 
         assert isinstance(GEN_AI_COST_USD, TenantLabeledCounter)
         assert "tenant" in GEN_AI_COST_USD._labelnames
 
     def test_http_and_genai_histograms_are_exemplar_aware(self):
-        from core.observability.metrics import (
+        from baselith.core.observability.metrics import (
             GEN_AI_OPERATION_DURATION,
             GEN_AI_TOKEN_USAGE,
             HTTP_REQUEST_DURATION_SECONDS,

@@ -2,7 +2,11 @@ import json
 
 import pytest
 
-from core.reasoning.tot import ThoughtNode, export_tree_to_json, export_tree_to_mermaid
+from baselith.core.reasoning.tot import (
+    ThoughtNode,
+    export_tree_to_json,
+    export_tree_to_mermaid,
+)
 
 
 class TestToTVisualization:

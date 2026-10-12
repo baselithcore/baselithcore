@@ -1,7 +1,11 @@
 """Hashed n-gram fingerprints: the O(1)-ish static lookup tier of the
 semantic cache — catches near-verbatim prompt variants without an embedder."""
 
-from core.cache.fingerprint import best_fingerprint_match, jaccard, ngram_fingerprint
+from baselith.core.cache.fingerprint import (
+    best_fingerprint_match,
+    jaccard,
+    ngram_fingerprint,
+)
 
 
 class TestNgramFingerprint:

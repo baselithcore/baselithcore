@@ -14,22 +14,22 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.config.resilience import ResilienceConfig
-from core.resilience.rate_limiter import RateLimitResult
-from core.services.llm import rate_limit
-from core.services.llm.exceptions import RateLimitError
-from core.services.llm.images import GeneratedImage, generate_image
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.rate_limit import (
+from baselith.core.config.resilience import ResilienceConfig
+from baselith.core.resilience.rate_limiter import RateLimitResult
+from baselith.core.services.llm import rate_limit
+from baselith.core.services.llm.exceptions import RateLimitError
+from baselith.core.services.llm.images import GeneratedImage, generate_image
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.rate_limit import (
     LocalLLMRateLimitError,
     acquire_llm_call_slot,
     llm_rate_limit_key,
     reset_llm_rate_limiter,
 )
-from core.services.llm.service import LLMService
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
 
 pytestmark = [pytest.mark.unit]
 
@@ -46,7 +46,7 @@ def _fresh_limiter():
 @pytest.fixture(autouse=True)
 def _isolated_token_ledger():
     """Keep token reports out of the process-wide cost context."""
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -63,7 +63,7 @@ def _configure(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
 
 
 def _service(provider: str = "openai", *, messages: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider=provider,
             model=MODEL,
@@ -186,7 +186,7 @@ class TestEnabled:
         opened = AsyncMock()
 
         await acquire_llm_call_slot("openai")  # window now full
-        with patch("core.services.llm._streaming.open_stream", opened):
+        with patch("baselith.core.services.llm._streaming.open_stream", opened):
             with pytest.raises(LocalLLMRateLimitError):
                 _ = [c async for c in service.generate_response_stream("q")]
 
@@ -200,9 +200,9 @@ class TestEveryPathAcquires:
         result = LLMResult(text="hi", tokens_used=10)
 
         with (
-            patch("core.services.llm.structured.acquire_llm_call_slot", gate),
+            patch("baselith.core.services.llm.structured.acquire_llm_call_slot", gate),
             patch(
-                "core.services.llm.structured._native_with_retry",
+                "baselith.core.services.llm.structured._native_with_retry",
                 AsyncMock(return_value=result),
             ),
         ):
@@ -210,9 +210,11 @@ class TestEveryPathAcquires:
         assert gate.await_count == 1
 
         with (
-            patch("core.services.llm.message_runtime.acquire_llm_call_slot", gate),
             patch(
-                "core.services.llm.message_runtime._messages_with_retry",
+                "baselith.core.services.llm.message_runtime.acquire_llm_call_slot", gate
+            ),
+            patch(
+                "baselith.core.services.llm.message_runtime._messages_with_retry",
                 AsyncMock(return_value=result),
             ),
         ):
@@ -224,7 +226,7 @@ class TestEveryPathAcquires:
             provider=SimpleNamespace(generate_image=AsyncMock(return_value=image)),
             config=SimpleNamespace(provider="openai"),
         )
-        with patch("core.services.llm.images.acquire_llm_call_slot", gate):
+        with patch("baselith.core.services.llm.images.acquire_llm_call_slot", gate):
             await generate_image(painter, "a lighthouse")
         gate.assert_awaited_with("openai")
         assert gate.await_count == 3

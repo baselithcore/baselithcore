@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, patch
 
-import core.db.schema as schema_module
+import baselith.core.db.schema as schema_module
 
 
 async def test_init_db_runs_migrations_by_default(monkeypatch):

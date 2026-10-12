@@ -1,4 +1,4 @@
-"""Tests for the plugin skill catalog service (core.plugins.skills_service)."""
+"""Tests for the plugin skill catalog service (baselith.core.plugins.skills_service)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from core.human import HumanIntervention
-from core.plugins.registry import PluginRegistry
-from core.plugins.result import SkillResult
-from core.plugins.skills_service import (
+from baselith.core.human import HumanIntervention
+from baselith.core.plugins.registry import PluginRegistry
+from baselith.core.plugins.result import SkillResult
+from baselith.core.plugins.skills_service import (
     ACTIVATE_SKILL_TOOL_NAME,
     SkillService,
     make_activation_tool_fn,
@@ -220,7 +220,7 @@ class TestUnknownSkillNegativeCache:
     def test_repeated_unknown_lookup_walks_once(self, tmp_path):
         from unittest.mock import patch
 
-        from core.plugins.skills_service import SkillService
+        from baselith.core.plugins.skills_service import SkillService
 
         service = SkillService(_FakeRegistry({}), extra_roots=[("x", tmp_path)])  # type: ignore[arg-type]
         service.refresh()
@@ -234,7 +234,7 @@ class TestUnknownSkillNegativeCache:
         assert spy.call_count == 1
 
     def test_refresh_clears_the_negative_cache(self, tmp_path):
-        from core.plugins.skills_service import SkillService
+        from baselith.core.plugins.skills_service import SkillService
 
         service = SkillService(_FakeRegistry({}), extra_roots=[("x", tmp_path)])  # type: ignore[arg-type]
         service.refresh()

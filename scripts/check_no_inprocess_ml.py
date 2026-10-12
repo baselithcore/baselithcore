@@ -1,7 +1,7 @@
 """Fail when plugin code builds an ML model or a Qdrant client in-process.
 
 Embedding, reranking and vector search are core services
-(``core.services.inference``): a plugin calls them, it does not carry its own
+(``baselith.core.services.inference``): a plugin calls them, it does not carry its own
 ``torch`` model or Qdrant connection. Every API process that mounts such a
 plugin otherwise pays the model's full memory (multiples of GiB per worker)
 and, with embedded Qdrant, a single-process file lock.
@@ -12,7 +12,7 @@ Flagged — a *call* (AST, so docstrings and comments never trip it) to any of::
     DocumentConverter    QdrantClient  AsyncQdrantClient
     transformers.AutoModel*  transformers.pipeline   (resolved through imports)
 
-anywhere under ``plugins/`` outside test and build trees. A plugin that still
+anywhere under ``baselith/plugins/`` outside test and build trees. A plugin that still
 needs one (a vendored engine not yet migrated) is listed in
 ``configs/inprocess_ml_allowlist.yaml`` with the reason; an entry whose path no
 longer exists, or no longer contains a flagged call, fails the gate so the
@@ -33,7 +33,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST_PATH = REPO_ROOT / "configs" / "inprocess_ml_allowlist.yaml"
-SCANNED_ROOT = "plugins"
+SCANNED_ROOT = "baselith/plugins"
 
 FORBIDDEN_CALLS = frozenset(
     {
@@ -202,7 +202,7 @@ def check(root: Path = REPO_ROOT, allowlist: Path = ALLOWLIST_PATH) -> list[str]
         prefix = _allowed(v.path, allow)
         if prefix is None:
             problems.append(
-                f"{v.path}:{v.line}: {v.name}( in a plugin — use core.services.inference "
+                f"{v.path}:{v.line}: {v.name}( in a plugin — use baselith.core.services.inference "
                 "(EmbeddingService / RerankService / ScopedVectorStore) instead"
             )
         else:
@@ -225,7 +225,7 @@ def main() -> int:
         print(f"\n{len(problems)} problem(s).", file=sys.stderr)
         return 1
     print(
-        "no in-process ML model or Qdrant client under plugins/ (outside the allowlist)"
+        "no in-process ML model or Qdrant client under baselith/plugins/ (outside the allowlist)"
     )
     return 0
 

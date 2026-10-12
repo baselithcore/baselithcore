@@ -14,15 +14,18 @@ sys.modules.setdefault("torch", MagicMock())
 
 import pytest  # noqa: E402
 
-from core.context import reset_user_context, set_user_context  # noqa: E402
-from core.models.chat import ChatRequest  # noqa: E402
-from core.orchestration.handlers.rag import build_rag_user_prompt  # noqa: E402
-from core.services.chat.service import ChatService, ChatServiceConfig  # noqa: E402
-from core.services.chat.utils.conversation import (  # noqa: E402
+from baselith.core.context import reset_user_context, set_user_context  # noqa: E402
+from baselith.core.models.chat import ChatRequest  # noqa: E402
+from baselith.core.orchestration.handlers.rag import build_rag_user_prompt  # noqa: E402
+from baselith.core.services.chat.service import (  # noqa: E402
+    ChatService,
+    ChatServiceConfig,
+)
+from baselith.core.services.chat.utils.conversation import (  # noqa: E402
     conversation_key,
     recording_stream,
 )
-from core.services.chat.utils.history import ChatHistoryManager  # noqa: E402
+from baselith.core.services.chat.utils.history import ChatHistoryManager  # noqa: E402
 
 
 class _DictCache:
@@ -164,7 +167,7 @@ def test_long_term_memory_has_its_own_setting(monkeypatch):
     # Regression: the long-term flag shared CHAT_MEMORY_ENABLED with history
     # (opposite defaults) and ChatServiceConfig had no attribute for it, so
     # it could never be switched on.
-    from core.config.chat import ChatConfig
+    from baselith.core.config.chat import ChatConfig
 
     monkeypatch.setenv("CHAT_MEMORY_ENABLED", "true")
     monkeypatch.delenv("CHAT_LONG_TERM_MEMORY_ENABLED", raising=False)
@@ -182,7 +185,7 @@ class TestConcurrentAppend:
     async def test_concurrent_appends_do_not_lose_turns(self):
         import asyncio
 
-        from core.services.chat.utils.history import ChatHistoryManager
+        from baselith.core.services.chat.utils.history import ChatHistoryManager
 
         class SlowCache:
             def __init__(self):

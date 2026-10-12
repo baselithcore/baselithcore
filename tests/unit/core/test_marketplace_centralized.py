@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.marketplace import (
+from baselith.core.marketplace import (
     PluginCategory,
     PluginInstaller,
     PluginRegistry,
     PluginValidator,
 )
-from core.marketplace.models import MarketplacePlugin, RegistryData
+from baselith.core.marketplace.models import MarketplacePlugin, RegistryData
 
 
 @pytest.fixture
@@ -150,7 +150,7 @@ async def test_installer_force_removes_existing_install(tmp_path, monkeypatch):
         return _Proc()
 
     monkeypatch.setattr(
-        "core.marketplace.installer.asyncio.create_subprocess_exec", _fake_exec
+        "baselith.core.marketplace.installer.asyncio.create_subprocess_exec", _fake_exec
     )
 
     result = await installer.install(plugin, force=True)

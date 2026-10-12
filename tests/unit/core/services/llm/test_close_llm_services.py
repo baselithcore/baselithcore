@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from core.services.llm import _fallback_support, runtime
+from baselith.core.services.llm import _fallback_support, runtime
 
 
 def _svc() -> MagicMock:

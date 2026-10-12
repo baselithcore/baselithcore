@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.events import EventNames
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.events import EventNames
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class TestOrchestratorEvents:
@@ -13,14 +13,22 @@ class TestOrchestratorEvents:
 
         # Patch get_event_bus to return our mock
         self.patcher = patch(
-            "core.orchestration.mixins.execution.get_event_bus",
+            "baselith.core.orchestration.mixins.execution.get_event_bus",
             return_value=self.mock_event_bus,
         )
         self.patcher.start()
+        # The completion event is emitted by the shared payload helper, after
+        # the output guard (baselith.core.orchestration.mixins._flow_events).
+        self.flow_patcher = patch(
+            "baselith.core.orchestration.mixins._flow_events.get_event_bus",
+            return_value=self.mock_event_bus,
+        )
+        self.flow_patcher.start()
 
         self.orchestrator = Orchestrator(intent_classifier=self.mock_intent_classifier)
 
     def teardown_method(self):
+        self.flow_patcher.stop()
         self.patcher.stop()
 
     @pytest.mark.asyncio

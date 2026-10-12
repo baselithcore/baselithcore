@@ -17,7 +17,7 @@ from redis.commands.graph import Graph
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import get_storage_config
+from baselith.core.config import get_storage_config
 
 _storage_config = get_storage_config()
 GRAPH_DB_URL = _storage_config.graph_db_url

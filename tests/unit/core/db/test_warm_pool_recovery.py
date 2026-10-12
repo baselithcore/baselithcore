@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.db import connection as conn_mod
+from baselith.core.db import connection as conn_mod
 
 
 class _TimingOutPool:

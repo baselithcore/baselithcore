@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.vision.models import VisionResponse
-from core.services.vision.tools import register_vision_tools
-from core.services.voice.tools import register_voice_tools
+from baselith.core.services.vision.models import VisionResponse
+from baselith.core.services.vision.tools import register_vision_tools
+from baselith.core.services.voice.tools import register_voice_tools
 
 
 @pytest.fixture
@@ -139,7 +139,8 @@ async def test_register_voice_tools(mock_mcp_server):
 
     # Mocking lazy load of VoiceService
     with patch(
-        "core.services.voice.service.VoiceService", return_value=mock_voice_service
+        "baselith.core.services.voice.service.VoiceService",
+        return_value=mock_voice_service,
     ):
         register_voice_tools(mock_mcp_server)
 

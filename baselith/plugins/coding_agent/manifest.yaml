@@ -1,0 +1,27 @@
+name: coding-agent
+version: 1.4.3
+description: Coding agent that writes, fixes, tests and refactors code and proves it
+  with pytest tests run in the sandbox, exposed as MCP tools
+author: Baselith
+tags:
+- coding
+- agent
+- mcp
+- llm
+category: ai
+required_resources:
+- llm
+- sandbox
+# Declared capabilities. Reaches the model through the core LLM service, which
+# is not plugin-attributable egress, and executes code inside the sandbox
+# resource rather than the host filesystem.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress: []
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
+integrity_sha256: 3aa5d83fff18a5215c2ffac97f395935af630ff7c6138f0e41018e01882311c2
+hash_surface_version: 5

@@ -48,11 +48,11 @@ document-analyzer/
 This example demonstrates how to create a custom plugin:
 
 ```python
-from core.plugins import AgentPlugin, GraphPlugin
+from baselith.core.plugins import AgentPlugin, GraphPlugin
 
 class DocumentAnalyzerPlugin(AgentPlugin, GraphPlugin):
     name = "document-analyzer"
-    
+
     def register_entity_types(self):
         return [
             {"type": "person", "display": "Person"},

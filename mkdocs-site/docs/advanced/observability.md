@@ -81,8 +81,8 @@ In BaselithCore, a single request can:
 ### Implementation in Code
 
 ```python
-from core.observability import get_tracer
-from core.context import get_current_tenant_id
+from baselith.core.observability import get_tracer
+from baselith.core.context import get_current_tenant_id
 
 # Create a tracer for your module/plugin
 tracer = get_tracer("my-plugin")
@@ -166,7 +166,7 @@ SERVICE_VERSION=                    # service.version (defaults to package versi
 ```
 
 !!! info "Provider setup"
-    Provider configuration is centralized in `core/observability/otel.py`:
+    Provider configuration is centralized in `baselith/core/observability/otel.py`:
     a rich `Resource` (`service.name/version/namespace/instance.id`,
     `deployment.environment`), a `ParentBased(TraceIdRatio)` sampler, OTLP
     span + metric + log export, FastAPI/HTTPX/Redis/psycopg
@@ -272,12 +272,12 @@ Metrics are numerical values aggregated over time. They are ideal for monitoring
 ### Built-in metrics
 
 The framework pre-defines its Prometheus instruments in
-`core/observability/metrics.py`. **All built-in metric names use the `mas_`
+`baselith/core/observability/metrics.py`. **All built-in metric names use the `mas_`
 prefix** (e.g. `mas_chat_requests_total`, `mas_llm_latency_seconds`,
 `mas_plugin_call_latency_seconds`). Import and use them directly:
 
 ```python
-from core.observability.metrics import (
+from baselith.core.observability.metrics import (
     CHAT_REQUESTS_TOTAL,       # mas_chat_requests_total
     LLM_LATENCY_SECONDS,       # mas_llm_latency_seconds
     LLM_FALLBACK_SERVED_TOTAL, # mas_llm_fallback_served_total
@@ -296,7 +296,7 @@ Update notices are exported as `baselith_update_available{component,security}`
 ### HTTP RED metrics (automatic)
 
 Every HTTP request is instrumented automatically by
-`core.middleware.http_metrics.HTTPMetricsMiddleware` — a pure-ASGI middleware
+`baselith.core.middleware.http_metrics.HTTPMetricsMiddleware` — a pure-ASGI middleware
 wired as the outermost layer in `create_app()`. It emits the three golden
 "RED" signals on the standard Prometheus names (no `mas_` prefix, so community
 dashboards and SLO rules apply unchanged):
@@ -440,9 +440,12 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0
 
 The SDK is initialized with `send_default_pii=False` and a `before_send`
 scrubber that redacts sensitive request headers (`Authorization`, `Cookie`,
-`X-API-Key`, …) and any keys whose name contains `password`, `token`,
-`secret`, `api_key`, `jwt`, or `session` from request payloads, contexts,
-extras, and exception frame variables before transmission.
+`X-API-Key`, …) and any keys whose name contains a credential keyword
+(`password`, `pwd`, `token`, `secret`, `api_key`, `private_key`, `jwt`,
+`session`, …) from request payloads, contexts, extras, and exception frame
+variables before transmission. It reads the same keyword list as log masking
+(see [Log masking](../core-modules/observability-module.md#log-masking)), so a
+name masked in the logs is masked in Sentry too.
 
 ### Advanced Usage
 
@@ -450,7 +453,7 @@ For manual error capture within your plugins:
 
 ```python
 import sentry_sdk
-from core.observability import get_logger
+from baselith.core.observability import get_logger
 
 logger = get_logger(__name__)
 
@@ -481,7 +484,7 @@ The framework automatically unifies all system logs. Whether a message comes fro
 Always use the framework-specific `get_logger` function. This ensures your logs are correctly integrated into the unified pipeline.
 
 ```python
-from core.observability import get_logger
+from baselith.core.observability import get_logger
 
 # Create logger with module name
 logger = get_logger(__name__)
@@ -508,7 +511,7 @@ In development mode (`LOG_JSON=false`), BaselithCore integrates with **Rich** to
 Use `bind_context` to automatically add metadata to every log message within a specific scope (e.g., a function or a request).
 
 ```python
-from core.observability.logging import bind_context
+from baselith.core.observability.logging import bind_context
 
 async def process_user_data(user_id: str):
     with bind_context(user_id=user_id):
@@ -607,7 +610,7 @@ uvicorn backend:app --log-config log_config.yaml
 ```
 
 !!! note "CLI Synchronization"
-    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
+    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`baselith/core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
 
 ---
 
@@ -663,6 +666,9 @@ The shipped rules (`deploy/prometheus/alert-rules.yml`, group
 | `HighCpuUsage` | `process_cpu_seconds_total` rate > 80% | 5m | warning |
 | `HighMemoryUsage` | resident / virtual memory > 85% | 5m | warning |
 
+A second group, `baselith-core-quality`, pages on answer quality — see
+[Alerting on answer quality](#alerting-on-answer-quality).
+
 ```yaml title="deploy/prometheus/alert-rules.yml (excerpt)"
 groups:
   - name: baselith-core-alerts
@@ -683,6 +689,37 @@ groups:
         annotations:
           summary: "High API Latency on {{ $labels.instance }}"
 ```
+
+### Alerting on answer quality
+
+Online evaluation ([Evaluation › Online evaluation](../core-modules/evaluation.md#online-evaluation))
+catches the failures no error alert sees: every request succeeds, the answers
+just got worse. Its rolling quality monitor decides (floor, trailing
+reference, hysteresis — the `EVAL_ONLINE_*` settings); the shipped rules page
+on its verdict rather than re-deriving a threshold:
+
+| Alert (compose / Helm) | Condition | For | Severity |
+|---|---|---|---|
+| `AnswerQualityDegraded` / `BaselithcoreAnswerQualityDegraded` | `max by (intent, source) (mas_eval_online_degraded) == 1` | 5m | warning |
+| `OnlineEvalMonitorFailing` / `BaselithcoreOnlineEvalMonitorFailing` | `rate(mas_eval_online_failures_total{stage=~"fleet\|monitor"}[10m]) > 0` | 15m | warning |
+
+The second alert exists because a blind monitor reads exactly like a healthy
+one: with the fleet monitor the windows live in Redis, and while Redis refuses
+the scores nothing degrades and nothing recovers. Both Helm alerts can be
+silenced through `prometheusRule.disabledAlerts`; with online evaluation off the
+series do not exist and the rules stay silent.
+
+With `CACHE_BACKEND=redis` the monitor is fleet-wide: one elected worker
+decides and every worker mirrors the verdict on the gauge, so the alert fires
+once per intent, not once per worker. The same transitions reach
+[webhook](../core-modules/webhooks.md) subscribers of `evaluation.degraded` /
+`evaluation.recovered` in `EVAL_ONLINE_WEBHOOK_TENANT` — the route to an
+on-call tool that does not go through Alertmanager.
+
+The **Agentic Metrics** dashboard (`grafana/dashboards/agentic-metrics.json`)
+has an *Online Evaluation Quality* row: the 15-minute mean check score per
+intent (`mas_eval_online_score`) and a state timeline of
+`mas_eval_online_degraded`.
 
 ### Notification Integration
 
@@ -727,7 +764,7 @@ SENTRY_PROFILES_SAMPLE_RATE=0.0   # off by default; raise per investigation
 
 !!! note "Prometheus `/metrics`"
     The Prometheus metrics endpoint is mounted by the API at `/metrics` (see
-    `plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
+    `baselith/plugins/api_routers/metrics.py`); there is no separate `METRICS_PORT`. Access
     it on the same host/port as the backend.
 
     **Auth** — the endpoint requires admin basic auth by default. Either give

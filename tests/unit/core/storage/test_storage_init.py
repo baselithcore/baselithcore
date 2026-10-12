@@ -1,13 +1,13 @@
 """
-Tests for core.storage package.
+Tests for baselith.core.storage package.
 """
 
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.storage.interfaces import FeedbackRepository, InteractionRepository
-from core.storage.models import Feedback, Interaction
+from baselith.core.storage.interfaces import FeedbackRepository, InteractionRepository
+from baselith.core.storage.models import Feedback, Interaction
 
 
 class TestStorageInterfaces:
@@ -46,8 +46,8 @@ class TestGetStorage:
     """Tests for get_storage function."""
 
     @pytest.mark.asyncio
-    @patch("core.storage.get_storage_config")
-    @patch("core.storage.PostgresStorage")
+    @patch("baselith.core.storage.get_storage_config")
+    @patch("baselith.core.storage.PostgresStorage")
     async def test_get_storage_creates_instance(self, mock_postgres, mock_config):
         """Test get_storage creates PostgresStorage instance."""
         mock_config.return_value = Mock(database_url="postgresql://test")
@@ -56,11 +56,11 @@ class TestGetStorage:
         mock_postgres.return_value = mock_instance
 
         # Reset the singleton
-        import core.storage
+        import baselith.core.storage
 
-        core.storage._storage_instance = None
+        baselith.core.storage._storage_instance = None
 
-        from core.storage import get_storage
+        from baselith.core.storage import get_storage
 
         await get_storage()
 

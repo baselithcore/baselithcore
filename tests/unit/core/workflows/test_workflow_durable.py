@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.workflows.builder import WorkflowBuilder
-from core.workflows.executor import ExecutionStatus, WorkflowExecutor
-from core.workflows.flow_handler import WorkflowFlowHandler
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.workflows.builder import WorkflowBuilder
+from baselith.core.workflows.executor import ExecutionStatus, WorkflowExecutor
+from baselith.core.workflows.flow_handler import WorkflowFlowHandler
 
 
 def _workflow():

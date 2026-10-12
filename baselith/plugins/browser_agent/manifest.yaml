@@ -1,0 +1,30 @@
+name: browser_agent
+version: 0.3.0
+description: Browser automation and MCP browser tools powered by Playwright and VisionService
+author: Baselith
+tags:
+- browser
+- automation
+- playwright
+- mcp
+category: ai
+python_dependencies:
+- playwright>=1.45.0
+required_resources:
+- llm
+optional_resources:
+- internet
+# Declared capabilities. A browser navigates wherever it is pointed, so the
+# egress set cannot be narrowed without breaking the plugin; the SSRF guard
+# (loopback, private and link-local targets) still applies underneath.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
+integrity_sha256: aad1b36ab73d1da762a1882dc48d8096c669b3ee8e70d4560badfa9177e91edb
+hash_surface_version: 5

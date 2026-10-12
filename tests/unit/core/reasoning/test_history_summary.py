@@ -14,16 +14,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.config.orchestration import OrchestrationConfig
-from core.orchestration.tool_output import UNTRUSTED_OPEN_PREFIX
-from core.reasoning.history import compact_message_history
-from core.reasoning.history_summary import (
+from baselith.core.config.orchestration import OrchestrationConfig
+from baselith.core.orchestration.tool_output import UNTRUSTED_OPEN_PREFIX
+from baselith.core.reasoning.history import compact_message_history
+from baselith.core.reasoning.history_summary import (
     SUMMARY_LABEL,
     compact_history_for_loop,
     is_summary_message,
     summarize_message_history,
 )
-from core.services.llm.messages import (
+from baselith.core.services.llm.messages import (
     Message,
     TextBlock,
     ToolResultBlock,
@@ -61,7 +61,7 @@ def _llm(answer: Any = "notes so far") -> MagicMock:
 def _enable(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
     config = OrchestrationConfig(compaction_summarize=True, **overrides)
     monkeypatch.setattr(
-        "core.config.orchestration.get_orchestration_config", lambda: config
+        "baselith.core.config.orchestration.get_orchestration_config", lambda: config
     )
 
 
@@ -163,11 +163,13 @@ class TestSummarisedCompaction:
     async def test_follows_late_bound_policy_pin(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from core.services.llm._late_binding import mark_funnel_issued
+        from baselith.core.services.llm._late_binding import mark_funnel_issued
 
         issued, pinned = _llm(), _llm("pinned notes")
         mark_funnel_issued(issued)
-        monkeypatch.setattr("core.services.llm.runtime.get_llm_service", lambda: pinned)
+        monkeypatch.setattr(
+            "baselith.core.services.llm.runtime.get_llm_service", lambda: pinned
+        )
         out = await summarize_message_history(_history(5), issued, max_tokens=BUDGET)
         assert out is not None and "pinned notes" in out[1].text
         issued.generate_response.assert_not_awaited()
@@ -215,7 +217,8 @@ class TestFallback:
     ) -> None:
         config = OrchestrationConfig(compaction_summarize=False)
         monkeypatch.setattr(
-            "core.config.orchestration.get_orchestration_config", lambda: config
+            "baselith.core.config.orchestration.get_orchestration_config",
+            lambda: config,
         )
         llm = _llm()
         history = _history(5)

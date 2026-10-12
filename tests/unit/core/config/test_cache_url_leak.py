@@ -9,7 +9,7 @@ config dump or Sentry frame.
 
 from __future__ import annotations
 
-from core.config.cache import RedisCacheConfig
+from baselith.core.config.cache import RedisCacheConfig
 
 _URL = "redis://:sup3r-s3cret-pw@cache.internal:6379/1"
 

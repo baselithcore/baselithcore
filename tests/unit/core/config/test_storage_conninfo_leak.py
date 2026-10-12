@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from core.config.storage import StorageConfig
+from baselith.core.config.storage import StorageConfig
 
 
 def _config() -> StorageConfig:

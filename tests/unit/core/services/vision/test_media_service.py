@@ -13,13 +13,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.services.vision.media_models import (
+from baselith.core.services.vision.media_models import (
     AudioContent,
     DocumentContent,
     UnsupportedContentError,
 )
-from core.services.vision.models import VisionProvider
-from core.services.vision.service import VisionService
+from baselith.core.services.vision.models import VisionProvider
+from baselith.core.services.vision.service import VisionService
 
 _PDF = b"%PDF-1.7\n%fake little pdf"
 _WAV = b"RIFF\x24\x00\x00\x00WAVEfmt "
@@ -32,7 +32,9 @@ _B64_WAV = base64.b64encode(_WAV).decode("ascii")
 
 @pytest.fixture
 def vision_service():
-    with patch("core.services.vision.service.get_vision_config") as mock_config:
+    with patch(
+        "baselith.core.services.vision.service.get_vision_config"
+    ) as mock_config:
         mock_config.return_value.provider = "openai"
         mock_config.return_value.openai_api_key = SecretStr("fake-key")
         mock_config.return_value.anthropic_api_key = SecretStr("fake-key")
@@ -112,7 +114,9 @@ class TestAnthropicDocument:
 
     @pytest.mark.asyncio
     async def test_missing_key(self):
-        with patch("core.services.vision.service.get_vision_config") as mock_config:
+        with patch(
+            "baselith.core.services.vision.service.get_vision_config"
+        ) as mock_config:
             mock_config.return_value.provider = "anthropic"
             mock_config.return_value.openai_api_key = None
             mock_config.return_value.anthropic_api_key = None
@@ -303,7 +307,7 @@ class TestServiceDispatchAndBoundary:
 
     @pytest.mark.asyncio
     async def test_document_boundary_message_points_at_extraction(self, vision_service):
-        # Text extraction lives only in plugins/document_sources; core must not
+        # Text extraction lives only in baselith/plugins/document_sources; core must not
         # import it (Sacred Core). The re-raise names the extraction pipeline.
         with pytest.raises(UnsupportedContentError) as excinfo:
             await vision_service.analyze_document(

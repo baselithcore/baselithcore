@@ -12,9 +12,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.orchestration.idempotency_postgres import PostgresToolLedger
+from baselith.core.orchestration.idempotency_postgres import PostgresToolLedger
 
-MODULE = "core.orchestration.idempotency_postgres"
+MODULE = "baselith.core.orchestration.idempotency_postgres"
 
 
 def _cursor_ctx(cursor):
@@ -227,7 +227,7 @@ class TestSchemaOwnership:
         """Alembic owns ``tool_invocations``; this module must not create it."""
         from pathlib import Path
 
-        source = Path("core/orchestration/idempotency_postgres.py").read_text(
+        source = Path("baselith/core/orchestration/idempotency_postgres.py").read_text(
             encoding="utf-8"
         )
         assert "CREATE TABLE" not in source
@@ -241,7 +241,10 @@ class TestSchemaOwnership:
         """
         import inspect
 
-        from core.orchestration.idempotency import InMemoryToolLedger, ToolLedger
+        from baselith.core.orchestration.idempotency import (
+            InMemoryToolLedger,
+            ToolLedger,
+        )
 
         for name in ("lookup", "begin", "complete", "fail"):
             expected = inspect.signature(getattr(ToolLedger, name))
@@ -257,7 +260,7 @@ async def test_claim_is_refused_for_unresolved_and_completed_rows(status):
 
     The two ledgers must agree: only a ``failed`` row is re-claimable.
     """
-    from core.orchestration.idempotency import InMemoryToolLedger
+    from baselith.core.orchestration.idempotency import InMemoryToolLedger
 
     ledger = InMemoryToolLedger()
     assert await ledger.begin("k", run_id="r", tool="t") is None
@@ -268,7 +271,7 @@ async def test_claim_is_refused_for_unresolved_and_completed_rows(status):
 
 
 async def test_failed_row_is_reclaimable_in_both_ledgers():
-    from core.orchestration.idempotency import InMemoryToolLedger
+    from baselith.core.orchestration.idempotency import InMemoryToolLedger
 
     ledger = InMemoryToolLedger()
     await ledger.begin("k", run_id="r", tool="t")

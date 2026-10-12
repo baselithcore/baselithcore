@@ -3,7 +3,7 @@ title: Middleware & Auth Dependencies
 description: Pure-ASGI middleware stack and authentication dependencies
 ---
 
-The `core/middleware` module provides the HTTP middleware stack and the
+The `baselith/core/middleware` module provides the HTTP middleware stack and the
 authentication/authorization dependencies used by the FastAPI surface. Every
 middleware is written as **pure ASGI** (`async def __call__(scope, receive,
 send)`) — never `BaseHTTPMiddleware`, which would wrap each request in an extra
@@ -13,7 +13,7 @@ anyio task and break streaming and cancellation.
 
 ```mermaid
 graph TB
-    subgraph MW["core/middleware"]
+    subgraph MW["baselith/core/middleware"]
         Metrics[HTTPMetricsMiddleware]
         ReqId[RequestIdMiddleware]
         SecHdr[SecurityHeadersMiddleware]
@@ -42,7 +42,7 @@ graph TB
 ### Module structure
 
 ```text
-core/middleware/
+baselith/core/middleware/
 ├── __init__.py            # Public exports
 ├── observability.py       # RequestIdMiddleware
 ├── http_metrics.py        # HTTPMetricsMiddleware (pure ASGI, RED metrics; outermost)
@@ -74,7 +74,7 @@ core/middleware/
 ## Public API
 
 ```python
-from core.middleware import (
+from baselith.core.middleware import (
     # Cost control
     CostController, CostControlMiddleware, CostStats,
     BudgetExceededError, cost_controller,
@@ -99,16 +99,16 @@ from core.middleware import (
 )
 ```
 
-`RequestIdMiddleware` is imported from `core.middleware.observability`;
-`APIDeprecationMiddleware` from `core.middleware.api_deprecation`;
+`RequestIdMiddleware` is imported from `baselith.core.middleware.observability`;
+`APIDeprecationMiddleware` from `baselith.core.middleware.api_deprecation`;
 `StaticCacheMiddleware` and `SmartGzipMiddleware` from
-`core.middleware.optimization`.
+`baselith.core.middleware.optimization`.
 
 ---
 
 ## Middleware stack & wiring
 
-The stack is assembled in `core/api/factory.py`. Starlette executes middleware
+The stack is assembled in `baselith/core/api/factory.py`. Starlette executes middleware
 **last-added-first**, so the registration order below is roughly the reverse of
 execution. The whole stack is now **pure ASGI** — the previous CSRF and
 plugin-activation `BaseHTTPMiddleware` closures were replaced by dedicated ASGI
@@ -125,7 +125,7 @@ adds, in order:
 | `TenantMiddleware` | `tenant.py` | Derive tenant context from the auth user |
 | `PluginContextMiddleware` | `plugin_context.py` | Attribute each request to its owning plugin (LLM policy seam) |
 | `QuotaMiddleware` | `quota.py` | Enforce per-identity + per-tenant usage quotas (`429` when exhausted) |
-| Plugin app-level middleware | `core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot). Only plugins the enable-list in `configs/plugins.yaml` allows are consulted — the same rule the lifespan applies to routers, read through `core/plugins/config_file.py`, so a plugin disabled there installs no middleware and mounts no SPA either |
+| Plugin app-level middleware | `baselith/core/plugins/app_setup.py` | Whatever installed plugins add by overriding `Plugin.setup_app_middleware` (`apply_plugin_app_middleware`; best-effort — a failing plugin never blocks boot). Only plugins the enable-list in `configs/plugins.yaml` allows are consulted — the same rule the lifespan applies to routers, read through `baselith/core/plugins/config_file.py`, so a plugin disabled there installs no middleware and mounts no SPA either |
 | `CSRFOriginMiddleware` | `csrf.py` | Validate `Origin` on state-changing requests **and on every WebSocket handshake** — a single cheap header compare that rejects before a quota unit is consumed, an idempotency lock taken or a plugin route matched |
 | `TrustedHostMiddleware` | Starlette | Host header validation — mounted **only** when `TRUSTED_HOSTS` is non-empty (default `[]`); added after CSRF so it runs outermost of the two; see the note below |
 | `RequestSizeLimitMiddleware` | `security_headers.py` | Reject oversized bodies before any inner middleware (auth, quotas, gzip) does work; inner only to the catch-all, CORS and the observability layers, none of which reads the body |
@@ -155,7 +155,7 @@ adds, in order:
     Because the factory only calls `app.add_middleware(TrustedHostMiddleware, ...)`
     when `TRUSTED_HOSTS` is non-empty, the default stack validates **no** `Host`
     header: a spoofed `Host` / `X-Forwarded-Host` poisons absolute URLs built
-    from the request and host-keyed caches. `core.api.startup_checks` therefore
+    from the request and host-keyed caches. `baselith.core.api.startup_checks` therefore
     **refuses to boot** in production when this happens (the hostnames are
     deployment knowledge the framework cannot infer, so it asks for them
     instead of guessing); `BASELITH_ALLOW_UNVALIDATED_HOST=true` is the
@@ -166,7 +166,7 @@ adds, in order:
 
 ## RequestIdMiddleware
 
-`core/middleware/observability.py`. Reads an incoming `X-Request-ID` header (or
+`baselith/core/middleware/observability.py`. Reads an incoming `X-Request-ID` header (or
 generates a UUID), sets the `request_id` contextvar, binds it to the structured
 logging context, and echoes it back on the response.
 
@@ -192,7 +192,7 @@ id) had an edge log entry nothing in the app log could be matched to.
 
 ## HTTPMetricsMiddleware
 
-`core/middleware/http_metrics.py`. The outermost layer; emits the RED
+`baselith/core/middleware/http_metrics.py`. The outermost layer; emits the RED
 (Rate / Errors / Duration) signals for the HTTP server to the Prometheus
 registry scraped at `/metrics`: `http_requests_total{method, route, status}`,
 `http_request_duration_seconds{method, route}` and
@@ -207,7 +207,7 @@ series; unmatched requests bucket under `__unmatched__` and unusual verbs under
 
 ## UnhandledErrorMiddleware
 
-`core/middleware/unhandled_error.py`. Pure ASGI. Starlette renders an
+`baselith/core/middleware/unhandled_error.py`. Pure ASGI. Starlette renders an
 unhandled exception in `ServerErrorMiddleware`, the outermost layer of all —
 outside `RequestIdMiddleware`, `SecurityHeadersMiddleware` and CORS. A `500`
 built there had no `X-Request-ID` header, a `null` `request_id` in the problem
@@ -216,7 +216,7 @@ body (the contextvar was already reset), no CSP/`nosniff`, and no
 instead of the error, and the one correlation id an operator needs was missing.
 
 This layer sits inside those three and renders the same RFC 9457 document
-through `core.api.errors.unhandled_exception_handler`, so a `500` carries the
+through `baselith.core.api.errors.unhandled_exception_handler`, so a `500` carries the
 `X-Request-ID` header, the `request_id` member, the security headers and the
 CORS grant like every other response. The exception is then **re-raised**:
 `ServerErrorMiddleware` sees that a response has started, skips its own
@@ -231,7 +231,7 @@ scopes pass straight through.
 
 ## RequestSizeLimitMiddleware
 
-`core/middleware/security_headers.py` (re-exported from `core.middleware.security`).
+`baselith/core/middleware/security_headers.py` (re-exported from `baselith.core.middleware.security`).
 Enforces a maximum request body size in two
 stages: a cheap `Content-Length` reject, then a streaming byte counter on the
 receive channel (defends against chunked-encoding bypass and missing
@@ -264,7 +264,7 @@ guard. That cap is a property of the route, not of the deployment, so raising
 the wrong lever. The route's owner registers its own instead:
 
 ```python
-from core.middleware.security import register_request_size_override
+from baselith.core.middleware.security import register_request_size_override
 
 # A plugin declares this when it mounts, for its own path prefix.
 register_request_size_override("/myplugin/api/uploads/", 51 * 1024 * 1024)
@@ -284,7 +284,7 @@ register_request_size_override("/myplugin/api/uploads/", 51 * 1024 * 1024)
 
 ## SecurityHeadersMiddleware
 
-`core/middleware/security_headers.py` (re-exported from `core.middleware.security`).
+`baselith/core/middleware/security_headers.py` (re-exported from `baselith.core.middleware.security`).
 Injects baseline headers in the `send` wrapper so
 streaming responses are unaffected. Always sets `X-Content-Type-Options`,
 `X-Frame-Options`, `Referrer-Policy`, and `X-XSS-Protection`. When
@@ -325,7 +325,7 @@ strict and docs header lists are cached independently after first use.
 
 ## CSRFOriginMiddleware
 
-`core/middleware/csrf.py`. One allowlist (`ALLOW_ORIGINS`) and one decision
+`baselith/core/middleware/csrf.py`. One allowlist (`ALLOW_ORIGINS`) and one decision
 function guard two different attacks.
 
 **HTTP (CSRF).** Only `POST`/`PUT`/`PATCH`/`DELETE` are checked. An `Origin`
@@ -372,8 +372,8 @@ so it is sanitised to one line and truncated to **256** characters.
 
 !!! note "Same-origin browser UIs need no allowlist entry"
     Browsers send `Origin` on same-origin WebSocket handshakes too; a UI served
-    by the deployment itself (e.g. the `baselithbot` dashboard opening
-    `/ws/pair`) passes because that `Origin` equals the handshake's own origin.
+    by the deployment itself (e.g. a plugin dashboard opening a
+    WebSocket) passes because that `Origin` equals the handshake's own origin.
     Behind a TLS-terminating proxy that does not forward the scheme the server
     sees `http`/`ws` while the page is `https` — list the public origin in
     `ALLOW_ORIGINS` in that case.
@@ -384,12 +384,12 @@ See [WebSocket Origin validation](../advanced/security.md#websocket-origin-valid
 
 ## CostControlMiddleware
 
-`core/middleware/cost_control.py`. Initializes a per-request `CostStats`
+`baselith/core/middleware/cost_control.py`. Initializes a per-request `CostStats`
 (contextvar-isolated) so application code can call the shared `cost_controller`
 to track token usage and graph queries.
 
 ```python
-from core.middleware import cost_controller
+from baselith.core.middleware import cost_controller
 
 cost_controller.track_tokens(120, model="claude-sonnet-4-6")
 cost_controller.track_query("MATCH (n) RETURN n LIMIT 10")
@@ -402,7 +402,7 @@ catches it and, if the response has not started, returns `429` as an RFC 9457
 problem document (`code: "budget_exceeded"`, `title: "Quota exceeded"`, a
 fixed `detail` that never names the configured thresholds, the request's
 `request_id`, and `Retry-After` when the exception carries a `retry_after`
-hint). The `budget_exceeded_handler` in `core/api/errors.py` answers a breach
+hint). The `budget_exceeded_handler` in `baselith/core/api/errors.py` answers a breach
 raised deep inside a route with the same document. Limits are sourced from app/storage config; the global
 `cost_controller` instance is constructed at import time.
 
@@ -415,9 +415,9 @@ refund the quota unit, although `429` is otherwise a refunded status.
 
 ## APIDeprecationMiddleware
 
-`core/middleware/api_deprecation.py`. Every API router is mounted under `/v1`
+`baselith/core/middleware/api_deprecation.py`. Every API router is mounted under `/v1`
 and, for backward compatibility, at its unprefixed path
-(`core/api/versioning.py`: `versioned_routers` / `legacy_include_kwargs`). The
+(`baselith/core/api/versioning.py`: `versioned_routers` / `legacy_include_kwargs`). The
 unprefixed copy is included with `deprecated=True` (OpenAPI) **and** a marker
 dependency, `mark_deprecated_path`, that sets the scope key
 `baselith.deprecated_api_path`. At `http.response.start` this middleware reads
@@ -440,7 +440,7 @@ With `API_V1_ENABLED=false` nothing is versioned and nothing is marked.
 
 ## StaticCacheMiddleware & SmartGzipMiddleware
 
-`core/middleware/optimization.py`.
+`baselith/core/middleware/optimization.py`.
 
 - **`StaticCacheMiddleware`** adds `Cache-Control: public, max-age=<n>` to
   `/static` and `/console` responses, but forces `no-store` for `application/json`
@@ -473,7 +473,7 @@ With `API_V1_ENABLED=false` nothing is versioned and nothing is marked.
 
 ## IdempotencyMiddleware
 
-`core/middleware/idempotency.py`. Pure ASGI, **enabled by default** (the factory
+`baselith/core/middleware/idempotency.py`. Pure ASGI, **enabled by default** (the factory
 always mounts it; `BASELITH_IDEMPOTENCY_ENABLED=false` turns it off). A mutating
 request (`POST`/`PUT`/`PATCH`/`DELETE`) carrying an `Idempotency-Key` header has
 its response captured in Redis; a later request with the same key replays it
@@ -531,7 +531,7 @@ not accept gzip gets it decompressed, with `Content-Encoding` dropped and
 
 **One round trip before the route runs.** "Is there a stored response?" and
 "claim the in-flight lock" are a single atomic Lua step
-(`core/middleware/_idempotency_store.py`, registered once per process like
+(`baselith/core/middleware/_idempotency_store.py`, registered once per process like
 the rate limiter's script): the script returns the stored payload, or takes
 the lock with `SET NX EX`, or reports the lock held. They used to be a `GET`
 followed by a `SET NX` — two Redis latencies on the hot path of every keyed
@@ -546,7 +546,7 @@ authentication, so the storage key is `{tenant}:{identity}:{method}:
 {sha256(path)}:{sha256(key)}` where `identity` is a hash of the raw
 `Authorization`/`X-API-Key` header — and that header must **verify**: the
 middleware reads the per-request auth memo the tenant layer already filled
-(`core/middleware/_auth_memo.py`, no extra verification), and a credential
+(`baselith/core/middleware/_auth_memo.py`, no extra verification), and a credential
 that does not authenticate (junk, expired, an unsupported scheme such as
 `Basic`) gets no bucket at all — the request runs, nothing is stored. Before
 this, every distinct header value minted its own bucket, so an
@@ -566,7 +566,7 @@ Knobs and the full rationale: [Idempotency-Key replay](../advanced/runtime-tunin
 
 ## TenantMiddleware
 
-`core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
+`baselith/core/middleware/tenant.py`. Reads the authenticated `AuthUser` from
 `scope["state"].user` (or `scope["user"]`), derives the `tenant_id` (defaulting
 to `"default"`), binds it to the tenant contextvar and to structlog, and resets
 it on exit. It also binds the authenticated `user_id` (when present) via
@@ -580,17 +580,17 @@ WebSocket and lifespan scopes are skipped.
 
 Pure-ASGI middleware that resolves each HTTP request's path to the plugin that
 owns it (router prefix via the plugin registry, then mounted sub-app prefix)
-and binds that identity to `core.context.set_plugin_context` for the request's
+and binds that identity to `baselith.core.context.set_plugin_context` for the request's
 duration. Downstream framework seams — notably the central per-plugin LLM
 policy consulted by `get_llm_service()` — read it back via
-`core.context.get_current_plugin()`. Attribution is path-derived, never a
+`baselith.core.context.get_current_plugin()`. Attribution is path-derived, never a
 client header, and strictly best-effort: an unresolvable path passes through
 unattributed. See [Services — Central Per-Plugin LLM
 Policy](services.md#central-per-plugin-llm-policy).
 
 ## QuotaMiddleware
 
-`core/middleware/quota.py`. Self-authenticates from the caller's credentials,
+`baselith/core/middleware/quota.py`. Self-authenticates from the caller's credentials,
 then consumes one unit from both the caller's **identity** budget and their
 **tenant** aggregate budget via `QuotaManager`. If either calendar window (daily /
 monthly) is exhausted it short-circuits with `429` before the route runs. Its
@@ -637,7 +637,7 @@ liveness poll and Prometheus scrape.
     own auth dependency does not re-verify the same token.
 
 `QuotaMiddleware` and `TenantMiddleware` both resolve that credential through
-the shared helper in `core/middleware/_auth_memo.py`: `effective_auth_header()`
+the shared helper in `baselith/core/middleware/_auth_memo.py`: `effective_auth_header()`
 builds the same `Authorization`/`ApiKey <key>` value the route dependency would
 see (so the two middlewares and the dependency memo-match on an identical
 string), and `auth_manager()` resolves the app-configured `AuthManager` with a
@@ -654,14 +654,14 @@ explicit `str` rather than passing through `Headers.get()`'s untyped result.
 
 ## Authentication & authorization
 
-`core/middleware/security.py` also houses the auth layer. `SecurityManager`
+`baselith/core/middleware/security.py` also houses the auth layer. `SecurityManager`
 (singleton via `get_security_manager()`) performs authentication, role checks,
 and rate limiting; the FastAPI route dependencies are thin wrappers over it.
 
 ### Dependencies
 
 ```python
-from core.middleware import require_user, require_admin, require_admin_or_job
+from baselith.core.middleware import require_user, require_admin, require_admin_or_job
 from fastapi import Depends
 
 @router.post("/chat", dependencies=[Depends(require_user)])
@@ -721,7 +721,7 @@ clients share one budget per /64 — and the MCP endpoint charges the same one.
 
 A distributed **sliding-window** limiter keyed by `role:credential`/IP, backed
 by Redis with an in-memory fallback when Redis is unavailable. It lives in
-`core/middleware/rate_limiter.py` (re-exported from `security` for backward
+`baselith/core/middleware/rate_limiter.py` (re-exported from `security` for backward
 compatibility), emits the `security_events_total` Prometheus counter, and
 raises `429` over the limit. The module exposes a lazy `rate_limiter` proxy
 that resolves the shared instance on access.
@@ -790,7 +790,7 @@ round trips per bad login and, if the process died between the two, left a
 counter with **no TTL** — a permanent lockout for that IP. The script also
 re-arms the window on any key it finds without a TTL, healing such
 leftovers. The admin router
-(`plugins/api_routers/admin.py`) wires these into its `verify_credentials`
+(`baselith/plugins/api_routers/admin.py`) wires these into its `verify_credentials`
 dependency. The lockout state and checks live in `AdminLockoutMixin`
-(`core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
+(`baselith/core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
 public helpers above are unchanged.

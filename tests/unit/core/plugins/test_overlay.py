@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import overlay
-from core.plugins.discovery import MANIFEST_FILENAMES, apply_overlay
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.plugins import overlay
+from baselith.core.plugins.discovery import MANIFEST_FILENAMES, apply_overlay
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 def _make_plugin(base: Path, name: str, version: str, body: str = "X = 1\n") -> Path:
@@ -101,14 +101,16 @@ def test_name_mismatch_rejected(tmp_path: Path, keys: tuple[str, str]) -> None:
 def test_register_and_import_from_overlay(
     tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import plugins  # noqa: F401  # the real package first, as in production; else a bare stub wins
+    from baselith import (
+        plugins,  # noqa: F401  # the real package first, as in production; else a bare stub wins
+    )
 
     private_hex, public_hex = keys
     link = _store_entry(tmp_path, "demo_ov", "1.1.0", private_hex)
     monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
-    monkeypatch.delitem(sys.modules, "plugins.demo_ov", raising=False)
+    monkeypatch.delitem(sys.modules, "baselith.plugins.demo_ov", raising=False)
     assert overlay.register_overlay_packages(tmp_path) == ["demo_ov"]
-    import plugins.demo_ov as mod  # type: ignore[import-not-found]
+    import baselith.plugins.demo_ov as mod  # type: ignore[import-not-found]
 
     # The registered package is a lazy stub: __file__ appears only after the
     # first non-dunder attribute access, so assert on __path__ and on a value.
@@ -132,13 +134,15 @@ def test_bundled_shadow_detected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bundled = tmp_path / "plugins"
-    fake = type(sys)("plugins.demo_shadow.sub")
+    fake = type(sys)("baselith.plugins.demo_shadow.sub")
     fake.__file__ = str(bundled / "demo_shadow" / "sub.py")
-    monkeypatch.setitem(sys.modules, "plugins.demo_shadow.sub", fake)
+    monkeypatch.setitem(sys.modules, "baselith.plugins.demo_shadow.sub", fake)
     monkeypatch.setattr(
         overlay, "_REGISTERED", {"demo_shadow": tmp_path / "ov" / "demo_shadow"}
     )
-    assert overlay.bundled_shadow_modules(bundled) == ["plugins.demo_shadow.sub"]
+    assert overlay.bundled_shadow_modules(bundled) == [
+        "baselith.plugins.demo_shadow.sub"
+    ]
 
 
 def test_apply_overlay_replaces_by_name(tmp_path: Path) -> None:
@@ -150,7 +154,7 @@ def test_apply_overlay_replaces_by_name(tmp_path: Path) -> None:
 def test_registration_runs_on_first_plugins_import() -> None:
     # Read the file, not ``plugins.__file__``: other suites leave a bare stub in sys.modules.
     source = (
-        Path(__file__).resolve().parents[4] / "plugins" / "__init__.py"
+        Path(__file__).resolve().parents[4] / "baselith" / "plugins" / "__init__.py"
     ).read_text()
     assert "register_overlay_packages()" in source
 
@@ -159,11 +163,13 @@ def test_app_middleware_hook_comes_from_overlay(
     tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Sync pre-discovery must exec the overlay plugin.py, never the bundled one."""
-    import plugins  # noqa: F401  # the real package first, as in production
-    from core.plugins.app_setup import apply_plugin_app_middleware
+    from baselith import (
+        plugins,  # noqa: F401  # the real package first, as in production
+    )
+    from baselith.core.plugins.app_setup import apply_plugin_app_middleware
 
     hook = (
-        "from core.plugins import Plugin\n\n\n"
+        "from baselith.core.plugins import Plugin\n\n\n"
         "class OvMwPlugin(Plugin):\n"
         "    @classmethod\n"
         "    def setup_app_middleware(cls, app):\n"
@@ -184,7 +190,7 @@ def test_app_middleware_hook_comes_from_overlay(
     _sign(real, private_hex)
     (root / "demo_mw").symlink_to(real, target_is_directory=True)
 
-    for mod in ("plugins.demo_mw", "plugins.demo_mw.plugin"):
+    for mod in ("baselith.plugins.demo_mw", "baselith.plugins.demo_mw.plugin"):
         monkeypatch.delitem(sys.modules, mod, raising=False)
     monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
     assert overlay.register_overlay_packages(root) == ["demo_mw"]
@@ -201,7 +207,7 @@ def test_app_middleware_hook_comes_from_overlay(
         assert app.origin == "overlay"
         assert overlay.bundled_shadow_modules(bundled) == []
     finally:
-        for mod in ("plugins.demo_mw", "plugins.demo_mw.plugin"):
+        for mod in ("baselith.plugins.demo_mw", "baselith.plugins.demo_mw.plugin"):
             sys.modules.pop(mod, None)
 
 
@@ -219,8 +225,8 @@ def _bundled_and_overlay(
 def test_resolve_plugin_dir_prefers_overlay(
     tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugins.loader import PluginLoader
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.plugins.loader import PluginLoader
+    from baselith.core.plugins.registry import PluginRegistry
 
     bundled_root, link = _bundled_and_overlay(tmp_path, keys[0], monkeypatch)
     loader = PluginLoader(bundled_root, PluginRegistry())
@@ -230,7 +236,7 @@ def test_resolve_plugin_dir_prefers_overlay(
 def test_resource_analyzer_reads_overlay_manifest(
     tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from core.plugins.resource_analyzer import ResourceAnalyzer
+    from baselith.core.plugins.resource_analyzer import ResourceAnalyzer
 
     bundled_root, _ = _bundled_and_overlay(tmp_path, keys[0], monkeypatch)
     found = ResourceAnalyzer(bundled_root).discover_plugins({})
@@ -257,14 +263,16 @@ def test_symlinked_subdirectory_refused(tmp_path: Path, keys: tuple[str, str]) -
 def test_malformed_entry_does_not_block_a_later_good_one(
     tmp_path: Path, keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import plugins  # noqa: F401  # the real package first, as in production
+    from baselith import (
+        plugins,  # noqa: F401  # the real package first, as in production
+    )
 
     private_hex, public_hex = keys
     bad = _make_plugin(tmp_path, "aaa_bad", "1.0.0")
     (bad / "manifest.yaml").write_text("name: [unclosed\n")
     _store_entry(tmp_path, "zzz_good", "1.1.0", private_hex)
     monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
-    monkeypatch.delitem(sys.modules, "plugins.zzz_good", raising=False)
+    monkeypatch.delitem(sys.modules, "baselith.plugins.zzz_good", raising=False)
     assert overlay.register_overlay_packages(tmp_path) == ["zzz_good"]
 
 
@@ -279,13 +287,13 @@ def test_package_path_is_the_verified_store_dir_not_the_link(
     verified; registering the resolved store directory pins the imports to
     the verified release until the restart.
     """
-    import plugins  # noqa: F401
+    from baselith import plugins  # noqa: F401
 
     private_hex, public_hex = keys
     link = _store_entry(tmp_path, "demo_pin", "1.1.0", private_hex)
     monkeypatch.setattr(overlay, "_trusted_public_keys", lambda _name: [public_hex])
-    monkeypatch.delitem(sys.modules, "plugins.demo_pin", raising=False)
+    monkeypatch.delitem(sys.modules, "baselith.plugins.demo_pin", raising=False)
     assert overlay.register_overlay_packages(tmp_path) == ["demo_pin"]
-    pkg = sys.modules["plugins.demo_pin"]
+    pkg = sys.modules["baselith.plugins.demo_pin"]
     assert pkg.__path__ == [str(link.resolve())]
     assert pkg.__path__ != [str(link)]

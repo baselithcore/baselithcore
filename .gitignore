@@ -10,7 +10,7 @@
 .claude/
 # Repo-root scratch dir for agent artifacts only. Anchored with a leading
 # slash: an unanchored `docs/` also matches mkdocs-site/docs/,
-# plugins/*/docs/ and backstage-portal example docs — all tracked trees the
+# baselith/plugins/*/docs/ and backstage-portal example docs — all tracked trees the
 # OpenAPI drift gate and the docs build depend on.
 /docs/
 CLAUDE.md
@@ -32,10 +32,10 @@ build/
 *.egg-info/
 
 # --- Local caches (marketplace registry, etc.) ---
-# NB: 'cache/' is unanchored => it also matched the SOURCE packages core/cache/
+# NB: 'cache/' is unanchored => it also matched the SOURCE packages baselith/core/cache/
 # and tests/unit/core/cache/. Re-include them explicitly (negation after the rule).
 cache/
-!core/cache/
+!baselith/core/cache/
 !tests/unit/core/cache/
 
 # --- Testing and Coverage ---
@@ -45,6 +45,8 @@ cache/
 .coverage
 .coverage.*
 htmlcov/
+# mutmut's working copy (`mutmut run`, see [tool.mutmut] in pyproject.toml)
+mutants/
 nosetests.xml
 coverage.xml
 coverage.json
@@ -60,7 +62,7 @@ EXTERNAL/
 .env
 .env.*
 /plugins/.pnpm-store/
-plugins/*/.state/
+baselith/plugins/*/.state/
 !.env.example
 !.env.*.example
 configs/.env
@@ -91,8 +93,6 @@ node_modules/
 package-lock.json
 # The published TS SDK needs a reproducible `npm ci` in CI — keep its lockfile.
 !sdk/typescript/package-lock.json
-# The baselithbot dashboard is built from this repo before signing — keep its lockfile too.
-!plugins/baselithbot/ui/package-lock.json
 
 # --- Browser / OS ---
 .DS_Store
@@ -121,3 +121,7 @@ deploy/systemd/
 .github/workflows/eval-nightly.yml
 .github/workflows/dependency-audit.yml
 .vscode/settings.json
+
+# Merge backups (git mergetool, patch)
+*.orig
+*.rej

@@ -1,6 +1,6 @@
 """Lesson compaction: failures survive as one line, not as transcripts."""
 
-from core.loops.lessons import LessonLog, compact_evidence
+from baselith.core.loops.lessons import LessonLog, compact_evidence
 
 
 class TestCompactEvidence:

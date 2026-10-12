@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.models import Refusal
-from core.plugin_updates.verifier import requirement_satisfied, verify_release
-from core.plugins.integrity import compute_plugin_hash
-from core.plugins.signing import generate_keypair_hex, sign_plugin_hash
+from baselith.core.plugin_updates.models import Refusal
+from baselith.core.plugin_updates.verifier import requirement_satisfied, verify_release
+from baselith.core.plugins.integrity import compute_plugin_hash
+from baselith.core.plugins.signing import generate_keypair_hex, sign_plugin_hash
 
 
 def _release(
@@ -213,7 +213,7 @@ def test_symlinked_manifest_is_refused(tmp_path: Path, keys: tuple[str, str]) ->
 
 
 def test_expected_files_match_passes(tmp_path: Path, keys: tuple[str, str]) -> None:
-    from core.plugin_updates.release_manifest import file_digests
+    from baselith.core.plugin_updates.release_manifest import file_digests
 
     priv, pub = keys
     d = _release(tmp_path, sign_with=priv)
@@ -223,7 +223,7 @@ def test_expected_files_match_passes(tmp_path: Path, keys: tuple[str, str]) -> N
 def test_expected_files_mismatch_is_refused_first(
     tmp_path: Path, keys: tuple[str, str]
 ) -> None:
-    from core.plugin_updates.release_manifest import file_digests
+    from baselith.core.plugin_updates.release_manifest import file_digests
 
     priv, pub = keys
     d = _release(tmp_path, sign_with=priv)

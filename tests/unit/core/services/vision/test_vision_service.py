@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.services.vision.models import (
+from baselith.core.services.vision.models import (
     ImageContent,
     VisionCapability,
     VisionProvider,
     VisionRequest,
 )
-from core.services.vision.service import VisionService
+from baselith.core.services.vision.service import VisionService
 
 
 @pytest.fixture
@@ -19,7 +19,9 @@ def vision_service():
     # VisionConfig fields are typed `Optional[SecretStr]`, and the service
     # reads them via `.get_secret_value()`. Mock with real SecretStr so the
     # accessor works without patching the method shape.
-    with patch("core.services.vision.service.get_vision_config") as mock_config:
+    with patch(
+        "baselith.core.services.vision.service.get_vision_config"
+    ) as mock_config:
         mock_config.return_value.provider = "openai"
         mock_config.return_value.openai_api_key = SecretStr("fake-key")
         mock_config.return_value.anthropic_api_key = SecretStr("fake-key")
@@ -47,7 +49,9 @@ async def test_models_default_when_config_unset(vision_service):
 @pytest.mark.asyncio
 async def test_models_resolved_from_config():
     # Config-supplied model identifiers override the class defaults.
-    with patch("core.services.vision.service.get_vision_config") as mock_config:
+    with patch(
+        "baselith.core.services.vision.service.get_vision_config"
+    ) as mock_config:
         mock_config.return_value.provider = "openai"
         mock_config.return_value.openai_api_key = SecretStr("fake-key")
         mock_config.return_value.anthropic_api_key = None
@@ -244,7 +248,9 @@ async def test_build_prompt(vision_service):
 
 @pytest.mark.asyncio
 async def test_missing_api_keys():
-    with patch("core.services.vision.service.get_vision_config") as mock_config:
+    with patch(
+        "baselith.core.services.vision.service.get_vision_config"
+    ) as mock_config:
         mock_config.return_value.provider = "openai"
         mock_config.return_value.openai_api_key = None
         mock_config.return_value.anthropic_api_key = None

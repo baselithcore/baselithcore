@@ -8,13 +8,13 @@ from unittest.mock import PropertyMock, patch
 
 import pytest
 
-from core.exploration import (
+from baselith.core.exploration import (
     ExplorationResult,
     Hypothesis,
     HypothesisGenerator,
     ProactiveExplorer,
 )
-from core.exploration.hypothesis import ConfidenceLevel
+from baselith.core.exploration.hypothesis import ConfidenceLevel
 
 # ============================================================================
 # Mock Knowledge Source
@@ -184,7 +184,7 @@ class TestHypothesisGenerator:
     async def test_generate_simple_no_llm(self):
         """Generate hypotheses without LLM."""
         with patch(
-            "core.exploration.hypothesis.HypothesisGenerator.llm_service",
+            "baselith.core.exploration.hypothesis.HypothesisGenerator.llm_service",
             new_callable=PropertyMock,
         ) as mock_prop:
             mock_prop.return_value = None
@@ -215,7 +215,7 @@ class TestHypothesisGenerator:
     async def test_generate_fallback_empty_unknowns(self):
         """Generate fallback when no unknown."""
         with patch(
-            "core.exploration.hypothesis.HypothesisGenerator.llm_service",
+            "baselith.core.exploration.hypothesis.HypothesisGenerator.llm_service",
             new_callable=PropertyMock,
         ) as mock_prop:
             mock_prop.return_value = None
@@ -241,7 +241,7 @@ async def test_exploration_to_hypothesis_flow():
     source = MockKnowledgeSource(results=[{"content": "partial info"}])
 
     with patch(
-        "core.exploration.explorer.ProactiveExplorer.llm_service",
+        "baselith.core.exploration.explorer.ProactiveExplorer.llm_service",
         new_callable=PropertyMock,
     ) as mock_exp_llm:
         mock_exp_llm.return_value = None
@@ -258,7 +258,7 @@ async def test_exploration_to_hypothesis_flow():
 
     # Generate hypotheses about the topic - patch LLM for stability in tests
     with patch(
-        "core.exploration.hypothesis.HypothesisGenerator.llm_service",
+        "baselith.core.exploration.hypothesis.HypothesisGenerator.llm_service",
         new_callable=PropertyMock,
     ) as mock_hyp_llm:
         mock_hyp_llm.return_value = None

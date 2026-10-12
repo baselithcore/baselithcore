@@ -4,8 +4,8 @@ CLAUDE.md: "Code and docs ship together — no merge with stale docs." This is
 the mechanical half of that rule. Every page is scanned for verifiable claims
 and each one is checked against the repository:
 
-- **imports** — ``from core.x import Y`` in Python fences must really import;
-- **paths** — ``core/…``, ``plugins/…``, ``tests/…`` references must exist
+- **imports** — ``from baselith.core.x import Y`` in Python fences must really import;
+- **paths** — ``baselith/core/…``, ``baselith/plugins/…``, ``tests/…`` references must exist
   (tutorial scaffolds listed in :data:`ILLUSTRATIVE_PATH_PREFIXES` are exempt);
 - **links** — relative ``.md`` links must resolve;
 - **env** — ``NAME=`` lines in env fences and ``PREFIX_NAME`` tokens must be
@@ -48,7 +48,7 @@ ILLUSTRATIVE_PATH_PREFIXES: tuple[str, ...] = (
     "plugins/my_plugin/",
     "plugins/weather_agent/",
     "plugins/weather-agent/",
-    "plugins/<",
+    "baselith/plugins/<",
 )
 # Files the reader is told to create, sample output, or a name the text warns against.
 ILLUSTRATIVE_PATHS: frozenset[str] = frozenset(
@@ -64,8 +64,8 @@ ILLUSTRATIVE_PATHS: frozenset[str] = frozenset(
 )
 # Tutorial packages that only exist once the reader has built them.
 ILLUSTRATIVE_IMPORT_PREFIXES: tuple[str, ...] = (
-    "plugins.weather_agent",
-    "plugins.my_plugin",
+    "baselith.plugins.weather_agent",
+    "baselith.plugins.my_plugin",
 )
 # Sample plugin CLI commands from the "add a CLI to your plugin" walkthrough.
 ILLUSTRATIVE_CLI: frozenset[str] = frozenset({"my-feature"})
@@ -217,7 +217,7 @@ def run(
     cli_tree = known.cli_tree(REPO_ROOT) if cli else None
     if cli and cli_tree is None:
         notices.append(
-            "CLI tree unavailable (core.cli not importable here) — cli check skipped"
+            "CLI tree unavailable (baselith.core.cli not importable here) — cli check skipped"
         )
     route_set = known.known_routes(REPO_ROOT) if routes else None
     if routes and route_set is None:

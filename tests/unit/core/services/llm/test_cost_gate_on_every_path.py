@@ -19,16 +19,16 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.config.quotas import QuotaConfig
-from core.context import set_tenant_context
-from core.quotas.manager import CostBudgetExceededError, QuotaManager
-from core.quotas.store import InMemoryQuotaStore
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.service import LLMService
-from core.services.llm.stream_events import generate_stream_events
-from core.services.llm.structured import generate_structured
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.config.quotas import QuotaConfig
+from baselith.core.context import set_tenant_context
+from baselith.core.quotas.manager import CostBudgetExceededError, QuotaManager
+from baselith.core.quotas.store import InMemoryQuotaStore
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.stream_events import generate_stream_events
+from baselith.core.services.llm.structured import generate_structured
+from baselith.core.services.llm.tool_calling import LLMResult
 
 pytestmark = [pytest.mark.unit]
 
@@ -45,7 +45,7 @@ def _isolated_token_ledger():
     so anything reported here would accumulate for the rest of the session
     and trip its 10 000-token agent cap in unrelated tests.
     """
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -68,13 +68,13 @@ async def over_budget(monkeypatch):
     set_tenant_context("acme")
     await manager.record_tenant_cost("acme", 1.50)
     monkeypatch.setattr(
-        "core.quotas.cost_enforcement.get_quota_manager", lambda: manager
+        "baselith.core.quotas.cost_enforcement.get_quota_manager", lambda: manager
     )
     return manager
 
 
 def _service(*, native: bool = False, messages: bool = False) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -109,7 +109,7 @@ class TestPathsThatAlwaysHadTheGate:
         service = _service()
         opened = AsyncMock()
 
-        with patch("core.services.llm._streaming.open_stream", opened):
+        with patch("baselith.core.services.llm._streaming.open_stream", opened):
             with pytest.raises(CostBudgetExceededError):
                 _ = [c async for c in service.generate_response_stream("q")]
 
@@ -123,7 +123,7 @@ class TestPathsThatWroteTheLedgerWithoutReadingIt:
         service = _service(native=True)
         native = AsyncMock(return_value=LLMResult(text="hi", tokens_used=10))
 
-        with patch("core.services.llm.structured._native_with_retry", native):
+        with patch("baselith.core.services.llm.structured._native_with_retry", native):
             with pytest.raises(CostBudgetExceededError):
                 await generate_structured(service, "q", model=MODEL)
 
@@ -142,7 +142,9 @@ class TestPathsThatWroteTheLedgerWithoutReadingIt:
         service = _service(messages=True)
         turn = AsyncMock(return_value=LLMResult(text="hi", tokens_used=10))
 
-        with patch("core.services.llm.message_runtime._messages_with_retry", turn):
+        with patch(
+            "baselith.core.services.llm.message_runtime._messages_with_retry", turn
+        ):
             with pytest.raises(CostBudgetExceededError):
                 await generate_messages(service, HISTORY, model=MODEL)
 
@@ -179,12 +181,12 @@ class TestTheGateStillPassesWhenUnderBudget:
         )
         set_tenant_context("acme")
         monkeypatch.setattr(
-            "core.quotas.cost_enforcement.get_quota_manager", lambda: manager
+            "baselith.core.quotas.cost_enforcement.get_quota_manager", lambda: manager
         )
         service = _service(messages=True)
 
         with patch(
-            "core.services.llm.message_runtime._messages_with_retry",
+            "baselith.core.services.llm.message_runtime._messages_with_retry",
             AsyncMock(return_value=LLMResult(text="hi", tokens_used=10)),
         ):
             result = await generate_messages(service, HISTORY, model=MODEL)

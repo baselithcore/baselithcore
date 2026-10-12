@@ -1,10 +1,10 @@
 """
-Tests for core.chat.feedback module.
+Tests for baselith.core.chat.feedback module.
 """
 
 from unittest.mock import Mock
 
-from core.chat.feedback import RankedHit, apply_feedback_boost
+from baselith.core.chat.feedback import RankedHit, apply_feedback_boost
 
 
 class TestApplyFeedbackBoost:

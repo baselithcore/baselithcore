@@ -7,17 +7,21 @@ from typing import Any
 
 import pytest
 
-from core.agent import Agent
-from core.agent._strict_tools import strict_tool_parameters
-from core.orchestration.autonomy import AutonomyPolicy
-from core.orchestration.budget_context import (
+from baselith.core.agent import Agent
+from baselith.core.agent._strict_tools import strict_tool_parameters
+from baselith.core.orchestration.autonomy import AutonomyPolicy
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     deactivate_budget,
     get_active_budget,
 )
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.reasoning.react import ToolDefinition
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.reasoning.react import ToolDefinition
+from baselith.core.services.llm.tool_calling import LLMResult
 from tests.unit.core.agent.test_agent_messages import _call, _histories, _service
 
 
@@ -119,7 +123,7 @@ class TestDestructiveGuard:
             name="wipe", fn=lambda target: "x", description="d", category="destructive"
         )
         agent = Agent(tools=[tool], llm_service=_service([]))
-        from core.agent._safety import destructive_denial
+        from baselith.core.agent._safety import destructive_denial
 
         assert destructive_denial(agent, tool) is not None
         agent._autonomy_policy = AutonomyPolicy()
@@ -265,10 +269,10 @@ class TestStrictToolSchemas:
         assert strict_tool_parameters(loose, inferred=False) is None
 
     def test_provider_mappings_emit_the_strict_flag(self) -> None:
-        from core.services.llm.providers._anthropic_mapping import (
+        from baselith.core.services.llm.providers._anthropic_mapping import (
             _to_anthropic_tools,
         )
-        from core.services.llm.providers._openai_mapping import to_openai_tools
+        from baselith.core.services.llm.providers._openai_mapping import to_openai_tools
 
         def lookup(city: str) -> str:
             """Look up."""
@@ -306,7 +310,7 @@ class TestGuardScope:
         assert calls == ["db"]
 
     async def test_connector_action_left_at_default_category_runs(self) -> None:
-        from core.connectors.types import ActionSpec
+        from baselith.core.connectors.types import ActionSpec
 
         action = ActionSpec(name="send", description="d")
         assert action.category == "destructive"
@@ -324,7 +328,7 @@ class TestGuardScope:
 
 
 def test_shared_limits_lift_counters_but_keep_cost_caps() -> None:
-    from core.agent._safety import shared_loop_limits
+    from baselith.core.agent._safety import shared_loop_limits
 
     shared = shared_loop_limits()
     defaults = LoopLimits()

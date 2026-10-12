@@ -2,8 +2,8 @@
 
 import pytest
 
-import core.prompts.registry as registry_module
-from core.prompts.registry import PromptRegistry, get_prompt_registry
+import baselith.core.prompts.registry as registry_module
+from baselith.core.prompts.registry import PromptRegistry, get_prompt_registry
 
 
 class SpyTracer:
@@ -25,7 +25,7 @@ class SpyTracer:
 
 def test_render_emits_prompt_identity_span(monkeypatch):
     spans = []
-    import core.observability as obs
+    import baselith.core.observability as obs
 
     monkeypatch.setattr(obs, "get_tracer", lambda name: SpyTracer(spans))
 

@@ -3,7 +3,7 @@ title: Prioritization
 description: Weighted task scoring, dependency tracking, and a priority queue for agent work scheduling
 ---
 
-The `core/prioritization` module decides **which piece of work an agent should
+The `baselith/core/prioritization` module decides **which piece of work an agent should
 pick up next**. A `TaskPrioritizer` scores each `Task` on five weighted factors
 — urgency, importance, effort, deadline proximity, and how many other tasks it
 unblocks — a `DependencyGraph` holds tasks back until their prerequisites
@@ -35,7 +35,7 @@ decomposer output; moving jobs between processes is the
 ## Structure
 
 ```text
-core/prioritization/
+baselith/core/prioritization/
 ├── __init__.py   # public API: Task, TaskStatus, DependencyGraph,
 │                 #             PriorityQueue, PriorityScore, TaskPrioritizer
 ├── models.py     # Task dataclass, TaskStatus enum, DependencyGraph
@@ -44,7 +44,7 @@ core/prioritization/
 ```
 
 ```python
-from core.prioritization import (
+from baselith.core.prioritization import (
     DependencyGraph,  # prerequisite tracking, cycle check, topological order
     PriorityQueue,    # enqueue / dequeue / complete / fail / reprioritize
     PriorityScore,    # total plus per-factor breakdown
@@ -54,8 +54,8 @@ from core.prioritization import (
 )
 ```
 
-The scoring weights live in `core.config.prioritization.PrioritizationConfig`
-(also exported from `core.config`); see [Configuration](#configuration).
+The scoring weights live in `baselith.core.config.prioritization.PrioritizationConfig`
+(also exported from `baselith.core.config`); see [Configuration](#configuration).
 
 ---
 
@@ -107,7 +107,7 @@ dependencies), `IN_PROGRESS` (handed out by `dequeue()`), `COMPLETED`,
 
 ```python
 from datetime import datetime, timedelta
-from core.prioritization import Task, TaskPrioritizer
+from baselith.core.prioritization import Task, TaskPrioritizer
 
 prioritizer = TaskPrioritizer()  # weights from PrioritizationConfig (env or defaults)
 
@@ -124,8 +124,8 @@ given); without it, explicit keyword overrides take precedence and the
 remaining weights come from the environment or the defaults:
 
 ```python
-from core.config import PrioritizationConfig
-from core.prioritization import TaskPrioritizer
+from baselith.core.config import PrioritizationConfig
+from baselith.core.prioritization import TaskPrioritizer
 
 TaskPrioritizer(config=PrioritizationConfig(weight_deadline=0.4))
 TaskPrioritizer(weight_urgency=0.5)  # other four weights: env or defaults
@@ -160,7 +160,7 @@ ordering questions.
 | `len(graph)`               | `int`          | Number of tasks                                                                  |
 
 ```python
-from core.prioritization import DependencyGraph, Task
+from baselith.core.prioritization import DependencyGraph, Task
 
 graph = DependencyGraph()
 graph.add_task(Task(id="a", name="fetch"))
@@ -182,7 +182,7 @@ synchronous.
 
 ```python
 from datetime import datetime, timedelta
-from core.prioritization import PriorityQueue, Task
+from baselith.core.prioritization import PriorityQueue, Task
 
 queue = PriorityQueue()
 
@@ -251,7 +251,7 @@ Two scoring details worth knowing:
 
 ## Configuration
 
-`PrioritizationConfig` (`core/config/prioritization.py`) is a pydantic-settings
+`PrioritizationConfig` (`baselith/core/config/prioritization.py`) is a pydantic-settings
 model read from `PRIORITIZATION_`-prefixed environment variables. The defaults
 sum to `1.0`, which keeps `total` inside 0.0–1.0 without clamping; overrides
 that sum higher are clamped at `1.0`.
@@ -282,7 +282,7 @@ model itself, or pass one in via `config=`.
 
 ## The boundary
 
-`core/prioritization` is domain-agnostic: it knows nothing about tenants,
+`baselith/core/prioritization` is domain-agnostic: it knows nothing about tenants,
 SLAs, cost, or what a task does. Anything that decides *what the factors
 should be* — mapping a customer tier to `importance`, an SLA clock to
 `deadline`, a [`SubTask.estimated_effort`](planning.md#task-decomposer) to

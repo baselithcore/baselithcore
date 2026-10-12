@@ -113,7 +113,7 @@ plugins/
 ```
 
 !!! tip "Golden Rule"
-    **NEVER** insert domain-specific logic into `core/`. If you're writing code mentioning a specific domain (e.g., "weather", "finance"), it must be a plugin.
+    **NEVER** insert domain-specific logic into `baselith/core/`. If you're writing code mentioning a specific domain (e.g., "weather", "finance"), it must be a plugin.
 
 ### 4. Core Services
 
@@ -121,11 +121,11 @@ Domain-agnostic services:
 
 | Service            | Module                      | Responsibility                 |
 | ------------------ | --------------------------- | ------------------------------ |
-| **LLM Service**    | `core/services/llm`         | LLM provider abstraction       |
-| **Memory Manager** | `core/memory`               | Context and history management |
-| **VectorStore**    | `core/services/vectorstore` | Semantic search                |
-| **Event Bus**      | `core/events`               | Internal pub/sub               |
-| **Task Queue**     | `core/task_queue`           | Asynchronous jobs              |
+| **LLM Service**    | `baselith/core/services/llm`         | LLM provider abstraction       |
+| **Memory Manager** | `baselith/core/memory`               | Context and history management |
+| **VectorStore**    | `baselith/core/services/vectorstore` | Semantic search                |
+| **Event Bus**      | `baselith/core/events`               | Internal pub/sub               |
+| **Task Queue**     | `baselith/core/task_queue`           | Asynchronous jobs              |
 
 ### 5. Infrastructure
 
@@ -142,10 +142,10 @@ Database 2: Task Queue (RQ workers)
 
 ## Dependency Injection
 
-The system uses a custom DI container (`core/di`):
+The system uses a custom DI container (`baselith/core/di`):
 
 ```python
-from core.di import DependencyContainer, ServiceLifetime
+from baselith.core.di import DependencyContainer, ServiceLifetime
 
 # Create a container
 container = DependencyContainer()
@@ -172,7 +172,7 @@ For async, lazily-initialized singletons (the pattern used by the runtime
 itself), use the global `LazyServiceRegistry`:
 
 ```python
-from core.di import get_lazy_registry
+from baselith.core.di import get_lazy_registry
 
 registry = get_lazy_registry()
 registry.register_factory(LLMServiceProtocol, build_llm_service)  # async factory
@@ -199,10 +199,10 @@ stateDiagram-v2
 
 ## Centralized Configuration
 
-All configuration is managed via Pydantic Settings in `core/config`:
+All configuration is managed via Pydantic Settings in `baselith/core/config`:
 
 ```python
-from core.config import get_llm_config, get_resilience_config
+from baselith.core.config import get_llm_config, get_resilience_config
 
 # ✅ Correct - use factory functions
 config = get_llm_config()
@@ -231,7 +231,7 @@ model = os.getenv("DEFAULT_MODEL")  # NO!
 Every core service defines a `Protocol` (interface):
 
 ```python
-# core/interfaces/services.py
+# baselith/core/interfaces/services.py
 from typing import Protocol, AsyncIterator
 
 class LLMServiceProtocol(Protocol):
@@ -246,17 +246,23 @@ class LLMServiceProtocol(Protocol):
         """Generate a response."""
         ...
 
-    async def generate_response_stream(
+    def generate_response_stream(
         self,
         prompt: str,
         model: str | None = None,
     ) -> AsyncIterator[str]:
-        """Generate in streaming mode."""
+        """Generate in streaming mode (implement as an async generator)."""
         ...
 ```
 
-The protocol is re-exported from `core.interfaces`, so import it with
-`from core.interfaces import LLMServiceProtocol`.
+`generate_response_stream` is declared as a plain `def` returning an
+`AsyncIterator`: that is the type of an async generator function
+(`async def` with `yield`), which is how every implementation writes it. An
+`async def` in the protocol would declare a coroutine that *returns* an
+iterator, and a type checker would reject every real implementation.
+
+The protocol is re-exported from `baselith.core.interfaces`, so import it with
+`from baselith.core.interfaces import LLMServiceProtocol`.
 
 This enables:
 
@@ -295,7 +301,7 @@ sequenceDiagram
 ### Service Lazy Loading
 
 ```python
-from core.di import get_lazy_registry
+from baselith.core.di import get_lazy_registry
 
 registry = get_lazy_registry()
 
@@ -317,11 +323,11 @@ Security is integrated at all levels:
 
 ```python
 from fastapi import Depends
-from core.middleware import require_admin
+from baselith.core.middleware import require_admin
 
 # Auth is enforced as a FastAPI dependency. require_admin (admin-only),
 # require_user (user/admin/job) and require_admin_or_job all live in
-# core.middleware.security and return the resolved identity string.
+# baselith.core.middleware.security and return the resolved identity string.
 @router.get("/admin/stats")
 async def admin_stats(user: str = Depends(require_admin)):
     return {"stats": "..."}
@@ -330,7 +336,7 @@ async def admin_stats(user: str = Depends(require_admin)):
 ### Input Sanitization
 
 ```python
-from core.guardrails import InputGuard
+from baselith.core.guardrails import InputGuard
 
 guard = InputGuard()
 
@@ -347,7 +353,7 @@ safe_input = guard.sanitize(user_input)
 
 ```python
 # ✅ Secrets in .env, accessed via config
-from core.config import get_security_config
+from baselith.core.config import get_security_config
 jwt_secret = get_security_config().secret_key
 
 # ❌ Never hardcoded

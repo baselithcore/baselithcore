@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.plugins.version import (
+from baselith.core.plugins.version import (
     SemanticVersion,
     VersionConstraint,
     check_plugin_dependency,

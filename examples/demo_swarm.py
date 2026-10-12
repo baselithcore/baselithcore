@@ -15,7 +15,7 @@ Run: python examples/demo_swarm.py
 import asyncio
 
 # Standard imports for Baselith-Core
-from core.swarm import (
+from baselith.core.swarm import (
     AgentProfile,
     AgentStatus,
     Capability,

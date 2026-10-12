@@ -4,7 +4,7 @@ Unit tests for tracing system.
 
 import pytest
 
-from core.observability.tracing import (
+from baselith.core.observability.tracing import (
     InMemoryExporter,
     Span,
     SpanContext,

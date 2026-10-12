@@ -1,5 +1,5 @@
 """
-Tests for core/services/graph/agent.py
+Tests for baselith/core/services/graph/agent.py
 
 Tests GraphService for graph operations.
 """
@@ -14,7 +14,7 @@ class TestGraphServiceInit:
         """Verify GraphService initializes with graph client."""
         mock_client = MagicMock()
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
 
@@ -29,7 +29,7 @@ class TestGraphServiceUpsertDocument:
         """Verify upsert_document delegates to DocumentOperations."""
         mock_client = MagicMock()
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service._doc_ops = MagicMock()
@@ -54,7 +54,7 @@ class TestGraphServiceTransitionDocument:
         """Verify transition_document_to_kb delegates to DocumentOperations."""
         mock_client = MagicMock()
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service._doc_ops = MagicMock()
@@ -74,7 +74,7 @@ class TestGraphServiceLinkEntities:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = True
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service.link_entities("entity_1", "RELATED_TO", "entity_2", {"weight": 0.8})
@@ -88,7 +88,7 @@ class TestGraphServiceLinkEntities:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = False
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service.link_entities("entity_1", "RELATED_TO", "entity_2")
@@ -101,7 +101,7 @@ class TestGraphServiceLinkEntities:
         mock_client.is_enabled.return_value = True
         mock_client.upsert_edge.side_effect = Exception("Graph error")
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         # Should not raise
@@ -116,7 +116,7 @@ class TestGraphServiceRegisterRagUsage:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = True
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         # Remove doc_ops method to test fallback
@@ -144,7 +144,7 @@ class TestGraphServiceRegisterRagUsage:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = False
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service._doc_ops = MagicMock(spec=[])
@@ -157,7 +157,7 @@ class TestGraphServiceRegisterRagUsage:
         """Verify register_rag_usage delegates to doc_ops if method exists."""
         mock_client = MagicMock()
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service._doc_ops = MagicMock()
@@ -176,7 +176,7 @@ class TestGraphServiceRegisterRagUsage:
         mock_client.is_enabled.return_value = True
         mock_client.upsert_node.side_effect = Exception("Graph error")
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         service._doc_ops = MagicMock(spec=[])
@@ -193,7 +193,7 @@ class TestGraphServiceReason:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = False
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         result = service.reason("explain", ["entity_1"])
@@ -206,7 +206,7 @@ class TestGraphServiceReason:
         mock_client = MagicMock()
         mock_client.is_enabled.return_value = True
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         result = service.reason("explain", [])
@@ -223,7 +223,7 @@ class TestGraphServiceReason:
             ["entity_1", "Summary 1", "DEPENDS_ON", "Summary 3"],
         ]
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         result = service.reason("explain", ["entity_1"])
@@ -238,7 +238,7 @@ class TestGraphServiceReason:
         mock_client.is_enabled.return_value = True
         mock_client.query.return_value = []
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         result = service.reason("explain", ["entity_1"])
@@ -252,7 +252,7 @@ class TestGraphServiceReason:
         mock_client.is_enabled.return_value = True
         mock_client.query.side_effect = Exception("Query error")
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         result = service.reason("explain", ["entity_1"])
@@ -268,7 +268,7 @@ class TestGraphServiceCurrentTimestamp:
         """Verify _current_timestamp returns ISO format string."""
         mock_client = MagicMock()
 
-        from core.services.graph.agent import GraphService
+        from baselith.core.services.graph.agent import GraphService
 
         service = GraphService(mock_client)
         timestamp = service._current_timestamp()

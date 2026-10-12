@@ -1,9 +1,13 @@
 """Fail-closed defaults for ReAct and parallel tool execution."""
 
-from core.orchestration.autonomy import DESTRUCTIVE, AutonomyLevel, AutonomyPolicy
-from core.orchestration.parallel import ParallelToolExecutor
-from core.reasoning.react import ReActAgent
-from core.reasoning.react_types import ToolDefinition
+from baselith.core.orchestration.autonomy import (
+    DESTRUCTIVE,
+    AutonomyLevel,
+    AutonomyPolicy,
+)
+from baselith.core.orchestration.parallel import ParallelToolExecutor
+from baselith.core.reasoning.react import ReActAgent
+from baselith.core.reasoning.react_types import ToolDefinition
 
 
 def test_tool_definition_category_defaults_to_destructive():

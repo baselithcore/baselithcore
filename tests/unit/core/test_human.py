@@ -1,5 +1,5 @@
 """
-Unit tests for the Human-in-the-Loop module (core/human).
+Unit tests for the Human-in-the-Loop module (baselith/core/human).
 
 Tests cover:
 - HumanIntervention class with sync and async callbacks
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.human import (
+from baselith.core.human import (
     HumanIntervention,
     HumanRequest,
     InteractionStatus,

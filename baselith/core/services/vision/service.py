@@ -1,0 +1,425 @@
+"""
+Vision Service Implementation.
+
+Multi-provider vision service supporting OpenAI, Anthropic, and Google
+for image analysis, OCR, and multi-modal understanding.
+
+Usage:
+    from baselith.core.services.vision import VisionService, VisionRequest, ImageContent
+
+    service = VisionService()
+
+    request = VisionRequest(
+        prompt="What's in this image?",
+        images=[ImageContent.from_file("screenshot.png")]
+    )
+
+    response = await service.analyze(request)
+    print(response.content)
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from baselith.core.config import get_vision_config
+from baselith.core.observability.logging import get_logger
+from baselith.core.services.vision import backends
+from baselith.core.services.vision.media_service import MediaAnalysisMixin
+from baselith.core.services.vision.models import (
+    ImageContent,
+    VisionCapability,
+    VisionProvider,
+    VisionRequest,
+    VisionResponse,
+)
+
+_ApiKeyResolver = Callable[[str], str | None]
+
+_key_resolvers: list[_ApiKeyResolver] = []
+
+
+def register_api_key_resolver(resolver: _ApiKeyResolver) -> None:
+    """Register a callable consulted before env fallback for provider keys.
+
+    Resolvers are queried with the provider name (``"openai"``,
+    ``"anthropic"``, ``"google"``, ``"ollama"``) and should return a
+    plaintext key or ``None`` if unknown. First non-None wins.
+    """
+    if resolver not in _key_resolvers:
+        _key_resolvers.insert(0, resolver)
+
+
+def unregister_api_key_resolver(resolver: _ApiKeyResolver) -> None:
+    """Remove a previously registered resolver (no-op if absent)."""
+    try:
+        _key_resolvers.remove(resolver)
+    except ValueError:
+        pass
+
+
+def _resolve_key(provider: str) -> str | None:
+    for resolver in _key_resolvers:
+        try:
+            value = resolver(provider)
+        except Exception as exc:
+            # Type name only: a key resolver's error may carry credential detail.
+            logger.debug(
+                "vision_api_key_resolver_failed",
+                extra={"provider": provider, "error": type(exc).__name__},
+            )
+            continue
+        if value:
+            return value
+    return None
+
+
+logger = get_logger(__name__)
+
+
+class VisionService(MediaAnalysisMixin):
+    """
+    Multi-provider vision service.
+
+    Supports:
+    - OpenAI GPT-4o / GPT-4-turbo-vision
+    - Anthropic Claude 3.5 Sonnet
+    - Google Gemini 2.0
+    - Ollama (local models with vision)
+
+    Features:
+    - Structured output (JSON mode)
+    - Multi-image support
+    - OCR and diagram understanding
+    """
+
+    # Default models per provider
+    DEFAULT_MODELS = {
+        VisionProvider.OPENAI: "gpt-4o",
+        VisionProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
+        VisionProvider.GOOGLE: "gemini-2.0-flash",
+        VisionProvider.OLLAMA: "llava",
+    }
+
+    # The vision model (gpt-4o) cannot take ``input_audio``; the native audio
+    # path needs an audio-capable chat model.
+    DEFAULT_OPENAI_AUDIO_MODEL = "gpt-4o-audio-preview"
+
+    # Prompts for specific capabilities
+    CAPABILITY_PROMPTS = {
+        VisionCapability.OCR: "Extract all text from this image. Return only the extracted text, preserving the layout as much as possible.",
+        VisionCapability.DIAGRAM_UNDERSTANDING: "Analyze this diagram. Describe its structure, components, relationships, and any text labels. Be precise about connections and flow.",
+        VisionCapability.SCREENSHOT_ANALYSIS: "Analyze this screenshot. Identify UI elements, their positions, any text content, and the overall state of the interface.",
+        VisionCapability.OBJECT_DETECTION: "List all objects visible in this image. For each object, describe its position (top/bottom, left/right/center) and any relevant attributes.",
+        VisionCapability.COMPARISON: "Compare these images. Describe the similarities and differences you observe.",
+    }
+
+    def __init__(
+        self,
+        default_provider: VisionProvider | None = None,
+        openai_api_key: str | None = None,
+        anthropic_api_key: str | None = None,
+        google_api_key: str | None = None,
+    ) -> None:
+        """
+        Initialize vision service.
+
+        Args:
+            default_provider: Default provider to use. If None, reads from
+                VisionConfig.provider (env VISION_PROVIDER).
+            openai_api_key: OpenAI API key (or from env OPENAI_API_KEY)
+            anthropic_api_key: Anthropic API key (or from env ANTHROPIC_API_KEY)
+            google_api_key: Google API key (or from env GOOGLE_API_KEY)
+        """
+        _vision_cfg = get_vision_config()
+        if default_provider is None:
+            default_provider = VisionProvider(_vision_cfg.provider)
+        self.default_provider = default_provider
+
+        # Per-provider model identifiers resolved from config, falling back to
+        # the class defaults so existing deployments keep their current models.
+        self.models = {
+            VisionProvider.OPENAI: _vision_cfg.openai_model
+            or self.DEFAULT_MODELS[VisionProvider.OPENAI],
+            VisionProvider.ANTHROPIC: _vision_cfg.anthropic_model
+            or self.DEFAULT_MODELS[VisionProvider.ANTHROPIC],
+            VisionProvider.GOOGLE: _vision_cfg.google_model
+            or self.DEFAULT_MODELS[VisionProvider.GOOGLE],
+            VisionProvider.OLLAMA: _vision_cfg.ollama_model
+            or self.DEFAULT_MODELS[VisionProvider.OLLAMA],
+        }
+        self.openai_audio_model: str = (
+            _vision_cfg.openai_audio_model or self.DEFAULT_OPENAI_AUDIO_MODEL
+        )
+        self._openai_key = (
+            openai_api_key
+            or _resolve_key("openai")
+            or (
+                _vision_cfg.openai_api_key.get_secret_value()
+                if _vision_cfg.openai_api_key
+                else None
+            )
+        )
+        self._anthropic_key = (
+            anthropic_api_key
+            or _resolve_key("anthropic")
+            or (
+                _vision_cfg.anthropic_api_key.get_secret_value()
+                if _vision_cfg.anthropic_api_key
+                else None
+            )
+        )
+        self._google_key = (
+            google_api_key
+            or _resolve_key("google")
+            or (
+                _vision_cfg.google_api_key.get_secret_value()
+                if _vision_cfg.google_api_key
+                else None
+            )
+        )
+
+        # Shared HTTP client (lazy). Reused across analyze() calls so each
+        # request does not pay TLS handshake + connection setup again.
+        self._http_client: Any = None
+        # Shared AsyncOpenAI client (lazy). A fresh client per call leaked its
+        # httpx pool and inherited the SDK's 600s default timeout.
+        self._openai_client: Any = None
+
+        logger.info(
+            "vision_service_initialized",
+            default_provider=default_provider.value,
+            openai_available=bool(self._openai_key),
+            anthropic_available=bool(self._anthropic_key),
+            google_available=bool(self._google_key),
+        )
+
+    def _get_http_client(self) -> Any:
+        """Return the lazily created shared ``httpx.AsyncClient``.
+
+        Per-request timeouts are passed at call sites, so a single pooled
+        client serves all HTTP-based providers (Anthropic, Google, Ollama).
+        """
+        if self._http_client is None:
+            try:
+                import httpx
+            except ImportError:
+                raise ImportError("httpx package required") from None
+            self._http_client = httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return self._http_client
+
+    def _get_openai_client(self) -> Any:
+        """Return the lazily created shared ``AsyncOpenAI`` client.
+
+        Built once with an explicit timeout (the SDK default is 600s) and
+        reused across calls so each request does not open a new httpx pool.
+        """
+        if self._openai_client is None:
+            try:
+                from openai import AsyncOpenAI
+            except ImportError:
+                raise ImportError(
+                    "openai package required: pip install openai"
+                ) from None
+            self._openai_client = AsyncOpenAI(
+                api_key=self._openai_key,
+                timeout=60.0,
+                max_retries=2,
+            )
+        return self._openai_client
+
+    async def close(self) -> None:
+        """Close the shared HTTP and OpenAI clients (no-op if never used)."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+        if self._openai_client is not None:
+            await self._openai_client.close()
+            self._openai_client = None
+
+    async def analyze(self, request: VisionRequest) -> VisionResponse:
+        """
+        Analyze images with the given request.
+
+        Args:
+            request: Vision analysis request
+
+        Returns:
+            Vision analysis response
+        """
+        provider = request.provider or self.default_provider
+
+        # Build the full prompt
+        prompt = self._build_prompt(request)
+
+        logger.info(
+            "vision_analyze_start",
+            provider=provider.value,
+            capability=request.capability.value,
+            num_images=len(request.images),
+        )
+
+        try:
+            if provider == VisionProvider.OPENAI:
+                response = await self._analyze_openai(request, prompt)
+            elif provider == VisionProvider.ANTHROPIC:
+                response = await self._analyze_anthropic(request, prompt)
+            elif provider == VisionProvider.GOOGLE:
+                response = await self._analyze_google(request, prompt)
+            elif provider == VisionProvider.OLLAMA:
+                response = await self._analyze_ollama(request, prompt)
+            else:
+                raise ValueError(f"Unsupported provider: {provider}")
+
+            logger.info(
+                "vision_analyze_complete",
+                provider=provider.value,
+                tokens_used=response.tokens_used,
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(
+                "vision_analyze_error",
+                provider=provider.value,
+                error=str(e),
+            )
+            raise
+
+    def _build_prompt(self, request: VisionRequest) -> str:
+        """
+        Construct the final instructions based on request capabilities.
+
+        Args:
+            request: The user's vision request.
+
+        Returns:
+            str: Enriched prompt with capability-specific formatting.
+        """
+        base_prompt = request.prompt
+
+        # Add capability-specific prompt if not basic analysis
+        if request.capability != VisionCapability.IMAGE_ANALYSIS:
+            capability_prompt = self.CAPABILITY_PROMPTS.get(request.capability, "")
+            if capability_prompt:
+                base_prompt = (
+                    f"{capability_prompt}\n\nAdditional instructions: {request.prompt}"
+                )
+
+        # Add JSON mode instruction if requested
+        if request.json_mode:
+            base_prompt += "\n\nRespond only with valid JSON."
+
+        return base_prompt
+
+    async def _analyze_openai(
+        self, request: VisionRequest, prompt: str
+    ) -> VisionResponse:
+        """Analyze using OpenAI (see baselith.core.services.vision.backends)."""
+        return await backends.analyze_openai(self, request, prompt)
+
+    async def _analyze_anthropic(
+        self, request: VisionRequest, prompt: str
+    ) -> VisionResponse:
+        """Analyze using Anthropic (see baselith.core.services.vision.backends)."""
+        return await backends.analyze_anthropic(self, request, prompt)
+
+    async def _analyze_google(
+        self, request: VisionRequest, prompt: str
+    ) -> VisionResponse:
+        """Analyze using Google Gemini (see baselith.core.services.vision.backends)."""
+        return await backends.analyze_google(self, request, prompt)
+
+    async def _analyze_ollama(
+        self, request: VisionRequest, prompt: str
+    ) -> VisionResponse:
+        """Analyze using Ollama (see baselith.core.services.vision.backends)."""
+        return await backends.analyze_ollama(self, request, prompt)
+
+    # -------------------------------------------------------------------------
+    # Convenience Methods
+    # -------------------------------------------------------------------------
+
+    async def describe_image(self, image: ImageContent) -> str:
+        """
+        Generate a concise textual description of an image.
+
+        Args:
+            image: The image to analyze.
+
+        Returns:
+            str: Natural language description of the content.
+        """
+        request = VisionRequest(
+            prompt="Describe this image in detail.",
+            images=[image],
+        )
+        response = await self.analyze(request)
+        return response.content
+
+    async def extract_text(self, image: ImageContent) -> str:
+        """
+        Extract readable text from an image using OCR.
+
+        Args:
+            image: The source image.
+
+        Returns:
+            str: Transcribed text content.
+        """
+        request = VisionRequest(
+            prompt="Extract all text.",
+            images=[image],
+            capability=VisionCapability.OCR,
+        )
+        response = await self.analyze(request)
+        return response.content
+
+    async def analyze_screenshot(self, image: ImageContent, question: str = "") -> str:
+        """
+        Identify UI elements and state from a screen capture.
+
+        Args:
+            image: The screenshot image.
+            question: Specific area of interest (e.g., 'where is the login button?').
+
+        Returns:
+            str: Detailed UI analysis and element descriptions.
+        """
+        prompt = question or "Describe the UI and any visible text or buttons."
+        request = VisionRequest(
+            prompt=prompt,
+            images=[image],
+            capability=VisionCapability.SCREENSHOT_ANALYSIS,
+        )
+        response = await self.analyze(request)
+        return response.content
+
+    async def analyze_diagram(self, image: ImageContent) -> str:
+        """Analyze a diagram or architecture image."""
+        request = VisionRequest(
+            prompt="Analyze this diagram.",
+            images=[image],
+            capability=VisionCapability.DIAGRAM_UNDERSTANDING,
+        )
+        response = await self.analyze(request)
+        return response.content
+
+    async def compare_images(
+        self, image1: ImageContent, image2: ImageContent, aspect: str = ""
+    ) -> str:
+        """Compare two images."""
+        prompt = (
+            f"Compare these images. {aspect}" if aspect else "Compare these images."
+        )
+        request = VisionRequest(
+            prompt=prompt,
+            images=[image1, image2],
+            capability=VisionCapability.COMPARISON,
+        )
+        response = await self.analyze(request)
+        return response.content

@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.vectorstore._dimension import (
+from baselith.core.services.vectorstore._dimension import (
     EmbeddingDimensionMismatchError,
     qdrant_vector_size,
 )
-from core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.services.vectorstore.exceptions import VectorStoreError
 
 
 def _info(vectors):
@@ -47,13 +47,15 @@ def _client(existing_size: int) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-@patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+@patch("baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
 async def test_mismatched_existing_collection_fails_with_an_actionable_error(
     mock_qdrant_client,
 ):
     client = _client(existing_size=768)
     mock_qdrant_client.return_value = client
-    from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+    from baselith.core.services.vectorstore.providers.qdrant_provider import (
+        QdrantProvider,
+    )
 
     with pytest.raises(EmbeddingDimensionMismatchError) as excinfo:
         await QdrantProvider().create_collection("documents", vector_size=384)
@@ -67,11 +69,13 @@ async def test_mismatched_existing_collection_fails_with_an_actionable_error(
 
 
 @pytest.mark.asyncio
-@patch("core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
+@patch("baselith.core.services.vectorstore.providers.qdrant_provider.AsyncQdrantClient")
 async def test_matching_existing_collection_proceeds(mock_qdrant_client):
     client = _client(existing_size=384)
     mock_qdrant_client.return_value = client
-    from core.services.vectorstore.providers.qdrant_provider import QdrantProvider
+    from baselith.core.services.vectorstore.providers.qdrant_provider import (
+        QdrantProvider,
+    )
 
     await QdrantProvider().create_collection("documents", vector_size=384)
 
@@ -81,7 +85,7 @@ async def test_matching_existing_collection_proceeds(mock_qdrant_client):
 
 @pytest.mark.asyncio
 async def test_pgvector_mismatch_raises_the_same_error_type():
-    from core.services.vectorstore.providers import pgvector_provider
+    from baselith.core.services.vectorstore.providers import pgvector_provider
 
     with patch.object(
         pgvector_provider.PgVectorProvider,
@@ -94,7 +98,7 @@ async def test_pgvector_mismatch_raises_the_same_error_type():
 
 @pytest.mark.asyncio
 async def test_service_keeps_the_mismatch_type():
-    from core.services.vectorstore.service import VectorStoreService
+    from baselith.core.services.vectorstore.service import VectorStoreService
 
     provider = AsyncMock()
     provider.create_collection.side_effect = EmbeddingDimensionMismatchError("x")

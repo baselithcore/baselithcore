@@ -10,11 +10,14 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from core.config.services import LLMConfig
-from core.services.llm.exceptions import describe_exception
-from core.services.llm.governed import resolve_governed_client_config
-from core.services.llm.policy import PluginLLMPolicy, set_plugin_llm_policy_resolver
-from core.services.llm.runtime import api_base_for
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.exceptions import describe_exception
+from baselith.core.services.llm.governed import resolve_governed_client_config
+from baselith.core.services.llm.policy import (
+    PluginLLMPolicy,
+    set_plugin_llm_policy_resolver,
+)
+from baselith.core.services.llm.runtime import api_base_for
 
 
 def _config(**kwargs) -> LLMConfig:
@@ -124,7 +127,9 @@ class TestGovernedEndpoint:
                 provider="ollama", model="llama3.2"
             )
         )
-        with patch("core.services.llm.governed.get_llm_config", return_value=config):
+        with patch(
+            "baselith.core.services.llm.governed.get_llm_config", return_value=config
+        ):
             resolved = resolve_governed_client_config("some-plugin")
         assert resolved is not None
         assert resolved.provider == "ollama"
@@ -137,7 +142,9 @@ class TestGovernedEndpoint:
         set_plugin_llm_policy_resolver(
             lambda name, scope=None: PluginLLMPolicy(model="mistral")
         )
-        with patch("core.services.llm.governed.get_llm_config", return_value=config):
+        with patch(
+            "baselith.core.services.llm.governed.get_llm_config", return_value=config
+        ):
             resolved = resolve_governed_client_config("some-plugin")
         assert resolved is not None
         assert resolved.api_base == "http://box:11434"
@@ -183,11 +190,11 @@ class TestFallbackStageEndpoint:
         """
         from unittest.mock import AsyncMock
 
-        from core.services.llm.fallback_runtime import (
+        from baselith.core.services.llm.fallback_runtime import (
             _clone_service,
             reset_fallback_services,
         )
-        from core.services.llm.service import LLMService
+        from baselith.core.services.llm.service import LLMService
 
         reset_fallback_services()
         base_config = _config(

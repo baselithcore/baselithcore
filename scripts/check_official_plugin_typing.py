@@ -1,12 +1,12 @@
 """Run mypy on official framework plugins.
 
 This keeps typing pressure on first-party plugins without forcing the whole
-`plugins/` tree to be type-clean in one step.
+`baselith/plugins/` tree to be type-clean in one step.
 
 The roster is **derived, not hardcoded**: an official plugin is a directory
-under `plugins/` whose manifest declares `integrity_sha256`, i.e. one this repo
-signs and ships. The old hardcoded tuple silently dropped `plugins/goals`,
-`plugins/reasoning_agent` and `plugins/baselithbot/dashboard` — a plugin added
+under `baselith/plugins/` whose manifest declares `integrity_sha256`, i.e. one this repo
+signs and ships. The old hardcoded tuple silently dropped `baselith/plugins/goals`,
+`baselith/plugins/reasoning_agent` — a plugin added
 after the list was written was simply never gated.
 """
 
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mypy_runner import MypyNotFoundError, mypy_base_command
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLUGINS_ROOT = REPO_ROOT / "plugins"
+PLUGINS_ROOT = REPO_ROOT / "baselith" / "plugins"
 
 MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
 
@@ -37,12 +37,7 @@ UNSIGNED_BY_DESIGN: frozenset[str] = frozenset({"example-plugin", "test-project"
 # Subdirectories within the official plugins that are excluded from the strict
 # typing gate (non-Python assets, generated code, vendored trees, or test
 # suites with their own conventions).
-EXCLUDED_SUBPATHS: tuple[str, ...] = (
-    "plugins/baselithbot/ui",
-    "plugins/baselithbot/docs",
-    "plugins/baselithbot/.state",
-    "plugins/baselithbot/tests",
-)
+EXCLUDED_SUBPATHS: tuple[str, ...] = ()
 
 
 def _is_excluded(relative_path: str) -> bool:
@@ -75,7 +70,7 @@ def _has_manifest(plugin_dir: Path) -> bool:
 
 
 def official_plugin_dirs() -> tuple[list[str], list[str]]:
-    """Split ``plugins/`` into gated plugins and ones that escaped the gate.
+    """Split ``baselith/plugins/`` into gated plugins and ones that escaped the gate.
 
     Directories whose name is not a valid Python identifier (``example-plugin``)
     are never gated: mypy refuses to analyse a package it cannot name, so such
@@ -98,7 +93,12 @@ def official_plugin_dirs() -> tuple[list[str], list[str]]:
     found: list[str] = []
     unsigned: list[str] = []
     raw = subprocess.run(
-        [git, "ls-files", "plugins/*/manifest.y*ml", "plugins/*/manifest.json"],
+        [
+            git,
+            "ls-files",
+            "baselith/plugins/*/manifest.y*ml",
+            "baselith/plugins/*/manifest.json",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -138,7 +138,7 @@ def main() -> int:
     official, unsigned = official_plugin_dirs()
     if unsigned:
         print(
-            "Unsigned plugin(s) under plugins/ — the typing gate derives its "
+            "Unsigned plugin(s) under baselith/plugins/ — the typing gate derives its "
             "roster from `integrity_sha256`, so these would escape it entirely:",
             file=sys.stderr,
         )

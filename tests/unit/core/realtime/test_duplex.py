@@ -8,7 +8,7 @@ from typing import get_args
 
 import pytest
 
-from core.realtime import (
+from baselith.core.realtime import (
     AudioDelta,
     DuplexEvent,
     DuplexVoiceSession,

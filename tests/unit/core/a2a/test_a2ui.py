@@ -1,10 +1,10 @@
-"""Unit tests for ``core.a2a.a2ui``."""
+"""Unit tests for ``baselith.core.a2a.a2ui``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.a2a.a2ui import (
+from baselith.core.a2a.a2ui import (
     A2UI_SCHEMA_VERSION,
     MAX_TREE_DEPTH,
     MAX_TREE_NODES,

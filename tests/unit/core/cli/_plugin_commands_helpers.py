@@ -18,7 +18,7 @@ def _make_plugin(
 
     plugin_py = "plugin.disabled" if disabled else "plugin.py"
     (plugin_dir / plugin_py).write_text(
-        "from core.plugins.interface import Plugin\n"
+        "from baselith.core.plugins.interface import Plugin\n"
         f"class {name.replace('-', '').title()}Plugin(Plugin):\n"
         "    async def initialize(self, config): pass\n"
     )

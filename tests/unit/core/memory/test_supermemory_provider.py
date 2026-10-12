@@ -15,8 +15,8 @@ import types
 
 from pydantic import SecretStr
 
-from core.config.memory import SupermemoryConfig
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.config.memory import SupermemoryConfig
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 
 def test_config_exposes_timeout_and_retry_knobs():
@@ -72,7 +72,7 @@ def _install_fake_sdk(monkeypatch, *, reject_timeout: bool = False) -> None:
 
 
 def _make_provider(monkeypatch, **config_kwargs):
-    from core.memory.supermemory_provider import SupermemoryProvider
+    from baselith.core.memory.supermemory_provider import SupermemoryProvider
 
     config = SupermemoryConfig(api_key=SecretStr("k"), **config_kwargs)
     return SupermemoryProvider(container_tag="t1", config=config)

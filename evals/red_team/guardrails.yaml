@@ -4,9 +4,9 @@
 # (no LLM, no API key, no cost). A case that flips verdict is a security
 # regression and fails the merge, exactly like a failing unit test.
 #
-# surface: input    -> core.guardrails.input_guard.InputGuard.validate
-#          external -> core.guardrails.indirect.IndirectInjectionScanner.scan
-#          output   -> core.guardrails.output_guard.OutputGuard.filter
+# surface: input    -> baselith.core.guardrails.input_guard.InputGuard.validate
+#          external -> baselith.core.guardrails.indirect.IndirectInjectionScanner.scan
+#          output   -> baselith.core.guardrails.output_guard.OutputGuard.filter
 # expect:  input    -> blocked | allowed
 #          external -> flagged | clean
 #          output   -> redacted | clean

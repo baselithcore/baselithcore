@@ -1,0 +1,31 @@
+name: web-scraper
+version: 0.2.0
+description: Web scraping, crawling, extractors, middleware and storage backends
+author: Baselith
+tags:
+- scraper
+- crawler
+- web
+- extraction
+category: ai
+python_dependencies:
+- httpx==0.27.0
+- playwright>=1.62.0
+- beautifulsoup4>=4.14.2
+- soupsieve>=2.8.4
+optional_resources:
+- internet
+# Declared capabilities. A scraper's targets are supplied per crawl, so the
+# egress set is open by nature; the SSRF guard still refuses internal and
+# link-local addresses underneath this declaration.
+# See mkdocs-site/docs/plugins/packaging.md#permissions.
+permissions:
+  network:
+    egress:
+    - '*'
+  tools:
+  - '*'
+  secrets: []
+  filesystem: []
+integrity_sha256: 606e2096f806b17badf79455d513db3be6ca8a33941fba328dcd520a16305b13
+hash_surface_version: 5

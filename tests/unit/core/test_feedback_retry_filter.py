@@ -15,7 +15,7 @@ from unittest.mock import patch
 import psycopg
 import pytest
 
-from core.db import feedback as feedback_mod
+from baselith.core.db import feedback as feedback_mod
 
 
 def _failing_connection(exc: Exception, counter: list[int]):

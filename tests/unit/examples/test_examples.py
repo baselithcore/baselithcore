@@ -153,7 +153,7 @@ class TestDocumentAnalyzerExample:
 class TestReferenceAgentExample:
     """The reference agent is documentation that has to keep executing.
 
-    It sat in the tree importing ``core.context.tenant_context`` and calling
+    It sat in the tree importing ``baselith.core.context.tenant_context`` and calling
     ``agent.initialize()`` — neither of which exists — so the file every
     best-practices page points at raised ``ImportError`` on its first import.
     Nothing caught it, because nothing ran it.

@@ -1,4 +1,4 @@
-"""Tests for A2A HMAC request signing (core.a2a.security)."""
+"""Tests for A2A HMAC request signing (baselith.core.a2a.security)."""
 
 import time
 
@@ -9,9 +9,9 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from core.a2a.agent_card import AgentCard  # noqa: E402
-from core.a2a.router import create_a2a_router  # noqa: E402
-from core.a2a.security import (  # noqa: E402
+from baselith.core.a2a.agent_card import AgentCard  # noqa: E402
+from baselith.core.a2a.router import create_a2a_router  # noqa: E402
+from baselith.core.a2a.security import (  # noqa: E402
     NONCE_HEADER,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
@@ -19,7 +19,7 @@ from core.a2a.security import (  # noqa: E402
     get_a2a_shared_secret,
     verify_signature,
 )
-from core.a2a.server import EchoA2AServer  # noqa: E402
+from baselith.core.a2a.server import EchoA2AServer  # noqa: E402
 
 SECRET = SecretStr("mesh-shared-secret-with-enough-entropy")
 BODY = b'{"jsonrpc": "2.0", "method": "message/send", "id": "1"}'
@@ -72,7 +72,7 @@ class TestSignVerify:
         explicitly opted into the legacy compatibility window."""
         import time as _time
 
-        from core.a2a.security import _compute_signature
+        from baselith.core.a2a.security import _compute_signature
 
         monkeypatch.delenv("BASELITH_A2A_ALLOW_LEGACY_NONCELESS", raising=False)
         ts = str(int(_time.time()))
@@ -86,7 +86,7 @@ class TestSignVerify:
         rollout possible, with the previous window-bounded replay exposure."""
         import time as _time
 
-        from core.a2a.security import _compute_signature
+        from baselith.core.a2a.security import _compute_signature
 
         monkeypatch.setenv("BASELITH_A2A_ALLOW_LEGACY_NONCELESS", "true")
         ts = str(int(_time.time()))
@@ -244,7 +244,7 @@ class TestRedisNonceLedger:
     request replay once PER REPLICA inside the skew window."""
 
     def test_redis_ledger_rejects_second_use(self) -> None:
-        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+        from baselith.core.a2a.security import _NonceLedger, _RedisNonceLedger
 
         ledger = _RedisNonceLedger(_FakeSyncRedis(), fallback=_NonceLedger())
         assert ledger.register_once("n1", ttl_seconds=10) is True
@@ -253,7 +253,7 @@ class TestRedisNonceLedger:
     def test_redis_error_falls_back_to_process_ledger(self) -> None:
         """A2A availability beats cross-replica strictness: Redis loss
         degrades to the documented per-process posture, never to open."""
-        from core.a2a.security import _NonceLedger, _RedisNonceLedger
+        from baselith.core.a2a.security import _NonceLedger, _RedisNonceLedger
 
         ledger = _RedisNonceLedger(_FakeSyncRedis(fail=True), fallback=_NonceLedger())
         assert ledger.register_once("n1", ttl_seconds=10) is True
@@ -272,7 +272,7 @@ class TestPerPeerSecrets:
         return build_signature_headers(BODY, SecretStr(secret))
 
     def _verify(self, monkeypatch, headers: dict[str, str], peer_secrets: str) -> bool:
-        from core.a2a.security import PEER_HEADER
+        from baselith.core.a2a.security import PEER_HEADER
 
         monkeypatch.setenv("BASELITH_A2A_PEER_SECRETS", peer_secrets)
         return verify_signature(
@@ -285,7 +285,7 @@ class TestPerPeerSecrets:
         )
 
     def test_peer_bound_roundtrip(self, monkeypatch) -> None:
-        from core.a2a.security import PEER_HEADER
+        from baselith.core.a2a.security import PEER_HEADER
 
         headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
         assert headers[PEER_HEADER] == "alpha"
@@ -296,7 +296,7 @@ class TestPerPeerSecrets:
     def test_peer_header_swap_rejected(self, monkeypatch) -> None:
         """The peer id is bound INSIDE the MAC: relabeling a captured request
         as another peer must fail even if the attacker knows both ids."""
-        from core.a2a.security import PEER_HEADER
+        from baselith.core.a2a.security import PEER_HEADER
 
         headers = self._sign_as(monkeypatch, "alpha", "secret-alpha-0123456789")
         headers[PEER_HEADER] = "beta"
@@ -328,7 +328,7 @@ class TestPerPeerSecrets:
         ambiguity inside the MAC message."""
         monkeypatch.setenv("BASELITH_A2A_PEER_ID", "bad.peer")
         monkeypatch.setenv("BASELITH_A2A_SHARED_SECRET", "s" * 20)
-        from core.a2a.security import PEER_HEADER
+        from baselith.core.a2a.security import PEER_HEADER
 
         headers = build_signature_headers(BODY, SecretStr("s" * 20))
         assert PEER_HEADER not in headers
@@ -344,7 +344,7 @@ class TestPeerSecretParsingNeverLogsMaterial:
 
     def _parse(self, monkeypatch, records: list, value: str) -> dict:
         """Parse ``value``, capturing every warning the module emits."""
-        from core.a2a import security
+        from baselith.core.a2a import security
 
         class _Recorder:
             def warning(self, message, *args, **kwargs):

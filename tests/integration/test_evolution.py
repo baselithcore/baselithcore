@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.events import EventBus, EventNames
-from core.learning.evolution import EvolutionService
+from baselith.core.events import EventBus, EventNames
+from baselith.core.learning.evolution import EvolutionService
 
 
 @pytest.fixture
@@ -24,7 +24,9 @@ async def test_evolution_service_low_score(mock_memory_manager, mock_event_bus):
     """Test that low score triggers lesson learned storage."""
 
     # Setup
-    with patch("core.learning.evolution.get_event_bus", return_value=mock_event_bus):
+    with patch(
+        "baselith.core.learning.evolution.get_event_bus", return_value=mock_event_bus
+    ):
         service = EvolutionService(memory_manager=mock_memory_manager)
         service.start()
 
@@ -57,7 +59,9 @@ async def test_evolution_service_low_score(mock_memory_manager, mock_event_bus):
 async def test_evolution_service_high_score(mock_memory_manager, mock_event_bus):
     """Test that high score triggers best practice storage."""
 
-    with patch("core.learning.evolution.get_event_bus", return_value=mock_event_bus):
+    with patch(
+        "baselith.core.learning.evolution.get_event_bus", return_value=mock_event_bus
+    ):
         service = EvolutionService(memory_manager=mock_memory_manager)
         service.start()
 

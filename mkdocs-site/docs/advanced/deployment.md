@@ -148,13 +148,9 @@ services:
       # rate limits / admin lockout see the real client, not nginx — and no
       # other container on app_net can forge one.
       - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-${GATEWAY_IP:-172.28.0.10}}
-      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
-      # Root filesystem is read-only (below): the baselithbot plugin keeps its
-      # secret-store key and state here, on a volume shared with the worker.
-      - plugin_state:/app/state/baselithbot
     networks:
       - app_net
       - obs_net
@@ -298,7 +294,7 @@ services:
       context: .
     container_name: baselith-core-worker
     env_file: configs/.env.production
-    command: python -m core.task_queue.worker
+    command: python -m baselith.core.task_queue.worker
     environment:
       - APP_ENV=production
       - ENVIRONMENT=production
@@ -308,11 +304,9 @@ services:
       - DOCKER_CERT_PATH=/certs/client
       - TELEMETRY_OTEL_ENDPOINT=http://jaeger:4317
       - SENTRY_DSN=${SENTRY_DSN}
-      - BASELITHBOT_STATE_DIR=/app/state/baselithbot
     volumes:
       - ${SANDBOX_CERTS_DIR:-./deploy/sandbox/client-certs}:/certs/client:ro
       - ./data:/app/data
-      - plugin_state:/app/state/baselithbot   # shared with api
     networks:
       - app_net
       - obs_net
@@ -435,7 +429,6 @@ volumes:
   postgres_data:
   qdrant_data:
   prometheus_data:
-  plugin_state:
   tei_embed_models:
   tei_rerank_models:
 
@@ -454,7 +447,7 @@ networks:
     The backend container is intentionally **not** published directly on the host anymore. Route traffic through the reverse proxy only.
     Also avoid weak fallback credentials in production: `DB_PASSWORD` must be explicitly set, and the runtime reads both `APP_ENV` and `ENVIRONMENT` (`APP_ENV` wins) to activate production-only checks consistently. The aliases `prod`, `prd` and `live` now resolve to `production` too, and an environment name the framework does not recognise is treated as production — see [Environment naming](#environment-naming).
     As an extra hardening layer, the production compose enables `no-new-privileges` broadly, drops ambient Linux capabilities for non-privileged services, and keeps the Nginx gateway on a read-only filesystem with dedicated `tmpfs` mounts.
-    The `api` and `worker` containers run with a **read-only root filesystem** too, the posture the Helm chart already had: writable paths are `/tmp`, the `./data` volume and the named `plugin_state` volume mounted at `/app/state/baselithbot` and named by `BASELITHBOT_STATE_DIR`, which both services share so they read one secret-store master key. (It used to be mounted at `/app/plugins/baselithbot/.state`, which the plugin only found through its deprecated in-package fallback; the volume is the same, so an existing deployment keeps its key and stores across the move. The image creates the mount point owned by `appuser` with mode `0700`, so a fresh volume is writable.) Any other plugin that writes under `/app` needs a volume of its own, and `baselith plugin enable` (which rewrites `configs/plugins.yaml`) becomes a deploy-time change, as in Kubernetes. Every service logs through the `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`), so a chatty worker or a flood of edge `429`s cannot fill the host disk, and carries a `pids` limit under `deploy.resources.limits` (1024 for `api`/`worker`, 512 for Postgres, Qdrant and the TEI servers, 256 for FalkorDB, Jaeger and Prometheus, 128 for the gateway) so a fork bomb from a tool result stops at the cgroup. The `worker` disables the inherited image `HEALTHCHECK` (`healthcheck: disable: true`) — it probes `:8000/health`, which an RQ consumer never serves, and flagged the worker unhealthy after every start; `compose.yaml` does the same. The `api` start period is `300s` with `start_interval: 5s`.
+    The `api` and `worker` containers run with a **read-only root filesystem** too, the posture the Helm chart already had: writable paths are `/tmp` and the `./data` volume. Any plugin that writes under `/app` needs a volume of its own, and `baselith plugin enable` (which rewrites `configs/plugins.yaml`) becomes a deploy-time change, as in Kubernetes. Every service logs through the `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`), so a chatty worker or a flood of edge `429`s cannot fill the host disk, and carries a `pids` limit under `deploy.resources.limits` (1024 for `api`/`worker`, 512 for Postgres, Qdrant and the TEI servers, 256 for FalkorDB, Jaeger and Prometheus, 128 for the gateway) so a fork bomb from a tool result stops at the cgroup. The `worker` disables the inherited image `HEALTHCHECK` (`healthcheck: disable: true`) — it probes `:8000/health`, which an RQ consumer never serves, and flagged the worker unhealthy after every start; `compose.yaml` does the same. The `api` start period is `300s` with `start_interval: 5s`.
     The gateway publishes `0.0.0.0:80:80` — **IPv4 only**. A bare `"80:80"` also binds `[::]:80`, and on a dual-stack host IPv6 clients reach nginx through `docker-proxy` with the bridge gateway as their source address, so every IPv6 client shared one rate-limit bucket. Put a real IPv6 listener in front, or run the daemon with `userland-proxy` off, before publishing on `[::]`. Its own healthcheck probes `/__gateway/healthz`, which nginx answers `204` itself, so a backend restart does not flag the gateway unhealthy.
     JSON logs are selected by `LOG_JSON` (default `true`), which the `api` and `worker` services set explicitly; the older `CORE_LOG_FORMAT` and `CORE_LOG_STRUCTURED` are deprecated and have no effect — see [Production Configuration](#production-configuration).
     The runtime images now honor `HOST`, `PORT`, and optional `WEB_CONCURRENCY`, so container startup stays aligned with Compose, health checks, and reverse proxy settings.
@@ -601,7 +594,7 @@ A later pass took it further, to **4.02GB** — see
 
 Two further changes to the same effect:
 
-- **`torchvision` is no longer installed.** Nothing in `core/` or `plugins/`
+- **`torchvision` is no longer installed.** Nothing in `baselith/core/` or `plugins/`
   imports it (the tree's only `torch` import is the Hugging Face provider, and
   `sentence-transformers` needs torchvision only for image models, which no
   plugin loads). The only thing in `uv.lock` that wanted it was mineru's
@@ -631,14 +624,14 @@ the container can execute. Measured on `linux/arm64`: **4.94GB → 4.02GB**.
 |---|---:|---|
 | `chromium` (the full browser) | 641MB | `playwright install chromium` fetches two binaries, and with no channel set `launch(headless=True)` resolves the *headless shell*, not this one. The full browser is what `headless=False` would start — and no stage installs Xvfb or an X client, so a headed launch fails with `Target page, context or browser has been closed`. Verified both ways. The install now passes `--only-shell` |
 | `cuda-bindings`, `cuda-pathfinder` | 27MB | CUDA Python bindings in a CPU-only image. They are linux dependencies of the PyPI `torch` wheel, and the filter that strips the GPU stack matched `^nvidia-` and `^triton` only. The post-install guard missed them too — it checked `site-packages` for a directory starting with `nvidia`, and these install one called `cuda`, so it reported success on every build |
-| the second copy of `core/` and `plugins/` | 25MB | `pip install .` materialises them inside `/install-app` alongside the console script, and `/install-app` precedes `/app` on `PYTHONPATH`. Which copy won depended on the working directory — `/app/core` from `WORKDIR`, `/install-app/…/core` from anywhere else. Since `baselith plugin enable` *writes* `configs/plugins.yaml`, the CLI run from the wrong directory edited a tree the API never read. Only the entry point and its `dist-info` are kept |
+| the second copy of `baselith/core/` and `plugins/` | 25MB | `pip install .` materialises them inside `/install-app` alongside the console script, and `/install-app` precedes `/app` on `PYTHONPATH`. Which copy won depended on the working directory — `/app/core` from `WORKDIR`, `/install-app/…/core` from anywhere else. Since `baselith plugin enable` *writes* `configs/plugins.yaml`, the CLI run from the wrong directory edited a tree the API never read. Only the entry point and its `dist-info` are kept |
 | `pytesseract`, `pdf2image` | ~10MB | Wrappers around the `tesseract` and `pdftoppm` binaries, neither of which the image installs. `pytesseract.get_tesseract_version()` raised `TesseractNotFoundError` in the released image; the plugin caught it and degraded, so the capability was never delivered and never complained |
 | `pyautogui`, `mss` | ~5MB | Both need an X11 display: `KeyError: 'DISPLAY'` and `Cannot connect to display` in a headless container |
 
 One thing was *added* in the same pass, for the opposite reason. spaCy and its
 compiled stack are ~160MB and `enable_spacy_documents` defaults to **on**, but
 no model was baked — so `spacy.load("en_core_web_sm")` raised `E050` and
-`core/nlp/` silently fell back to a blank sentencizer with no NER. The 15MB
+`baselith/core/nlp/` silently fell back to a blank sentencizer with no NER. The 15MB
 model is now installed at a pinned version, and the build fails if the
 installed spaCy cannot load it.
 
@@ -1112,13 +1105,10 @@ server {
     # a plain prefix location would let it fall through to `location /` and
     # its shorter read timeout. The other long-lived streams are listed as
     # well: the run event feed (GET /runs/{id}/events), the MCP Streamable
-    # HTTP transport (POST /mcp, SSE responses) and the baselithbot dashboard
-    # event feed (`/baselithbot/dash/events/stream`: the plugin router is
-    # mounted at `/baselithbot`, its dashboard router at `/dash`, and plugin
-    # routes get no `/v1` alias) — under `location /` each of them was cut
-    # by the read timeout after a minute of silence (an agent waiting on a
+    # HTTP transport (POST /mcp, SSE responses) — under `location /` each of
+    # them was cut by the read timeout after a minute of silence (an agent waiting on a
     # slow LLM call).
-    location ~ ^(/v1)?/(chat/stream|runs/[^/]+/events|mcp)$|^/baselithbot/dash/events/stream$ {
+    location ~ ^(/v1)?/(chat/stream|runs/[^/]+/events|mcp)$ {
         proxy_pass http://backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -1200,7 +1190,7 @@ request costs the app a worker, a quota lookup or a Redis round trip:
 | `api_req` | `location /` and synchronous chat | 30 r/s, burst 120 (`nodelay`) | `429` |
 | `auth_req` | `/admin`, `/admin/*`, `/v1/admin/*`, `/api/auth/*` (token and login endpoints an auth plugin serves) | 30 r/min, burst 20 (`nodelay`) | `429` |
 | `conn_per_ip` | every location | 64 concurrent requests per client | `429` |
-| `stream_conn` | the streaming location (`/chat/stream`, `/runs/{id}/events`, `/mcp`, the baselithbot dashboard feed, and `/v1` aliases) | 16 concurrent streams per client | `429` |
+| `stream_conn` | the streaming location (`/chat/stream`, `/runs/{id}/events`, `/mcp`, and `/v1` aliases) | 16 concurrent streams per client | `429` |
 
 Streams are exempt from `limit_req` — one stream is one request that lives for
 minutes, so its cost is concurrency, which `limit_conn` caps. `/health`
@@ -1399,12 +1389,12 @@ SENTRY_DSN=${SENTRY_DSN}
     the application itself never reads `configs/.env.*` at runtime.
 
     The same holds for **plugin runtime state**: `plugins/*/.state/` is
-    excluded, because a working checkout that has run baselithbot holds its
+    excluded, because a working checkout that has run a plugin may hold its
     secret-store master key (`.state/.secret_key`) there, and an image built
     from it would silently encrypt production credentials with the
     developer's key. Credential, log, SQLite and cache patterns carry a `**/`
     prefix — Docker matches a bare `*.key` only at the context root, so it
-    never reached the `COPY core/` and `COPY plugins/` trees.
+    never reached the `COPY baselith/core/` and `COPY plugins/` trees.
 
 ### Environment naming
 

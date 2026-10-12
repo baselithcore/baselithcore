@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.service import LLMService
+from baselith.core.services.llm.service import LLMService
 
 
 class FakeProvider:
@@ -80,8 +80,8 @@ async def test_generate_response_accepts_sampling_params():
 @pytest.mark.asyncio
 async def test_tree_of_thoughts_reaches_the_llm():
     """ToT must produce real thoughts through the real service API."""
-    from core.reasoning.tot.cache import get_thought_cache
-    from core.reasoning.tot.engine import TreeOfThoughtsAsync
+    from baselith.core.reasoning.tot.cache import get_thought_cache
+    from baselith.core.reasoning.tot.engine import TreeOfThoughtsAsync
 
     get_thought_cache().clear()
     service, provider = _make_service()
@@ -100,7 +100,7 @@ async def test_tree_of_thoughts_reaches_the_llm():
 @pytest.mark.asyncio
 async def test_chain_of_thought_reaches_the_llm():
     """CoT must not degrade to the canned no-LLM fallback."""
-    from core.reasoning.cot import ChainOfThought
+    from baselith.core.reasoning.cot import ChainOfThought
 
     service, provider = _make_service()
     cot = ChainOfThought(llm_service=service)
@@ -114,7 +114,7 @@ async def test_chain_of_thought_reaches_the_llm():
 @pytest.mark.asyncio
 async def test_persona_ensemble_reaches_the_llm():
     """Ensemble perspectives must be real generations, not error strings."""
-    from core.meta.ensemble import PersonaEnsemble
+    from baselith.core.meta.ensemble import PersonaEnsemble
 
     service, provider = _make_service()
     ensemble = PersonaEnsemble()
@@ -134,8 +134,8 @@ async def test_persona_ensemble_reaches_the_llm():
 @pytest.mark.asyncio
 async def test_internal_debate_reaches_the_llm():
     """Debate counterarguments/agreement analysis must use the real API."""
-    from core.meta.debate import InternalDebate
-    from core.meta.types import DebateRole, Perspective
+    from baselith.core.meta.debate import InternalDebate
+    from baselith.core.meta.types import DebateRole, Perspective
 
     service, provider = _make_service()
     debate = InternalDebate(max_rounds=1)

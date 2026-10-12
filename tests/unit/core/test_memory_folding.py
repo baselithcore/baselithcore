@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.memory.folding import ContextFolder, FoldingConfig
-from core.memory.types import MemoryItem, MemoryType
+from baselith.core.memory.folding import ContextFolder, FoldingConfig
+from baselith.core.memory.types import MemoryItem, MemoryType
 
 
 class TestContextFolder:
@@ -49,7 +49,9 @@ class TestContextFolder:
         ]
 
         # Should fold M1, keep M2. Without LLM, it uses simple fallback.
-        with patch("core.services.llm.get_llm_service", side_effect=ImportError):
+        with patch(
+            "baselith.core.services.llm.get_llm_service", side_effect=ImportError
+        ):
             result = await folder.fold(history)
 
         # Check for fallback summary format

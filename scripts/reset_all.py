@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,7 +35,7 @@ logger = get_logger("reset_all")
 
 async def reset_analytics():
     """Reset analytics data (PostgreSQL)."""
-    from core.config import get_storage_config
+    from baselith.core.config import get_storage_config
 
     storage_config = get_storage_config()
 
@@ -103,7 +103,7 @@ async def reset_qdrant():
     """Reset Qdrant vector store."""
     from qdrant_client import AsyncQdrantClient
 
-    from core.config import get_vectorstore_config
+    from baselith.core.config import get_vectorstore_config
 
     logger.info("=" * 50)
     logger.info("RESETTING Qdrant (vector store)...")
@@ -151,7 +151,7 @@ async def reset_qdrant():
 
 def reset_graphdb():
     """Reset GraphDB (FalkorDB/RedisGraph)."""
-    from core.graph import graph_db
+    from baselith.core.graph import graph_db
 
     logger.info("=" * 50)
     logger.info("RESETTING GraphDB (FalkorDB)...")

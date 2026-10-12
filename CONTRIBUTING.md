@@ -37,7 +37,7 @@ rather than open an issue: [SUPPORT.md](SUPPORT.md).
 2. **Features**: New functionality (discuss via Issue first)
 3. **Documentation**: Improvements to the documentation
 4. **Testing**: Increasing test coverage
-5. **Plugins**: New plugins in the `plugins/` directory
+5. **Plugins**: New plugins in the `baselith/plugins/` directory
 
 ### Workflow
 
@@ -108,7 +108,7 @@ python -m pytest
 
 # Run linting
 ruff check .
-mypy core/
+mypy baselith/core/
 ```
 
 ### Dependency policy
@@ -146,8 +146,8 @@ docker compose up -d
 
 ### Fundamental Rule
 
-> **The Core is Sacred**: The `core/` directory contains ONLY domain-agnostic logic.
-> Any domain-specific logic MUST be implemented as a plugin in `plugins/`.
+> **The Core is Sacred**: The `baselith/core/` directory contains ONLY domain-agnostic logic.
+> Any domain-specific logic MUST be implemented as a plugin in `baselith/plugins/`.
 
 ### Python Standards
 
@@ -172,7 +172,7 @@ pre-commit run --all-files
 ### Testing
 
 - **Pytest** for unit and integration tests
-- Minimum enforced **branch**-coverage gate: **78%** (`--cov-fail-under` in
+- Minimum enforced **branch**-coverage gate: **85%** (`--cov-fail-under` in
   [`pytest.ini`](pytest.ini)). It is a ratchet — raise it as coverage grows,
   never lower it to make a branch pass.
 - Strict `mypy` gate on hardened core resilience modules
@@ -193,7 +193,7 @@ python -m pytest tests/unit/core/reasoning/ -v
 
 - Python Files: max **500 lines** (modularize if necessary)
 - Every module must have an `__init__.py` with explicit exports
-- Plugins: follow the standard structure (see `plugins/example-plugin/`)
+- Plugins: follow the standard structure (see `baselith/plugins/example-plugin/`)
 
 ---
 
@@ -205,7 +205,7 @@ Before opening a PR, ensure that:
 
 - [ ] All tests pass: `python -m pytest`
 - [ ] No linting errors: `ruff check .`
-- [ ] Type checking OK: `mypy core/`
+- [ ] Type checking OK: `mypy baselith/core/`
 - [ ] Focused strict typing gates pass: `python scripts/check_official_plugin_typing.py` and `python scripts/check_core_strict_typing.py`
 - [ ] Pre-commit passes: `pre-commit run --all-files`
 - [ ] Documentation updated (if necessary)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.plugins.skills_service import SkillService
+from baselith.core.plugins.skills_service import SkillService
 
 SKILL_MD = """---
 name: fix-parser

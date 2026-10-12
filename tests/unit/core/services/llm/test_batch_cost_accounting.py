@@ -25,12 +25,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.config.quotas import QuotaConfig
-from core.context import set_tenant_context
-from core.quotas.manager import CostBudgetExceededError, QuotaManager
-from core.quotas.store import InMemoryQuotaStore
-from core.services.llm.batch import BatchPrompt, generate_batch
-from core.services.llm.service import LLMService
+from baselith.core.config.quotas import QuotaConfig
+from baselith.core.context import set_tenant_context
+from baselith.core.quotas.manager import CostBudgetExceededError, QuotaManager
+from baselith.core.quotas.store import InMemoryQuotaStore
+from baselith.core.services.llm.batch import BatchPrompt, generate_batch
+from baselith.core.services.llm.service import LLMService
 
 pytestmark = [pytest.mark.unit]
 
@@ -48,7 +48,7 @@ def _isolated_token_ledger():
     so anything reported here would accumulate for the rest of the session
     and trip its 10 000-token agent cap in unrelated tests.
     """
-    from core.middleware.cost_control import _cost_context
+    from baselith.core.middleware.cost_control import _cost_context
 
     token = _cost_context.set(None)
     try:
@@ -65,7 +65,9 @@ def booked(monkeypatch):
     async def _record(usd, **_kwargs):
         recorded.append(usd)
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
     return recorded
 
 
@@ -119,7 +121,7 @@ def _errored(custom_id):
 
 class TestTheInvoiceMatchesTheLedger:
     async def test_one_entry_books_half_the_interactive_price(self, booked):
-        from core.quotas.cost_enforcement import llm_call_cost_usd
+        from baselith.core.quotas.cost_enforcement import llm_call_cost_usd
 
         service = FakeAnthropicService(FakeBatchesAPI([_succeeded("a")]))
 
@@ -173,7 +175,7 @@ class TestTheJobIsGatedBeforeItIsSubmitted:
         set_tenant_context("acme")
         await manager.record_tenant_cost("acme", 1.50)
         monkeypatch.setattr(
-            "core.quotas.cost_enforcement.get_quota_manager", lambda: manager
+            "baselith.core.quotas.cost_enforcement.get_quota_manager", lambda: manager
         )
         batches = FakeBatchesAPI([_succeeded("a")])
         service = FakeAnthropicService(batches)
@@ -187,7 +189,7 @@ class TestTheJobIsGatedBeforeItIsSubmitted:
 class TestTheSequentialFallbackKeepsTheFullRate:
     async def test_it_bills_the_interactive_price(self, booked):
         """It buys no discount, so ``batch=True`` here would halve a real bill."""
-        with patch("core.services.llm.service.get_llm_config") as config:
+        with patch("baselith.core.services.llm.service.get_llm_config") as config:
             config.return_value = Mock(
                 provider="openai",
                 model=MODEL,
@@ -202,7 +204,7 @@ class TestTheSequentialFallbackKeepsTheFullRate:
         service.cost_tracker = None
 
         async def _generate(**kwargs):
-            from core.services.llm.usage import Usage
+            from baselith.core.services.llm.usage import Usage
 
             kwargs["usage_sink"].append(Usage(input_tokens=1000, output_tokens=1000))
             return "hi", 2000

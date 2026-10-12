@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.db import reachability
+from baselith.core.db import reachability
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def _storage(enabled: bool = True) -> SimpleNamespace:
 
 
 async def test_probe_against_a_closed_port_is_fast_and_recorded() -> None:
-    with patch("core.config.get_storage_config", return_value=_storage()):
+    with patch("baselith.core.config.get_storage_config", return_value=_storage()):
         started = time.monotonic()
         assert await reachability.probe_postgres(timeout=2.0) is False
     assert time.monotonic() - started < 3.0
@@ -41,7 +41,7 @@ async def test_probe_is_bounded_when_connect_hangs() -> None:
         await asyncio.sleep(60)
 
     with (
-        patch("core.config.get_storage_config", return_value=_storage()),
+        patch("baselith.core.config.get_storage_config", return_value=_storage()),
         patch("psycopg.AsyncConnection.connect", hang),
     ):
         started = time.monotonic()
@@ -52,7 +52,7 @@ async def test_probe_is_bounded_when_connect_hangs() -> None:
 async def test_probe_records_success() -> None:
     conn = SimpleNamespace(execute=AsyncMock(), close=AsyncMock())
     with (
-        patch("core.config.get_storage_config", return_value=_storage()),
+        patch("baselith.core.config.get_storage_config", return_value=_storage()),
         patch("psycopg.AsyncConnection.connect", AsyncMock(return_value=conn)),
     ):
         assert await reachability.probe_postgres() is True
@@ -62,13 +62,13 @@ async def test_probe_records_success() -> None:
 
 
 async def test_disabled_postgres_records_nothing() -> None:
-    with patch("core.config.get_storage_config", return_value=_storage(False)):
+    with patch("baselith.core.config.get_storage_config", return_value=_storage(False)):
         assert await reachability.probe_postgres() is False
     assert reachability.last_postgres_probe() is None
 
 
 async def test_core_schema_init_skips_alembic_when_the_probe_saw_the_db_down() -> None:
-    from core.db import schema
+    from baselith.core.db import schema
 
     reachability._last_outcome = False
     init_db = AsyncMock()
@@ -78,7 +78,7 @@ async def test_core_schema_init_skips_alembic_when_the_probe_saw_the_db_down() -
 
 
 async def test_core_schema_init_runs_when_the_db_answered() -> None:
-    from core.db import schema
+    from baselith.core.db import schema
 
     reachability._last_outcome = True
     init_db = AsyncMock()

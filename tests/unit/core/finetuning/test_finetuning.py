@@ -4,15 +4,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.finetuning.dataset import DatasetBuilder
-from core.finetuning.models import (
+from baselith.core.finetuning.dataset import DatasetBuilder
+from baselith.core.finetuning.models import (
     FineTuneConfig,
     FineTuneJob,
     FineTuneResult,
     TrainingStatus,
 )
-from core.finetuning.pipeline import FineTuningPipeline
-from core.finetuning.providers import OpenAIProvider, TogetherProvider
+from baselith.core.finetuning.pipeline import FineTuningPipeline
+from baselith.core.finetuning.providers import OpenAIProvider, TogetherProvider
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ async def test_start_training_openai(pipeline, mock_openai_provider):
 
     # Mock file preparation to avoid real file operations
     with patch(
-        "core.finetuning.pipeline.FineTuningPipeline._prepare_file"
+        "baselith.core.finetuning.pipeline.FineTuningPipeline._prepare_file"
     ) as mock_prep:
         mock_prep.return_value = "dummy.jsonl"
 

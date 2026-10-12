@@ -1,0 +1,65 @@
+"""
+Swarm Intelligence Module
+
+Provides emergent multi-agent coordination through swarm behaviors.
+Implements auction-based task allocation, pheromone signaling, and
+dynamic team formation without centralized control.
+
+Key Concepts:
+- Colony: A group of agents with shared goals
+- Auction: Decentralized task allocation mechanism
+- Pheromones: Virtual signals for indirect communication
+- Team Formation: Dynamic grouping based on capabilities
+"""
+
+from baselith.core.config.swarm import AuctionConfig, SwarmConfig, TeamConfig
+
+from .auction import TaskAuction
+from .colony import Colony
+from .pheromones import PheromoneSystem
+from .team_formation import TeamFormationEngine
+from .types import (
+    AgentProfile,
+    AgentStatus,
+    Bid,
+    Capability,
+    Handoff,
+    HandoffBrief,
+    MessageType,
+    SwarmMessage,
+    Task,
+    TaskPriority,
+    TeamFormation,
+    compress_handoff_context,
+)
+
+BatchResult = Colony.BatchResult
+
+__all__ = [
+    # Types
+    "AgentProfile",
+    "Task",
+    "Bid",
+    "SwarmMessage",
+    "TeamFormation",
+    "AgentStatus",
+    "MessageType",
+    "TaskPriority",
+    "Capability",
+    "Handoff",
+    "HandoffBrief",
+    "compress_handoff_context",
+    # Config
+    "SwarmConfig",
+    "AuctionConfig",
+    "TeamConfig",
+    # Colony
+    "Colony",
+    "BatchResult",
+    # Auction
+    "TaskAuction",
+    # Pheromones
+    "PheromoneSystem",
+    # Team
+    "TeamFormationEngine",
+]

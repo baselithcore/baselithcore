@@ -1,0 +1,500 @@
+"""
+Swarm Handler for Orchestrator.
+
+Enables decentralized multi-agent coordination for complex tasks
+using the Swarm Colony infrastructure.
+
+Use cases:
+- Large document analysis (split + parallel + merge)
+- Multi-perspective reasoning
+- Complex research tasks requiring diverse expertise
+- Collaborative problem-solving
+"""
+
+import asyncio
+import hashlib
+from collections.abc import Callable
+from typing import Any
+
+from baselith.core.config.swarm import SwarmConfig
+from baselith.core.observability.agent_spans import agent_span
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.autonomy import ApprovalPendingError
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_scope import (
+    bind_checkpoint,
+    current_checkpoint,
+    durable_step,
+    resolve_checkpoint,
+)
+from baselith.core.orchestration.enforcement import (
+    enforce_iteration,
+    enforce_tool_invocation,
+)
+from baselith.core.orchestration.handlers import BaseFlowHandler
+
+# Virtual-agent specs live in a sibling module (500-line cap); re-exported
+# so existing imports from swarm_handler keep working.
+from baselith.core.orchestration.handlers.swarm_agents import (
+    DECOMPOSITION_PROMPT_TEMPLATE as DECOMPOSITION_PROMPT_TEMPLATE,
+)
+from baselith.core.orchestration.handlers.swarm_agents import (
+    DEFAULT_VIRTUAL_AGENTS as DEFAULT_VIRTUAL_AGENTS,
+)
+from baselith.core.orchestration.handlers.swarm_agents import (
+    VirtualAgentSpec as VirtualAgentSpec,
+)
+from baselith.core.orchestration.handlers.swarm_agents import (
+    build_synthesis_prompt,
+    decompose_task,
+    gather_memory_context,
+    resolve_agent_persona,
+)
+from baselith.core.orchestration.handlers.swarm_agents import (
+    max_dynamic_subtasks as max_dynamic_subtasks,
+)
+
+# Per-request / per-tenant colony ownership lives in a sibling module (500-line
+# cap); MAX_TENANT_COLONIES is re-exported so callers can read the bound.
+from baselith.core.orchestration.handlers.swarm_colony import (
+    MAX_TENANT_COLONIES as MAX_TENANT_COLONIES,
+)
+from baselith.core.orchestration.handlers.swarm_colony import (
+    ColonyScopeMixin,
+    request_colony_scope,
+)
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.types import (
+    AgentProfile,
+    Capability,
+    Task,
+    TaskPriority,
+)
+
+logger = get_logger(__name__)
+
+
+class SwarmHandler(ColonyScopeMixin, BaseFlowHandler):
+    """
+    Handler for 'collaborative_task' intent.
+
+    Uses Swarm Colony for decentralized multi-agent coordination
+    on complex tasks that benefit from parallel processing and
+    diverse perspectives.
+
+    Workflow:
+    1. Break down complex query into sub-tasks
+    2. Create Task objects for each sub-task
+    3. Submit tasks to Colony for auction-based allocation
+    4. Coordinate virtual agent execution
+    5. Aggregate and synthesize results
+
+    Example:
+        ```python
+        handler = SwarmHandler()
+        result = await handler.handle(
+            query="Deep research on Machine Learning trends in 2024",
+            context={}
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        colony_config: SwarmConfig | None = None,
+        virtual_agents: list[VirtualAgentSpec] | None = None,
+        llm_service: Any | None = None,
+        colony_factory: Callable[[], Colony] | None = None,
+        memory_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Initialize the swarm handler.
+
+        Args:
+            colony_config: Configuration for the swarm colony.
+            virtual_agents: Optional custom virtual agent specifications.
+            llm_service: Optional LLM service for task decomposition and synthesis.
+            colony_factory: Optional zero-argument factory minting the colony
+                for one request. Defaults to a fresh ``Colony`` carrying the
+                virtual-agent roster. The handler is process-wide, so the
+                colony must never be — see
+                :mod:`baselith.core.orchestration.handlers.swarm_colony`.
+            memory_manager: Optional ``AgentMemory`` attached to every colony
+                the default factory mints (recall + simulation write-back).
+            *args, **kwargs: Passed to BaseFlowHandler.
+        """
+        super().__init__(*args, **kwargs)
+
+        if colony_config:
+            self.colony_config = colony_config
+        else:
+            from baselith.core.config.swarm import get_swarm_config
+
+            self.colony_config = get_swarm_config()
+
+        self._virtual_agents = virtual_agents or DEFAULT_VIRTUAL_AGENTS
+        self._memory_manager = memory_manager
+        self._init_colony_scope(colony_factory or self._build_colony)
+
+        if llm_service:
+            self._llm_service = llm_service
+        else:
+            # Lazy load will handle fallback
+            self._llm_service = None
+
+    def _build_colony(self) -> Colony:
+        """Mint a colony carrying the handler's virtual-agent roster."""
+        colony = Colony(config=self.colony_config, memory_manager=self._memory_manager)
+        self._register_virtual_agents(colony)
+        return colony
+
+    @property
+    def llm_service(self) -> Any:
+        """Lazy load LLM service."""
+        if self._llm_service is None:
+            try:
+                from baselith.core.services.llm import get_llm_service
+
+                self._llm_service = get_llm_service()
+            except Exception as e:
+                logger.warning(f"Could not load LLM service: {e}")
+        return self._llm_service
+
+    def _register_virtual_agents(self, colony: Colony | None = None) -> None:
+        """Register the virtual-agent roster with ``colony`` (default: current)."""
+        target = self._colony if colony is None else colony
+        for spec in self._virtual_agents:
+            profile = AgentProfile(
+                id=f"virtual_{spec.role}",
+                name=spec.name,
+                capabilities=[
+                    Capability(name=cap, proficiency=0.9) for cap in spec.capabilities
+                ],
+            )
+            target.register_agent(profile)
+            logger.debug(f"Registered virtual agent: {spec.name}")
+
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        """
+        Handle collaborative task request.
+
+        The request runs inside its own :class:`~baselith.core.swarm.colony.Colony`
+        (see :func:`~baselith.core.orchestration.handlers.swarm_colony.request_colony_scope`):
+        the handler is process-wide, so a shared colony would carry one
+        request's pheromone field, agent roster and auction state into the
+        next one — across tenants.
+
+        Args:
+            query: User's complex query/task
+            context: Optional execution context
+
+        Returns:
+            Dict with:
+                - response: Synthesized final answer
+                - sub_results: Results from individual agents
+                - coordination_stats: Colony statistics
+        """
+        parent = resolve_checkpoint(context.get("checkpoint"))
+        scope = parent.scope("swarm", {"query": query}) if parent else None
+        # Under a checkpoint the decomposition, every sub-task result and the
+        # synthesis are recorded steps of this scope (resume skips them).
+        with (
+            request_colony_scope(self.new_request_colony(context)),
+            bind_checkpoint(scope),
+        ):
+            return await self._handle_in_colony(query, context)
+
+    async def _handle_in_colony(
+        self, query: str, context: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Body of :meth:`handle`, run with a request-scoped colony bound."""
+        # Ids of agents minted for THIS request. Belt and braces: the colony
+        # is already per-request, but subclasses (and the tenant-scoped
+        # fallback colony) still rely on the explicit cleanup, so stale
+        # agents can never compete in a later request's auctions.
+        dynamic_agent_ids: list[str] = []
+        try:
+            # DEBUG: the raw user query is free-text PII — keep it out of
+            # INFO-level aggregated logs.
+            logger.debug(f"Starting collaborative task: {query[:100]}...")
+
+            # Step 1: Decompose task into sub-tasks
+            sub_tasks = await self._decompose_task(query, context, dynamic_agent_ids)
+            if not sub_tasks:
+                return self._fallback_response(query)
+
+            # Step 2: Submit tasks to colony and collect results
+            sub_results = await self._execute_subtasks(sub_tasks, query, context)
+
+            # Step 3: Synthesize final response
+            final_response = await self._synthesize_results(query, sub_results, context)
+
+            return {
+                "response": final_response,
+                "sub_results": sub_results,
+                "coordination_stats": self._colony.get_stats(),
+                "metadata": {
+                    "subtasks_count": len(sub_tasks),
+                    "agents_used": len(set(r.get("agent") for r in sub_results)),
+                    "approach": "swarm_collaborative",
+                },
+            }
+
+        except (ApprovalPendingError, CheckpointConflictError):
+            raise  # a durable pause / lost lease: the execution mixin's call
+        except Exception as e:
+            logger.error(f"Error in SwarmHandler: {e}", exc_info=True)
+            return self._error_response(str(e))
+        finally:
+            for agent_id in dynamic_agent_ids:
+                self._colony.unregister_agent(agent_id)
+
+    async def _decompose_task(
+        self,
+        query: str,
+        context: dict[str, Any],
+        dynamic_agent_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Decompose the query into sub-tasks (see swarm_agents.decompose_task).
+
+        ``dynamic_agent_ids`` is an output list of agents registered for this
+        request, so the caller can unregister them when the request completes.
+        """
+        del context  # reserved for future budget-aware decomposition
+        checkpoint = current_checkpoint()
+        return await decompose_task(
+            self.llm_service,
+            self._colony,
+            query,
+            [] if dynamic_agent_ids is None else dynamic_agent_ids,
+            **({"checkpoint": checkpoint} if checkpoint is not None else {}),
+        )
+
+    async def _execute_subtasks(
+        self,
+        sub_tasks: list[dict[str, Any]],
+        original_query: str,
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Execute sub-tasks through the swarm colony in parallel.
+
+        Orchestrates the dispatch of tasks to available virtual agents
+        and collects their individual results.
+
+        Args:
+            sub_tasks: List of task specifications.
+            original_query: The root goal for context.
+            context: Orchestration context carrying the per-request loop
+                budget; each sub-task is counted against the iteration and
+                tool-call caps (fail-closed) so a runaway decomposition cannot
+                fan out unbounded LLM work.
+
+        Returns:
+            List[Dict[str, Any]]: Aggregated results from all executed tasks.
+        """
+        results = []
+
+        async def execute_single(task_def: dict[str, Any]) -> dict[str, Any]:
+            """Auction one sub-task to a capable agent and run it."""
+            # Enforce the per-request loop budget: each sub-task is one
+            # iteration + one tool call. Raises BudgetExceededError when a cap
+            # is hit, which surfaces as a failed sub-task result below.
+            enforce_iteration(context)
+            await enforce_tool_invocation(
+                context,
+                f"swarm_subtask:{task_def.get('capability', 'analysis')}",
+            )
+
+            task = Task(
+                description=task_def["description"],
+                required_capabilities=[task_def.get("capability", "analysis")],
+                priority=TaskPriority.NORMAL,
+                parameters={"original_query": original_query},
+            )
+
+            # Submit to colony
+            assigned_agent = await self._colony.submit_task(task)
+            if not assigned_agent:
+                return {
+                    "task": task_def["description"],
+                    "agent": None,
+                    "result": "No agent available",
+                    "success": False,
+                }
+
+            # Get agent profile
+            agent = self._colony.get_agent(assigned_agent)
+            if not agent:
+                return {
+                    "task": task_def["description"],
+                    "agent": assigned_agent,
+                    "result": "Agent not found",
+                    "success": False,
+                }
+
+            # Execute task with LLM (simulating agent execution). The agent
+            # span records this sub-agent under the flow handler that spawned
+            # it — the one place a real agent-to-agent edge is observable.
+            with agent_span(agent.name, kind="swarm"):
+                result = await self._execute_with_agent(task_def, agent)
+
+            # Mark task complete
+            self._colony.complete_task(task.id, success=True, result=result)
+
+            return {
+                "task": task_def["description"],
+                "agent": agent.name,
+                "result": result,
+                "success": True,
+            }
+
+        # Execute sub-tasks in parallel, but bound concurrency: each sub-task is
+        # a full LLM call, so gathering an entire large decomposition at once
+        # would open that many simultaneous provider calls (429 storm + a cost
+        # spike the per-request loop budget does not gate, since it caps the
+        # TOTAL count, not how many run concurrently). The semaphore is created
+        # here so it binds to the running loop.
+        max_concurrency = max(1, self.colony_config.max_concurrent_subtasks)
+        semaphore = asyncio.Semaphore(max_concurrency)
+        checkpoint = current_checkpoint()
+
+        async def _bounded(index: int, task_def: dict[str, Any]) -> dict[str, Any]:
+            async with semaphore:
+                # A recorded sub-task replays: no auction, no LLM call, no
+                # budget charge. Failures raise out of the step unrecorded.
+                result: dict[str, Any] = await durable_step(
+                    checkpoint,
+                    "swarm_subtask",
+                    {"index": index, "task": task_def},
+                    lambda: execute_single(task_def),
+                    category="swarm",
+                )
+                return result
+
+        tasks_async = [_bounded(i, t) for i, t in enumerate(sub_tasks)]
+        results = await asyncio.gather(*tasks_async, return_exceptions=True)
+
+        # Handle exceptions
+        processed_results: list[dict[str, Any]] = []
+        for i, r in enumerate(results):
+            if isinstance(r, BaseException):
+                processed_results.append(
+                    {
+                        "task": sub_tasks[i]["description"],
+                        "agent": None,
+                        "result": f"Error: {r!s}",
+                        "success": False,
+                    }
+                )
+            elif isinstance(r, dict):
+                processed_results.append(r)
+
+        return processed_results
+
+    async def _execute_with_agent(
+        self, task_def: dict[str, Any], agent: AgentProfile
+    ) -> str:
+        """
+        Execute a task with memory-aware virtual agent.
+        """
+        if not self.llm_service:
+            return f"[{agent.name}] Analysis not available without LLM."
+
+        # 1. Fetch memory context from the request's colony (recall + GraphRAG).
+        memory_context = await gather_memory_context(
+            self._colony, task_def["description"]
+        )
+
+        # 2. Persona + per-agent model override (cheap executor / strong
+        #    reviewer split), from the profile metadata or the static spec.
+        system_prompt, model_override = resolve_agent_persona(
+            self._virtual_agents, agent
+        )
+
+        prompt = f"""{system_prompt}
+
+{memory_context}
+
+Assigned task: {task_def["description"]}
+
+Provide a detailed response, incorporating relevant memories and relationship data if provided.
+"""
+        try:
+            answer: str = await self.llm_service.generate_response(
+                prompt, model=model_override
+            )
+            return answer
+        except Exception as e:
+            logger.warning(
+                "swarm_agent_llm_call_failed",
+                extra={"agent": agent.name},
+                exc_info=True,
+            )
+            return f"[{agent.name}] Error: {e!s}"
+
+    async def _synthesize_results(
+        self,
+        original_query: str,
+        sub_results: list[dict[str, Any]],
+        context: dict[str, Any],
+    ) -> str:
+        """
+        Synthesize sub-task results into a coherent final response.
+
+        Args:
+            original_query: The initial user prompt.
+            sub_results: Collected data from all agents.
+            context: Original execution context.
+
+        Returns:
+            str: A unified response that answers the original query.
+        """
+        if not self.llm_service:
+            # Simple concatenation fallback
+            parts = []
+            for r in sub_results:
+                if r.get("success"):
+                    parts.append(
+                        f"**{r.get('agent', 'Agent')}**: {r.get('result', '')}"
+                    )
+            return "\n\n".join(parts) if parts else "No results available."
+
+        results_text, prompt = build_synthesis_prompt(original_query, sub_results)
+        try:
+            synthesis: str = await durable_step(
+                current_checkpoint(),
+                "swarm_synthesize",
+                {"prompt": hashlib.sha256(prompt.encode()).hexdigest()[:16]},
+                lambda: self.llm_service.generate_response(prompt),
+                category="swarm",
+            )
+            return synthesis
+        except CheckpointConflictError:
+            raise
+        except Exception as e:
+            logger.error(f"Synthesis failed: {e}")
+            # Fallback
+            return results_text if results_text else "Synthesis not available."
+
+    def _fallback_response(self, query: str) -> dict[str, Any]:
+        """Generate the fallback result used when decomposition fails."""
+        return {
+            "response": f"I couldn't decompose the request into sub-tasks. "
+            f"Trying with a direct approach: {query}",
+            "sub_results": [],
+            "coordination_stats": self._colony.get_stats(),
+            "metadata": {"approach": "fallback"},
+        }
+
+    def _error_response(self, error_message: str) -> dict[str, Any]:
+        """Create the standardized error result for the swarm handler."""
+        return {
+            "response": f"Error in task coordination: {error_message}",
+            "error": True,
+            "sub_results": [],
+            "coordination_stats": self._colony.get_stats(),
+            "metadata": {"error": error_message},
+        }

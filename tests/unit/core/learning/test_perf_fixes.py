@@ -14,10 +14,13 @@ from unittest.mock import patch
 
 import pytest
 
-from core.learning.auto_finetuning import AutoFineTuneConfig, AutoFineTuningService
-from core.learning.experience_buffer import ExperienceReplay
-from core.learning.learning_loop import ContinuousLearner
-from core.learning.types import Experience
+from baselith.core.learning.auto_finetuning import (
+    AutoFineTuneConfig,
+    AutoFineTuningService,
+)
+from baselith.core.learning.experience_buffer import ExperienceReplay
+from baselith.core.learning.learning_loop import ContinuousLearner
+from baselith.core.learning.types import Experience
 
 
 def _recompute_avg(service: AutoFineTuningService) -> float | None:
@@ -39,7 +42,7 @@ class TestRunningSumAverage:
             max_buffer_size=max_buffer_size,
             auto_trigger=False,
         )
-        with patch("core.learning.auto_finetuning.get_event_bus"):
+        with patch("baselith.core.learning.auto_finetuning.get_event_bus"):
             service = AutoFineTuningService(config=config)
         service._running = True
         return service

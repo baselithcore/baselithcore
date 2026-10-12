@@ -18,7 +18,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.chat as chat_module
+import baselith.plugins.api_routers.chat as chat_module
 
 
 class _StubRequest:
@@ -175,7 +175,7 @@ class TestErrorPayload:
     def test_the_error_event_carries_a_json_code_and_request_id(self) -> None:
         import json
 
-        from core.observability.setup import request_id_ctx
+        from baselith.core.observability.setup import request_id_ctx
 
         async def explodes() -> AsyncIterator[str]:
             raise RuntimeError("provider read failed: token abc123")
@@ -259,7 +259,7 @@ class TestHeartbeat:
     ) -> None:
         from types import SimpleNamespace
 
-        import plugins.api_routers._sse as sse_module
+        import baselith.plugins.api_routers._sse as sse_module
 
         monkeypatch.setattr(
             sse_module,

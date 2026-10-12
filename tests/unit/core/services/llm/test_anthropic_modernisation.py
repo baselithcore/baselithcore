@@ -37,11 +37,13 @@ def _client(response=None):
 
 def _provider(client, **kwargs):
     with patch(
-        "core.services.llm.providers.anthropic_provider.anthropic"
+        "baselith.core.services.llm.providers.anthropic_provider.anthropic"
     ) as mock_anthropic:
         mock_anthropic.AsyncAnthropic.return_value = client
         mock_anthropic.NOT_GIVEN = "not_given"
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test", **kwargs)
         provider._ensure_client()
@@ -218,7 +220,7 @@ class TestBetasAndPassthrough:
 @pytest.mark.asyncio
 class TestForcedToolChoice:
     async def test_forced_choice_is_downgraded_where_it_would_400(self):
-        from core.services.llm.tool_calling import LLMToolSpec, ToolChoice
+        from baselith.core.services.llm.tool_calling import LLMToolSpec, ToolChoice
 
         client = _client()
         provider = _provider(client)
@@ -233,7 +235,7 @@ class TestForcedToolChoice:
         }
 
     async def test_forced_choice_survives_elsewhere(self):
-        from core.services.llm.tool_calling import LLMToolSpec, ToolChoice
+        from baselith.core.services.llm.tool_calling import LLMToolSpec, ToolChoice
 
         client = _client()
         provider = _provider(client)
@@ -283,7 +285,7 @@ class TestOutputConfigMerging:
         assert client.messages.create.call_args.kwargs["output_config"] == {"k": "v"}
 
     async def test_response_format_wins_over_a_caller_format(self):
-        from core.services.llm.tool_calling import ResponseFormat
+        from baselith.core.services.llm.tool_calling import ResponseFormat
 
         client = _client()
         provider = _provider(client)
@@ -330,7 +332,9 @@ class TestCallerEffortIsClamped:
 
     @staticmethod
     def _built(model, caller_effort):
-        from core.services.llm.providers._anthropic_request import build_request_kwargs
+        from baselith.core.services.llm.providers._anthropic_request import (
+            build_request_kwargs,
+        )
 
         return build_request_kwargs(model, {"output_config": {"effort": caller_effort}})
 
@@ -349,7 +353,9 @@ class TestCallerEffortIsClamped:
         assert built["output_config"] == {"effort": "xhigh"}
 
     def test_other_caller_keys_survive_the_effort_being_dropped(self):
-        from core.services.llm.providers._anthropic_request import build_request_kwargs
+        from baselith.core.services.llm.providers._anthropic_request import (
+            build_request_kwargs,
+        )
 
         built = build_request_kwargs(
             "claude-haiku-4-5", {"output_config": {"effort": "max", "keep": 1}}

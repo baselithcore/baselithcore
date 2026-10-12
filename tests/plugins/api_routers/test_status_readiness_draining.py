@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import Response
 
-from core.lifecycle import drain
-from plugins.api_routers import status
+from baselith.core.lifecycle import drain
+from baselith.plugins.api_routers import status
 
 
 @pytest.fixture(autouse=True)

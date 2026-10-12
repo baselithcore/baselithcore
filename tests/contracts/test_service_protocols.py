@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator, Iterator, Sequence
 
 import pytest
 
-from core.interfaces import (
+from baselith.core.interfaces import (
     ChatServiceProtocol,
     EmbedderProtocol,
     LLMServiceProtocol,

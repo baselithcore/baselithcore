@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-import core.middleware._auth_memo as auth_memo
-from core.auth import AuthManager, AuthRole, AuthUser
-from core.di.container import ServiceRegistry
+import baselith.core.middleware._auth_memo as auth_memo
+from baselith.core.auth import AuthManager, AuthRole, AuthUser
+from baselith.core.di.container import ServiceRegistry
 
 _USER = AuthUser(user_id="u1", roles={AuthRole.USER}, tenant_id="t1")
 

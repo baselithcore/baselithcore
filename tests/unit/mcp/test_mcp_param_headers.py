@@ -12,13 +12,13 @@ import base64
 
 import pytest
 
-from core.mcp.http_headers import extract_param_headers, validate_param_headers
-from core.mcp.param_headers import (
+from baselith.core.mcp.http_headers import extract_param_headers, validate_param_headers
+from baselith.core.mcp.param_headers import (
     InvalidParamAnnotation,
     header_annotations,
     validate_annotations,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 _SCHEMA = {
     "type": "object",
@@ -160,7 +160,7 @@ class TestServerValidation:
         )
 
     def test_missing_header_is_rejected(self) -> None:
-        from core.mcp.errors import HeaderMismatch
+        from baselith.core.mcp.errors import HeaderMismatch
 
         with pytest.raises(HeaderMismatch, match="Mcp-Param-Region"):
             validate_param_headers(
@@ -168,7 +168,7 @@ class TestServerValidation:
             )
 
     def test_diverging_header_is_rejected(self) -> None:
-        from core.mcp.errors import HeaderMismatch
+        from baselith.core.mcp.errors import HeaderMismatch
 
         with pytest.raises(HeaderMismatch):
             validate_param_headers(

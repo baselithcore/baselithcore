@@ -1,5 +1,5 @@
 """
-Tests for core/services/llm/providers/openai_provider.py
+Tests for baselith/core/services/llm/providers/openai_provider.py
 
 Tests OpenAI LLM provider with mocked API calls.
 """
@@ -12,13 +12,13 @@ import pytest
 class TestOpenAIProviderInit:
     """Tests for OpenAIProvider initialization."""
 
-    @patch("core.services.llm.providers.openai_provider.openai")
+    @patch("baselith.core.services.llm.providers.openai_provider.openai")
     def test_init_with_api_key(self, mock_openai):
         """Verify provider initializes with API key."""
         mock_client = MagicMock()
         mock_openai.AsyncOpenAI.return_value = mock_client
 
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         provider = OpenAIProvider(api_key="sk-test-key")
         # Force initialization
@@ -33,22 +33,22 @@ class TestOpenAIProviderInit:
         assert "timeout" in call_kwargs
         assert provider.client is not None
 
-    @patch("core.services.llm.providers.openai_provider.openai")
+    @patch("baselith.core.services.llm.providers.openai_provider.openai")
     def test_init_without_api_key_raises(self, mock_openai):
         """Verify provider raises error without API key."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         with pytest.raises(LLMProviderError) as exc_info:
             OpenAIProvider(api_key="")
 
         assert "API key is required" in str(exc_info.value)
 
-    @patch("core.services.llm.providers.openai_provider.openai")
+    @patch("baselith.core.services.llm.providers.openai_provider.openai")
     def test_init_with_none_api_key_raises(self, mock_openai):
         """Verify provider raises error with None API key."""
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         with pytest.raises(LLMProviderError):
             OpenAIProvider(api_key=None)
@@ -67,9 +67,13 @@ class TestOpenAIProviderGenerate:
         mock_response.usage.total_tokens = 25
         mock_client.chat.completions.create.return_value = mock_response
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             content, tokens = await provider.generate("Test prompt", model="gpt-4")
@@ -86,9 +90,13 @@ class TestOpenAIProviderGenerate:
         mock_response.usage.total_tokens = 10
         mock_client.chat.completions.create.return_value = mock_response
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             await provider.generate("Prompt", model="gpt-4", json_mode=True)
@@ -105,9 +113,13 @@ class TestOpenAIProviderGenerate:
         mock_response.usage = None
         mock_client.chat.completions.create.return_value = mock_response
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             content, tokens = await provider.generate("Prompt", model="gpt-4")
@@ -120,10 +132,14 @@ class TestOpenAIProviderGenerate:
         mock_client = AsyncMock()
         mock_client.chat.completions.create.side_effect = Exception("API error")
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.exceptions import LLMProviderError
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.exceptions import LLMProviderError
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
 
@@ -166,9 +182,13 @@ class TestOpenAIProviderGenerateStream:
 
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             chunks = []
@@ -203,9 +223,13 @@ class TestOpenAIProviderGenerateStream:
 
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             chunks = []
@@ -221,10 +245,14 @@ class TestOpenAIProviderGenerateStream:
         mock_client = AsyncMock()
         mock_client.chat.completions.create.side_effect = Exception("Stream error")
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.exceptions import LLMProviderError
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.exceptions import LLMProviderError
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
 
@@ -247,9 +275,13 @@ class TestOpenAIProviderGenerateStream:
 
         mock_client.chat.completions.create.return_value = AsyncIterator(mock_chunks)
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             chunks = []
@@ -271,7 +303,7 @@ class TestOpenAIStructuredSchema:
         """
         from pydantic import BaseModel
 
-        from core.services.llm.tool_calling import ResponseFormat
+        from baselith.core.services.llm.tool_calling import ResponseFormat
 
         class Claim(BaseModel):
             id: str
@@ -285,9 +317,13 @@ class TestOpenAIStructuredSchema:
         mock_response.usage.total_tokens = 12
         mock_client.chat.completions.create.return_value = mock_response
 
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             await provider.generate_structured(
@@ -306,7 +342,7 @@ class TestOpenAIStructuredSchema:
 
     async def test_non_strict_schemas_are_sent_unchanged(self):
         """Without strict enforcement the caller's schema is the contract."""
-        from core.services.llm.tool_calling import ResponseFormat
+        from baselith.core.services.llm.tool_calling import ResponseFormat
 
         mock_client = AsyncMock()
         mock_response = MagicMock()
@@ -317,9 +353,13 @@ class TestOpenAIStructuredSchema:
         mock_client.chat.completions.create.return_value = mock_response
 
         loose = {"type": "object", "properties": {"a": {"type": "string"}}}
-        with patch("core.services.llm.providers.openai_provider.openai") as mock_openai:
+        with patch(
+            "baselith.core.services.llm.providers.openai_provider.openai"
+        ) as mock_openai:
             mock_openai.AsyncOpenAI.return_value = mock_client
-            from core.services.llm.providers.openai_provider import OpenAIProvider
+            from baselith.core.services.llm.providers.openai_provider import (
+                OpenAIProvider,
+            )
 
             provider = OpenAIProvider(api_key="sk-test")
             await provider.generate_structured(

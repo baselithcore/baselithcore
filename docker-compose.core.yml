@@ -23,14 +23,14 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       # Embedding, rerank and vector search are core services: the API pod
-      # loads no model and opens no embedded Qdrant (see core.services.inference).
+      # loads no model and opens no embedded Qdrant (see baselith.core.services.inference).
       BASELITH_QDRANT_URL: ${BASELITH_QDRANT_URL:-http://qdrant:6333}
       BASELITH_EMBEDDING_BACKEND: ${BASELITH_EMBEDDING_BACKEND:-remote}
       BASELITH_EMBEDDING_URL: ${BASELITH_EMBEDDING_URL:-http://tei-embed:80}
       BASELITH_RERANK_BACKEND: ${BASELITH_RERANK_BACKEND:-remote}
       BASELITH_RERANK_URL: ${BASELITH_RERANK_URL:-http://tei-rerank:80}
     volumes:
-      - ./plugins:/app/plugins
+      - ./baselith/plugins:/app/baselith/plugins
       - ./configs:/app/configs
       - ./documents:/app/documents
       - ./data:/app/data

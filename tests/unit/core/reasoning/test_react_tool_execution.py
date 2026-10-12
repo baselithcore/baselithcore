@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 
 def _agent(tool, **kwargs) -> ReActAgent:

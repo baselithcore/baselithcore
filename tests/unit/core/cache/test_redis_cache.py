@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.cache import redis_cache
+from baselith.core.cache import redis_cache
 
 
 def setup_function() -> None:

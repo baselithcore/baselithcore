@@ -14,8 +14,11 @@ class TestRelevanceCalculator:
 
     def test_calculate_score_new_memory(self):
         """New memories should have high relevance."""
-        from core.memory.compression import RelevanceCalculator, RelevanceConfig
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import (
+            RelevanceCalculator,
+            RelevanceConfig,
+        )
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         calc = RelevanceCalculator(RelevanceConfig(half_life_days=7))
 
@@ -32,8 +35,11 @@ class TestRelevanceCalculator:
 
     def test_calculate_score_old_memory(self):
         """Old memories should have lower relevance."""
-        from core.memory.compression import RelevanceCalculator, RelevanceConfig
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import (
+            RelevanceCalculator,
+            RelevanceConfig,
+        )
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         calc = RelevanceCalculator(RelevanceConfig(half_life_days=7))
 
@@ -50,8 +56,8 @@ class TestRelevanceCalculator:
 
     def test_access_boost(self):
         """Frequently accessed memories should score higher."""
-        from core.memory.compression import RelevanceCalculator
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import RelevanceCalculator
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         calc = RelevanceCalculator()
 
@@ -68,8 +74,11 @@ class TestRelevanceCalculator:
 
     def test_classify_memories(self):
         """Test memory classification into buckets."""
-        from core.memory.compression import RelevanceCalculator, RelevanceConfig
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import (
+            RelevanceCalculator,
+            RelevanceConfig,
+        )
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         config = RelevanceConfig(
             compression_threshold=0.3,
@@ -99,7 +108,7 @@ class TestCompressionResult:
 
     def test_compression_ratio(self):
         """Test compression ratio calculation."""
-        from core.memory.compression import CompressionResult
+        from baselith.core.memory.compression import CompressionResult
 
         result = CompressionResult(
             original_count=100,
@@ -112,7 +121,7 @@ class TestCompressionResult:
 
     def test_compression_ratio_empty(self):
         """Test compression ratio with no items."""
-        from core.memory.compression import CompressionResult
+        from baselith.core.memory.compression import CompressionResult
 
         result = CompressionResult(
             original_count=0,
@@ -130,8 +139,8 @@ class TestMemoryCompressor:
     @pytest.mark.asyncio
     async def test_summarize_without_llm(self):
         """Test summarization fallback without LLM."""
-        from core.memory.compression import MemoryCompressor
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import MemoryCompressor
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         compressor = MemoryCompressor(llm_service=None)
 
@@ -153,8 +162,11 @@ class TestMemoryCompressor:
     @pytest.mark.asyncio
     async def test_compress_pruning_strategy(self):
         """Test compression with pruning strategy."""
-        from core.memory.compression import CompressionStrategy, MemoryCompressor
-        from core.memory.types import MemoryItem, MemoryType
+        from baselith.core.memory.compression import (
+            CompressionStrategy,
+            MemoryCompressor,
+        )
+        from baselith.core.memory.types import MemoryItem, MemoryType
 
         compressor = MemoryCompressor()
 
@@ -180,7 +192,7 @@ class TestAgentMemoryCompression:
 
     @pytest.mark.asyncio
     async def test_compress_old_memories_flow(self):
-        from core.memory.manager import AgentMemory
+        from baselith.core.memory.manager import AgentMemory
 
         manager = AgentMemory()
         stats = manager.get_memory_stats()

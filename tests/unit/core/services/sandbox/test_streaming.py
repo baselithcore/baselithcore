@@ -10,14 +10,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.sandbox import SandboxConfig
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
+from baselith.core.config.sandbox import SandboxConfig
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
 
 
 @pytest.fixture
 def mock_docker_pkg():
     """Patch the docker package where docker_factory imports it."""
-    with patch("core.services.sandbox.docker_factory.docker") as mock_docker:
+    with patch("baselith.core.services.sandbox.docker_factory.docker") as mock_docker:
 
         class MockDockerException(Exception):
             pass
@@ -36,7 +40,7 @@ def mock_docker_client(mock_docker_pkg):
 def patched_config(**overrides):
     """Patch the config seam the service reads, with field overrides."""
     return patch(
-        "core.services.sandbox.service.get_sandbox_config",
+        "baselith.core.services.sandbox.service.get_sandbox_config",
         return_value=SandboxConfig(**overrides),
     )
 
@@ -66,7 +70,7 @@ async def collect(stream):
 
 
 async def test_stream_yields_frames_in_order_with_exit(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     container = make_container(
         mock_docker_client,
@@ -88,7 +92,7 @@ async def test_stream_yields_frames_in_order_with_exit(mock_docker_client):
 
 
 async def test_stream_timeout_kills_and_reports(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     release = threading.Event()
 
@@ -118,7 +122,7 @@ async def test_stream_timeout_kills_and_reports(mock_docker_client):
 
 
 async def test_stream_static_analysis_blocks_before_container(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     with patched_config(static_analysis_mode="block", cost_per_compute_second=1.0):
         service = SandboxService()
@@ -133,7 +137,7 @@ async def test_stream_static_analysis_blocks_before_container(mock_docker_client
 
 
 async def test_stream_unsupported_language_docker(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     with patched_config():
         service = SandboxService()
@@ -148,7 +152,7 @@ async def test_stream_unsupported_language_docker(mock_docker_client):
 
 
 async def test_stream_sbx_degraded_fallback(mock_docker_pkg):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     sbx_factory = MagicMock()
     sbx_factory.ensure_available = AsyncMock()
@@ -166,7 +170,7 @@ async def test_stream_sbx_degraded_fallback(mock_docker_pkg):
 
 
 async def test_stream_budget_charged(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     make_container(mock_docker_client, [(b"ok", None)], wait_sleep=0.01)
     budget = LoopBudget(limits=LoopLimits(budget_usd=100.0))
@@ -182,7 +186,7 @@ async def test_stream_budget_charged(mock_docker_client):
 
 
 async def test_stream_budget_exceeded_propagates(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     make_container(mock_docker_client, [(b"ok", None)], wait_sleep=0.01)
     budget = LoopBudget(limits=LoopLimits(budget_usd=1e-9))
@@ -202,8 +206,8 @@ async def test_stream_budget_exceeded_propagates(mock_docker_client):
 async def test_stream_output_is_capped_with_a_truncation_marker(
     mock_docker_client, monkeypatch
 ):
-    from core.services.sandbox import streaming
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox import streaming
+    from baselith.core.services.sandbox.service import SandboxService
 
     monkeypatch.setattr(streaming, "MAX_STREAM_OUTPUT_BYTES", 10)
     container = make_container(
@@ -226,8 +230,8 @@ async def test_stream_output_is_capped_with_a_truncation_marker(
 async def test_stream_queue_is_bounded_and_applies_backpressure(
     mock_docker_client, monkeypatch
 ):
-    from core.services.sandbox import streaming
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox import streaming
+    from baselith.core.services.sandbox.service import SandboxService
 
     monkeypatch.setattr(streaming, "STREAM_QUEUE_MAXSIZE", 2)
     produced: list[int] = []
@@ -258,7 +262,7 @@ async def test_stream_queue_is_bounded_and_applies_backpressure(
 
 
 async def test_disconnect_mid_stream_kills_the_container(mock_docker_client):
-    from core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.service import SandboxService
 
     release = threading.Event()
 
@@ -289,8 +293,8 @@ async def test_disconnect_mid_stream_kills_the_container(mock_docker_client):
 
 async def test_direct_aclose_kills_the_container(mock_docker_client):
     """The backend generator itself cleans up, whatever wraps it."""
-    from core.services.sandbox.service import SandboxService
-    from core.services.sandbox.streaming import stream_docker_execution
+    from baselith.core.services.sandbox.service import SandboxService
+    from baselith.core.services.sandbox.streaming import stream_docker_execution
 
     release = threading.Event()
 

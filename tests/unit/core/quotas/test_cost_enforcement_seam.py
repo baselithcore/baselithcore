@@ -11,18 +11,18 @@ from unittest.mock import patch
 
 import pytest
 
-from core.config.quotas import QuotaConfig
-from core.context import set_tenant_context
-from core.quotas import (  # package re-exports: house convention
+from baselith.core.config.quotas import QuotaConfig
+from baselith.core.context import set_tenant_context
+from baselith.core.quotas import (  # package re-exports: house convention
     CostBudgetExceededError,
     QuotaManager,
     enforce_tenant_cost_budget,
     llm_call_cost_usd,
     record_tenant_llm_cost,
 )
-from core.quotas import cost_enforcement as ce_mod
-from core.quotas.cost_enforcement import UnknownModelCostRejected
-from core.quotas.store import InMemoryQuotaStore
+from baselith.core.quotas import cost_enforcement as ce_mod
+from baselith.core.quotas.cost_enforcement import UnknownModelCostRejected
+from baselith.core.quotas.store import InMemoryQuotaStore
 
 
 @pytest.fixture(autouse=True)
@@ -69,7 +69,7 @@ async def test_zero_cost_is_not_recorded(manager):
 def test_llm_call_cost_priced_model_is_positive():
     # Independent of the ambient LoopBudget: an out-of-request LLM call must
     # still be meterable on the tenant ledger.
-    from core.models.pricing import DEFAULT_PRICING
+    from baselith.core.models.pricing import DEFAULT_PRICING
 
     model = next(iter(DEFAULT_PRICING))
     assert llm_call_cost_usd(model, 1000, 1000) > 0
@@ -77,7 +77,7 @@ def test_llm_call_cost_priced_model_is_positive():
 
 def test_llm_call_cost_unpriced_model_charges_unknown_price_by_default():
     """Default policy is 'charge': UNKNOWN_PRICE is billed, not silently 0."""
-    from core.models.pricing import UNKNOWN_PRICE
+    from baselith.core.models.pricing import UNKNOWN_PRICE
 
     cost = llm_call_cost_usd("my-self-hosted-model", 1000, 1000)
     assert cost == pytest.approx(UNKNOWN_PRICE.estimate(1000, 1000))
@@ -110,7 +110,7 @@ async def test_reject_policy_fires_on_the_pre_call_gate(manager, monkeypatch):
 async def test_the_gate_is_silent_for_a_priced_model_and_other_policies(
     manager, monkeypatch
 ):
-    from core.models.pricing import DEFAULT_PRICING
+    from baselith.core.models.pricing import DEFAULT_PRICING
 
     monkeypatch.setenv("BASELITH_UNKNOWN_MODEL_COST_POLICY", "reject")
     set_tenant_context("acme")
@@ -132,7 +132,7 @@ def test_unknown_model_warns_once_per_model_id_per_process():
 
 
 def test_llm_call_cost_threads_cache_and_batch_kwargs():
-    from core.models.pricing import DEFAULT_PRICING
+    from baselith.core.models.pricing import DEFAULT_PRICING
 
     model = next(iter(DEFAULT_PRICING))
     price = DEFAULT_PRICING[model]
@@ -144,8 +144,8 @@ def test_llm_call_cost_threads_cache_and_batch_kwargs():
 
 @pytest.mark.asyncio
 async def test_identity_budget_enforced_from_ambient_user(monkeypatch):
-    from core.config.quotas import QuotaConfig
-    from core.context import set_user_context
+    from baselith.core.config.quotas import QuotaConfig
+    from baselith.core.context import set_user_context
 
     identity_manager = QuotaManager(
         config=QuotaConfig(

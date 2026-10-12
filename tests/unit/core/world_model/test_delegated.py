@@ -1,4 +1,4 @@
-"""Unit tests for ``core.world_model.delegated`` — human-not-present mode."""
+"""Unit tests for ``baselith.core.world_model.delegated`` — human-not-present mode."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from core.world_model.delegated import (
+from baselith.core.world_model.delegated import (
     DelegatedPurchaseAgent,
     DelegationRegistryFullError,
 )
-from core.world_model.mandates import (
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     InMemoryReplayGuard,
@@ -27,7 +27,7 @@ from core.world_model.mandates import (
     sign_cart,
     sign_intent,
 )
-from core.world_model.payments import InMemoryReceiptStore, PaymentReceipt
+from baselith.core.world_model.payments import InMemoryReceiptStore, PaymentReceipt
 
 pytestmark = [pytest.mark.unit]
 

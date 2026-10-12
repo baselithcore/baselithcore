@@ -9,12 +9,15 @@ from pathlib import Path
 
 import pytest
 
-import core.cli.__main__ as cli_main
-from core.cli import handlers
-from core.cli.commands import plugin_updater as cli
-from core.cli.commands.plugin_updater import register_parser, run_plugin_updater
-from core.plugin_updates.apply.models import RunKind, RunState
-from core.plugin_updates.apply.store import RunStore
+import baselith.core.cli.__main__ as cli_main
+from baselith.core.cli import handlers
+from baselith.core.cli.commands import plugin_updater as cli
+from baselith.core.cli.commands.plugin_updater import (
+    register_parser,
+    run_plugin_updater,
+)
+from baselith.core.plugin_updates.apply.models import RunKind, RunState
+from baselith.core.plugin_updates.apply.store import RunStore
 
 SHA = "f" * 64
 
@@ -23,7 +26,7 @@ SHA = "f" * 64
 def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("UPDATE_APPLY_STATE_DIR", str(tmp_path))
     monkeypatch.delenv("BASELITH_PLUGIN_OVERLAY_DIR", raising=False)
-    from core.config.plugin_update_apply import get_update_apply_config
+    from baselith.core.config.plugin_update_apply import get_update_apply_config
 
     get_update_apply_config.cache_clear()
     yield tmp_path

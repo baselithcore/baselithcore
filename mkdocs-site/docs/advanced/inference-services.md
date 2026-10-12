@@ -12,14 +12,14 @@ extra worker repeats it. With the services remote, the API process imports no
 ML runtime at all, and the models are scaled — and sized — where they belong:
 as their own servers.
 
-All three live in `core.services.inference`. Importing it loads no model and
+All three live in `baselith.core.services.inference`. Importing it loads no model and
 opens no connection; `torch` is imported only inside the explicit `local`
 backends.
 
 ## EmbeddingService
 
 ```python
-from core.di.lazy_registry import get_lazy_registry
+from baselith.core.di.lazy_registry import get_lazy_registry
 
 embeddings = await get_lazy_registry().get_or_create("embedding")
 vectors = await embeddings.embed_documents(["first", "second"])
@@ -96,7 +96,7 @@ hits = await store.search("docs", vector, limit=10)
 There is one `AsyncQdrantClient` per process, in **server mode**. The client
 library is the optional `[qdrant]` extra and is imported only when the runtime
 opens (an `InferenceConfigError` names the extra when it is missing); importing
-`core.services.inference` never needs it, so a pgvector deployment imports and
+`baselith.core.services.inference` never needs it, so a pgvector deployment imports and
 shuts the package down without it
 (`BASELITH_QDRANT_URL`). The embedded `path=` mode is refused, and `:memory:`
 is accepted only by tests. A plugin never receives the client: it receives a
@@ -191,9 +191,9 @@ deployments would put all their vectors behind one key.
 ## The core's own models
 
 The embedder and reranker the core itself uses — retrieval, memory, the chat
-pipeline, `core.services.retrieval.Reranker` — go through the same services.
-`core.nlp.models.get_embedder()` and `get_reranker()` return TEI-backed
-stand-ins (`core.nlp._remote`) with the sentence-transformers surface
+pipeline, `baselith.core.services.retrieval.Reranker` — go through the same services.
+`baselith.core.nlp.models.get_embedder()` and `get_reranker()` return TEI-backed
+stand-ins (`baselith.core.nlp._remote`) with the sentence-transformers surface
 (`encode`, `get_sentence_embedding_dimension`, `predict`) when:
 
 - the backend is `remote` and its URL is set, **and**
@@ -219,7 +219,7 @@ convention: `encode` / `encode_document` embed documents (document prefix),
 prefix). `CachedEmbedder` and `LazyEmbedder` expose `encode_query` as well,
 and the core's search-side call sites (RAG retrieval, the chat pipeline's
 query vector, memory recall, the semantic router, the MCP knowledge-base tool)
-go through `core.nlp.roles.aencode_query`, which uses `encode_query` when the
+go through `baselith.core.nlp.roles.aencode_query`, which uses `encode_query` when the
 embedder has it — a local sentence-transformers ≥ 5 model then applies its own
 `"query"` prompt — and `encode` otherwise. The embedding cache keys on the
 model, the role and the prefix, so a query is never served a document's vector
@@ -245,7 +245,7 @@ build `local`.
 
 ## Client hardening
 
-The embedding and rerank clients (`core/services/inference/_http.py`) bound
+The embedding and rerank clients (`baselith/core/services/inference/_http.py`) bound
 every call and guard the bearer token. Each knob exists once per service, under
 `BASELITH_EMBEDDING_*` and `BASELITH_RERANK_*`:
 

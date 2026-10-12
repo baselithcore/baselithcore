@@ -331,6 +331,55 @@ spec:
               like a restart here. Raise the probe's timeout before raising the
               replica count.
         {{- end }}
+        {{- if not (has "BaselithcoreAnswerQualityDegraded" $off) }}
+        # The online evaluation monitor's verdict, not a threshold of its own:
+        # the floor, the comparison against the trailing reference and the
+        # hysteresis are EVAL_ONLINE_* settings, and the gauge only flips after
+        # a full window of sampled answers. `max by` because with the fleet
+        # monitor (CACHE_BACKEND=redis) every worker mirrors the same shared
+        # state, and without it one worker seeing the drop is enough. With
+        # online evaluation off the series does not exist and the rule is
+        # silent, not wrong.
+        - alert: BaselithcoreAnswerQualityDegraded
+          expr: |-
+            max by (intent, source) (mas_eval_online_degraded{namespace="{{ $ns }}"}) == 1
+          for: 5m
+          labels:
+            severity: warning
+            component: evaluation
+          annotations:
+            summary: "Answer quality degraded for intent {{ "{{ $labels.intent }}" }} ({{ "{{ $labels.source }}" }}) in {{ $ns }}"
+            description: >-
+              The windowed mean score of the sampled answers for this intent fell
+              below EVAL_ONLINE_QUALITY_FLOOR or EVAL_ONLINE_DEGRADATION_THRESHOLD
+              under its own trailing reference. Every request still succeeds, so
+              no error alert covers this. Start from mas_eval_online_flags_total
+              for the intent (empty, too_short, refusal, guard_blocked,
+              ungrounded name the failure), then GET /v1/evaluation/online/summary;
+              a prompt, model or retrieval change shipped shortly before is the
+              usual cause. It resolves on evaluation.recovered.
+        {{- end }}
+        {{- if not (has "BaselithcoreOnlineEvalMonitorFailing" $off) }}
+        # The quality alert above can only fire if the monitor can see. With
+        # the fleet monitor its windows live in Redis, and while Redis refuses
+        # the scores nothing degrades and nothing recovers — a blind monitor
+        # reads exactly like a healthy one.
+        - alert: BaselithcoreOnlineEvalMonitorFailing
+          expr: |-
+            sum(rate(mas_eval_online_failures_total{namespace="{{ $ns }}",stage=~"fleet|monitor"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            component: evaluation
+          annotations:
+            summary: "The online quality monitor is failing in {{ $ns }}"
+            description: >-
+              Scores are not reaching the quality monitor, so a degradation would
+              go unannounced. stage="fleet" is the shared Redis window store
+              (check CACHE_REDIS_URL and the cache's memory); stage="monitor" a
+              failing announcement. The api logs carry the error as
+              online_eval_fleet_* or online_eval_monitor_failed.
+        {{- end }}
         {{- with .Values.prometheusRule.extraRules }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -338,7 +387,7 @@ spec:
     # A group of its own: these are notices about the release, not about the
     # cell's health, so they never share an evaluation instant with the
     # "is it up" alerts above and can be dropped as a unit. The series is
-    # `baselith_update_available{component,security}` (core/plugin_updates).
+    # `baselith_update_available{component,security}` (baselith/core/plugin_updates).
     - name: {{ include "baselithcore.fullname" . }}-updates
       {{- with .Values.prometheusRule.interval }}
       interval: {{ . }}

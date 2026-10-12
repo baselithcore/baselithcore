@@ -39,8 +39,8 @@ class _RecordingLimiter:
 
 @pytest.fixture
 def limiter(monkeypatch):
-    import core.auth.manager as auth_manager_module
-    import core.middleware.security as security_module
+    import baselith.core.auth.manager as auth_manager_module
+    import baselith.core.middleware.security as security_module
 
     recorder = _RecordingLimiter(budget=2)
     manager = SimpleNamespace(
@@ -110,21 +110,21 @@ async def test_discovery_request_without_credentials_is_not_charged(limiter):
     ],
 )
 def test_resource_unpinned(resource_url, trusted_hosts, expected):
-    from core.mcp.http_authz import resource_unpinned
+    from baselith.core.mcp.http_authz import resource_unpinned
 
     cfg = SimpleNamespace(mcp_resource_url=resource_url)
     assert resource_unpinned(cfg, trusted_hosts) is expected
 
 
 def test_mount_logs_error_when_resource_is_unpinned(monkeypatch):
-    from core.mcp import http_authz
+    from baselith.core.mcp import http_authz
 
     errors: list[str] = []
     monkeypatch.setattr(
         http_authz.logger, "error", lambda event, **_: errors.append(event)
     )
     monkeypatch.setattr(
-        "core.config.get_security_config",
+        "baselith.core.config.get_security_config",
         lambda: SimpleNamespace(trusted_hosts=[]),
     )
 

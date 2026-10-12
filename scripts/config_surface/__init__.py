@@ -1,6 +1,6 @@
 """Introspection of the framework's configuration surface.
 
-The settings live in ~35 ``BaseSettings`` classes under ``core/config/`` (plus a
+The settings live in ~35 ``BaseSettings`` classes under ``baselith/core/config/`` (plus a
 handful in plugins); the operator-facing view of them lives in ``.env.example``
 and in the docs. Nothing kept those three in sync, so this package reads the
 classes and lets ``scripts/check_config_surface.py`` generate the reference page

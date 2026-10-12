@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from core.plugin_updates.apply.boot_report import BootReport, PluginBootState
-from core.plugin_updates.apply.models import Expectation
-from core.plugin_updates.apply.store import RunStore
-from core.plugins._overlay_guard import read_manifest_mapping
+from baselith.core.plugin_updates.apply.boot_report import BootReport, PluginBootState
+from baselith.core.plugin_updates.apply.models import Expectation
+from baselith.core.plugin_updates.apply.store import RunStore
+from baselith.core.plugins._overlay_guard import read_manifest_mapping
 
 
 @dataclass

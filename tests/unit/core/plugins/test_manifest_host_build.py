@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.plugins.manifest_model import validate_manifest_data
+from baselith.core.plugins.manifest_model import validate_manifest_data
 
 
 def test_defaults_to_false() -> None:

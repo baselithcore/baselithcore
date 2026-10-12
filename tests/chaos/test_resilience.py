@@ -5,7 +5,7 @@ These inject failures (always-failing functions, transient flakiness, provider
 outages, concurrency pressure) and assert the framework degrades gracefully:
 circuits trip and fast-reject, fallback chains pick the next provider, retries
 ride out transient errors, and bulkheads cap concurrency. They exercise the
-real ``core/resilience`` and ``core/models/fallback`` code — no mocks of the
+real ``baselith/core/resilience`` and ``baselith/core/models/fallback`` code — no mocks of the
 primitives themselves.
 
 Run only these: ``pytest -m chaos``. Skip them: ``pytest -m "not chaos"``.
@@ -16,18 +16,18 @@ import time
 
 import pytest
 
-from core.models.fallback import (
+from baselith.core.models.fallback import (
     AllProvidersFailedError,
     FallbackChain,
     Provider,
 )
-from core.resilience.bulkhead import Bulkhead
-from core.resilience.circuit_breaker import (
+from baselith.core.resilience.bulkhead import Bulkhead
+from baselith.core.resilience.circuit_breaker import (
     CircuitBreaker,
     CircuitBreakerError,
     CircuitState,
 )
-from core.resilience.retry import retry
+from baselith.core.resilience.retry import retry
 
 pytestmark = pytest.mark.chaos
 

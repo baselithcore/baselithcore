@@ -11,8 +11,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from core.config._pg_conninfo import merge_conninfo, transport_params
-from core.config.storage import StorageConfig
+from baselith.core.config._pg_conninfo import merge_conninfo, transport_params
+from baselith.core.config.storage import StorageConfig
 
 _DEFAULTS = {"connect_timeout": "10", "keepalives": "1"}
 

@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.mcp import _builtin_tools
-from core.models.domain import Document, SearchResult
+from baselith.core.mcp import _builtin_tools
+from baselith.core.models.domain import Document, SearchResult
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def embedder() -> Any:
     """
     fake = MagicMock()
     fake.encode = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-    with patch("core.nlp.models.get_embedder", return_value=fake):
+    with patch("baselith.core.nlp.models.get_embedder", return_value=fake):
         yield fake
 
 
@@ -39,7 +39,7 @@ def sync_embedder() -> Any:
     """A synchronous ``encode``, which the protocol also permits."""
     fake = MagicMock()
     fake.encode = MagicMock(return_value=[[0.1, 0.2, 0.3]])
-    with patch("core.nlp.models.get_embedder", return_value=fake):
+    with patch("baselith.core.nlp.models.get_embedder", return_value=fake):
         yield fake
 
 
@@ -62,7 +62,7 @@ class TestSearchKnowledgeBase:
         service = _store(search=AsyncMock(return_value=[hit]))
 
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=service,
         ):
             results = await _builtin_tools.search_knowledge_base("capital of Italy")
@@ -82,7 +82,7 @@ class TestSearchKnowledgeBase:
         service = _store(search=AsyncMock(return_value=[]))
 
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=service,
         ):
             results = await _builtin_tools.search_knowledge_base("anything")
@@ -93,7 +93,7 @@ class TestSearchKnowledgeBase:
         service = _store(search=AsyncMock(side_effect=RuntimeError("qdrant down")))
 
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=service,
         ):
             results = await _builtin_tools.search_knowledge_base("anything")
@@ -108,7 +108,7 @@ class TestSearchKnowledgeBase:
         """Forwarding the literal would search a collection called "default"."""
         search = AsyncMock(return_value=[])
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(search=search),
         ):
             await _builtin_tools.search_knowledge_base("q")
@@ -120,7 +120,7 @@ class TestSearchKnowledgeBase:
     async def test_a_synchronous_embedder_also_works(self, sync_embedder: Any) -> None:
         search = AsyncMock(return_value=[])
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(search=search),
         ):
             results = await _builtin_tools.search_knowledge_base("q")
@@ -132,7 +132,7 @@ class TestSearchKnowledgeBase:
         """A coroutine forwarded instead of a vector would surface here."""
         search = AsyncMock(return_value=[])
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(search=search),
         ):
             await _builtin_tools.search_knowledge_base("q")
@@ -142,7 +142,7 @@ class TestSearchKnowledgeBase:
     async def test_top_k_falls_back_to_config(self, embedder: Any) -> None:
         search = AsyncMock(return_value=[])
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(search=search),
         ):
             await _builtin_tools.search_knowledge_base("q", top_k=11)
@@ -154,7 +154,7 @@ class TestIndexDocument:
     async def test_reports_the_chunk_count_the_store_wrote(self) -> None:
         index = AsyncMock(return_value=3)
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(index=index),
         ):
             result = await _builtin_tools.index_document("body", metadata={"k": "v"})
@@ -167,7 +167,7 @@ class TestIndexDocument:
 
     async def test_zero_chunks_written_is_not_success(self) -> None:
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(index=AsyncMock(return_value=0)),
         ):
             result = await _builtin_tools.index_document("body")
@@ -176,7 +176,7 @@ class TestIndexDocument:
 
     async def test_store_failure_is_reported(self) -> None:
         with patch(
-            "core.services.vectorstore.service.get_vectorstore_service",
+            "baselith.core.services.vectorstore.service.get_vectorstore_service",
             return_value=_store(index=AsyncMock(side_effect=RuntimeError("no pool"))),
         ):
             result = await _builtin_tools.index_document("body")
@@ -196,8 +196,12 @@ class TestPlanTask:
         )
 
         with (
-            patch("core.reasoning.tot.engine.TreeOfThoughts", return_value=engine),
-            patch("core.services.llm.get_llm_service", return_value=MagicMock()),
+            patch(
+                "baselith.core.reasoning.tot.engine.TreeOfThoughts", return_value=engine
+            ),
+            patch(
+                "baselith.core.services.llm.get_llm_service", return_value=MagicMock()
+            ),
         ):
             result = await _builtin_tools.plan_task("ship it", context="repo is clean")
 
@@ -214,8 +218,12 @@ class TestPlanTask:
         engine.solve = AsyncMock(return_value={"steps": ["a"], "solution": "ok"})
 
         with (
-            patch("core.reasoning.tot.engine.TreeOfThoughts", return_value=engine),
-            patch("core.services.llm.get_llm_service", return_value=MagicMock()),
+            patch(
+                "baselith.core.reasoning.tot.engine.TreeOfThoughts", return_value=engine
+            ),
+            patch(
+                "baselith.core.services.llm.get_llm_service", return_value=MagicMock()
+            ),
         ):
             await _builtin_tools.plan_task("ship it")
 
@@ -225,7 +233,8 @@ class TestPlanTask:
 
     async def test_planner_failure_is_reported_not_canned(self) -> None:
         with patch(
-            "core.services.llm.get_llm_service", side_effect=RuntimeError("no provider")
+            "baselith.core.services.llm.get_llm_service",
+            side_effect=RuntimeError("no provider"),
         ):
             result = await _builtin_tools.plan_task("ship it")
 
@@ -238,8 +247,12 @@ class TestPlanTask:
         engine.solve = AsyncMock(return_value={"steps": [], "solution": "none"})
 
         with (
-            patch("core.reasoning.tot.engine.TreeOfThoughts", return_value=engine),
-            patch("core.services.llm.get_llm_service", return_value=MagicMock()),
+            patch(
+                "baselith.core.reasoning.tot.engine.TreeOfThoughts", return_value=engine
+            ),
+            patch(
+                "baselith.core.services.llm.get_llm_service", return_value=MagicMock()
+            ),
         ):
             result = await _builtin_tools.plan_task("ship it")
 

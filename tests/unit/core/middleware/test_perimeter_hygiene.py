@@ -10,12 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.middleware import csrf as csrf_module
-from core.middleware import observability as obs_module
-from core.middleware.observability import RequestIdMiddleware
-from core.middleware.security import SecurityManager
+from baselith.core.middleware import csrf as csrf_module
+from baselith.core.middleware import observability as obs_module
+from baselith.core.middleware.observability import RequestIdMiddleware
+from baselith.core.middleware.security import SecurityManager
 
-rate_limiter_module = importlib.import_module("core.middleware.rate_limiter")
+rate_limiter_module = importlib.import_module("baselith.core.middleware.rate_limiter")
 
 
 @pytest.mark.asyncio
@@ -27,12 +27,12 @@ async def test_anonymous_limit_key_collapses_an_ipv6_client_to_its_64(
     mock_security_config.api_keys_user = set()
     mock_security_config.api_keys_admin = set()
     mock_security_config.api_keys_job = set()
-    with patch("core.middleware.rate_limiter.create_redis_client") as factory:
+    with patch("baselith.core.middleware.rate_limiter.create_redis_client") as factory:
         factory.return_value = AsyncMock()
         manager = SecurityManager(mock_security_config)
     manager.rate_limiter = AsyncMock()
 
-    with patch("core.auth.manager.get_auth_manager") as get_auth:
+    with patch("baselith.core.auth.manager.get_auth_manager") as get_auth:
         auth = AsyncMock()
         anon = MagicMock()
         anon.is_authenticated = False

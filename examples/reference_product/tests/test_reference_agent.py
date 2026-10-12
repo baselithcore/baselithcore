@@ -4,7 +4,7 @@ Tests for the Reference Product FAQ Agent.
 
 import pytest
 
-from core.lifecycle import AgentError, AgentState, FrameworkErrorCode
+from baselith.core.lifecycle import AgentError, AgentState, FrameworkErrorCode
 from examples.reference_product.agent import FAQAgent
 
 

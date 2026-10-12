@@ -15,14 +15,14 @@ from typing import Any
 
 import pytest
 
-from core.api.events import AgentEvent, EventType
-from core.orchestration.run_events import (
+from baselith.core.api.events import AgentEvent, EventType
+from baselith.core.orchestration.run_events import (
     get_run_event_stream,
     publish_run_event,
     reset_run_event_stream,
     set_run_event_broadcaster,
 )
-from core.orchestration.run_events_bridge import (
+from baselith.core.orchestration.run_events_bridge import (
     RUN_EVENTS_CHANNEL_PREFIX,
     RedisRunEventsBridge,
 )
@@ -43,7 +43,7 @@ class _FakePubSub:
     ``get_message(timeout=…)`` returns ``None`` on an idle window, exactly as
     redis-py does; ``listen()`` is the shape that cannot be used here, because
     it reads with no deadline of its own and so inherits the shared pool's
-    ``socket_timeout`` (see ``core.realtime.subscriptions``).
+    ``socket_timeout`` (see ``baselith.core.realtime.subscriptions``).
     """
 
     def __init__(self, queue: asyncio.Queue) -> None:
@@ -63,7 +63,7 @@ class _FakePubSub:
     async def listen(self):
         raise AssertionError(
             "listen() cannot outlive the pool's socket_timeout — "
-            "poll with core.realtime.subscriptions.iter_messages"
+            "poll with baselith.core.realtime.subscriptions.iter_messages"
         )
         yield {}  # pragma: no cover - unreachable, keeps this a generator
 

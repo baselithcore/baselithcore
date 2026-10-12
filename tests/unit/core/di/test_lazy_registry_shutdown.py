@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-from core.di import lazy_registry as lazy_registry_module
-from core.di.lazy_registry import LazyServiceRegistry
-from core.events import EventNames
-from core.events.bus import EventBus
+from baselith.core.di import lazy_registry as lazy_registry_module
+from baselith.core.di.lazy_registry import LazyServiceRegistry
+from baselith.core.events import EventNames
+from baselith.core.events.bus import EventBus
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ async def test_sync_shutdown_is_called_without_error(errors: list[str]) -> None:
 async def test_real_postgres_storage_sync_shutdown_logs_no_error(
     errors: list[str],
 ) -> None:
-    from core.storage.postgres import PostgresStorage
+    from baselith.core.storage.postgres import PostgresStorage
 
     storage = PostgresStorage.__new__(PostgresStorage)
     registry = await _registry_with(storage)
@@ -109,7 +109,7 @@ async def test_only_the_preferred_hook_runs() -> None:
 
 @pytest.mark.asyncio
 async def test_evolution_service_is_unsubscribed_on_shutdown() -> None:
-    from core.learning.evolution import EvolutionService
+    from baselith.core.learning.evolution import EvolutionService
 
     service = EvolutionService(enable_auto_finetuning=False)
     bus = EventBus()
@@ -125,7 +125,7 @@ async def test_evolution_service_is_unsubscribed_on_shutdown() -> None:
 
 
 def test_auto_finetuning_stop_unsubscribes() -> None:
-    from core.learning.auto_finetuning import AutoFineTuningService
+    from baselith.core.learning.auto_finetuning import AutoFineTuningService
 
     service = AutoFineTuningService()
     bus = EventBus()

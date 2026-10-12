@@ -67,6 +67,17 @@ jobs:
             --severity ERROR --error \
             --metrics off
 
+      - name: Drop findings suppressed in source
+        # Semgrep keeps a `# nosemgrep` finding in the SARIF, marked with an
+        # inSource suppression, and code scanning opens an alert for it anyway.
+        # A triaged false positive then comes back as a new alert whenever its
+        # file moves. Dropping those results keeps `# nosemgrep` authoritative.
+        if: always()
+        run: |
+          jq '.runs[].results |= map(select((.suppressions // []) | length == 0))' \
+            semgrep.sarif > semgrep.filtered.sarif
+          mv semgrep.filtered.sarif semgrep.sarif
+
       - name: Upload SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81  # v4

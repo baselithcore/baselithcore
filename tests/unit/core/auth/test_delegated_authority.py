@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-from core.auth.types import AuthRole, AuthUser
+from baselith.core.auth.types import AuthRole, AuthUser
 
 AGENT_ACT = {"sub": "agent-1", "client_id": "agent-1"}
 IMPERSONATION_ACT = {"sub": "admin-user"}  # no client_id → impersonation
@@ -65,9 +65,9 @@ class TestReservedDelegationClaims:
     allowlist: caller-supplied extras must never be able to forge them."""
 
     def _handler(self):
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
-        with patch("core.auth.jwt.create_redis_client") as redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as redis_factory:
             redis_factory.return_value = AsyncMock(get=AsyncMock(return_value=None))
             return JWTHandler(secret_key="secret-with-at-least-thirty-two-characters!")
 

@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.scraper import ScraperConfig
-from core.scraper.models import ScrapedPage
-from core.scraper.scraper import Scraper
+from baselith.core.config.scraper import ScraperConfig
+from baselith.core.scraper.models import ScrapedPage
+from baselith.core.scraper.scraper import Scraper
 
 
 @pytest.fixture
@@ -58,9 +58,10 @@ async def test_scraper_initialization():
 @pytest.mark.asyncio
 async def test_scrape_success(mock_config, mock_fetcher, mock_middleware_chain):
     with (
-        patch("core.scraper.scraper.HttpxFetcher", return_value=mock_fetcher),
+        patch("baselith.core.scraper.scraper.HttpxFetcher", return_value=mock_fetcher),
         patch(
-            "core.scraper.scraper.MiddlewareChain", return_value=mock_middleware_chain
+            "baselith.core.scraper.scraper.MiddlewareChain",
+            return_value=mock_middleware_chain,
         ),
     ):
         async with Scraper(config=mock_config) as scraper:
@@ -94,7 +95,9 @@ async def test_scrape_cache_hit(mock_config):
     )
     mock_cache.get_cached.return_value = cached_page
 
-    with patch("core.scraper.scraper.CacheMiddleware", return_value=mock_cache):
+    with patch(
+        "baselith.core.scraper.scraper.CacheMiddleware", return_value=mock_cache
+    ):
         async with Scraper(config=mock_config, use_cache=True) as scraper:
             # Manually inject cache into middleware chain if needed,
             # but constructor does add it if use_cache=True
@@ -115,9 +118,10 @@ async def test_scrape_blocked_by_middleware(mock_config, mock_middleware_chain):
     mock_middleware_chain.process_request.return_value = None
 
     with (
-        patch("core.scraper.scraper.HttpxFetcher") as mock_fetcher_cls,
+        patch("baselith.core.scraper.scraper.HttpxFetcher") as mock_fetcher_cls,
         patch(
-            "core.scraper.scraper.MiddlewareChain", return_value=mock_middleware_chain
+            "baselith.core.scraper.scraper.MiddlewareChain",
+            return_value=mock_middleware_chain,
         ),
     ):
         # Mock the fetcher instance
@@ -138,13 +142,13 @@ async def test_scrape_blocked_by_middleware(mock_config, mock_middleware_chain):
 async def test_get_fetcher_selection(mock_config):
     async with Scraper(config=mock_config) as scraper:
         # Default (httpx)
-        with patch("core.scraper.scraper.HttpxFetcher") as mock_httpx:
+        with patch("baselith.core.scraper.scraper.HttpxFetcher") as mock_httpx:
             mock_httpx.return_value = AsyncMock()
             f1 = await scraper._get_fetcher(use_js=False)
             assert f1 is not None
 
         # JS (playwright)
-        with patch("core.scraper.scraper.PlaywrightFetcher") as mock_pw_cls:
+        with patch("baselith.core.scraper.scraper.PlaywrightFetcher") as mock_pw_cls:
             mock_pw_cls.return_value = AsyncMock()  # Ensure it returns an async-compatible mock if needed, though constructor isn't awaited
 
             f2 = await scraper._get_fetcher(use_js=True)
@@ -155,9 +159,10 @@ async def test_get_fetcher_selection(mock_config):
 @pytest.mark.asyncio
 async def test_scrape_many(mock_config, mock_fetcher, mock_middleware_chain):
     with (
-        patch("core.scraper.scraper.HttpxFetcher", return_value=mock_fetcher),
+        patch("baselith.core.scraper.scraper.HttpxFetcher", return_value=mock_fetcher),
         patch(
-            "core.scraper.scraper.MiddlewareChain", return_value=mock_middleware_chain
+            "baselith.core.scraper.scraper.MiddlewareChain",
+            return_value=mock_middleware_chain,
         ),
     ):
         async with Scraper(config=mock_config) as scraper:

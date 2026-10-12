@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from core.chat.workflow_planner import BacklogPlanner
+from baselith.core.chat.workflow_planner import BacklogPlanner
 
 
 def _state() -> MagicMock:

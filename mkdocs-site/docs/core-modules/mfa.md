@@ -3,7 +3,7 @@ title: Multi-Factor Authentication (TOTP)
 description: Time-based one-time-password second factor and recovery codes
 ---
 
-`core/auth/mfa.py` adds a **second authentication factor** to BaselithCore:
+`baselith/core/auth/mfa.py` adds a **second authentication factor** to BaselithCore:
 time-based one-time passwords (TOTP, [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238),
 built on HOTP [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226)) plus single-use
 recovery codes. It satisfies the multi-factor / continuous-authentication
@@ -43,7 +43,7 @@ compatible with off-the-shelf authenticator apps (Google Authenticator, Authy,
 ## Enrollment flow
 
 ```python
-from core.auth import get_auth_manager
+from baselith.core.auth import get_auth_manager
 
 auth = get_auth_manager()
 enrollment = auth.mfa.enroll(account_name="alice@example.com")
@@ -52,7 +52,7 @@ enrollment = auth.mfa.enroll(account_name="alice@example.com")
 qr_uri = enrollment.provisioning_uri()      # otpauth://totp/BaselithCore:alice@...
 recovery_codes = enrollment.recovery_codes  # plaintext, display-once
 
-# Persist server-side (encrypt the secret with core.security.encryption):
+# Persist server-side (encrypt the secret with baselith.core.security.encryption):
 store.save_mfa(
     user_id="alice",
     secret_ciphertext=encryptor.encrypt(enrollment.secret.get_secret_value()),
@@ -118,11 +118,11 @@ them for non-login checks such as verifying an enrollment confirmation code.
 | `hash_recovery_code(code)`                 | SHA-256 hash for storage at rest.                      |
 | `verify_recovery_code(code, hashes)`       | Constant-time match; returns the consumed hash.        |
 
-All symbols are re-exported from `core.auth`.
+All symbols are re-exported from `baselith.core.auth`.
 
 ## Operational notes
 
-- **Encrypt the secret at rest.** Use [`core/security/encryption.py`](security.md)
+- **Encrypt the secret at rest.** Use [`baselith/core/security/encryption.py`](security.md)
   (`DATA_ENCRYPTION_KEYS`) — a stored TOTP secret is equivalent to a password.
 - **Recovery codes are single-use.** After `verify_recovery_code` returns a hash,
   remove it from the stored set so it cannot be replayed.

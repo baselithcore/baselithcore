@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.orchestration.adaptive import (
+from baselith.core.orchestration.adaptive import (
     AdaptiveConfig,
     AdaptiveController,
     ProcessingPath,

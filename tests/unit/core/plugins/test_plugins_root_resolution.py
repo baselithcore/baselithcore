@@ -11,22 +11,29 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from core.config.plugins import (
+from baselith.core.config.plugins import (
     PluginConfig,
     installed_plugins_dir,
     resolve_plugins_root,
 )
-from core.plugins import Plugin, apply_late_app_hook
-from core.plugins import app_setup as app_setup_mod
-from core.plugins.app_setup import apply_plugin_app_middleware, plugin_restart_required
+from baselith.core.plugins import Plugin, apply_late_app_hook
+from baselith.core.plugins import app_setup as app_setup_mod
+from baselith.core.plugins.app_setup import (
+    apply_plugin_app_middleware,
+    plugin_restart_required,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clean_modules() -> Any:
-    before = {n for n in sys.modules if n == "plugins" or n.startswith("plugins.")}
+    before = {
+        n for n in sys.modules if n == "plugins" or n.startswith("baselith.plugins.")
+    }
     yield
     for name in list(sys.modules):
-        if (name == "plugins" or name.startswith("plugins.")) and name not in before:
+        if (
+            name == "plugins" or name.startswith("baselith.plugins.")
+        ) and name not in before:
             del sys.modules[name]
 
 
@@ -64,7 +71,8 @@ def test_resolver_returns_cwd_path_when_nothing_exists(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "core.config.plugins.installed_plugins_dir", lambda: tmp_path / "missing"
+        "baselith.core.config.plugins.installed_plugins_dir",
+        lambda: tmp_path / "missing",
     )
     assert resolve_plugins_root("plugins") == tmp_path / "plugins"
 
@@ -72,9 +80,9 @@ def test_resolver_returns_cwd_path_when_nothing_exists(
 def test_update_service_defaults_to_resolved_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import core.config.plugins as cfg_mod
-    from core.config.plugin_updates import PluginUpdateConfig
-    from core.plugin_updates.service import PluginUpdateService
+    import baselith.core.config.plugins as cfg_mod
+    from baselith.core.config.plugin_updates import PluginUpdateConfig
+    from baselith.core.plugin_updates.service import PluginUpdateService
 
     monkeypatch.setattr(
         cfg_mod, "_plugin_config", PluginConfig(plugins_path=tmp_path / "root")
@@ -95,7 +103,7 @@ def _write_plugin(plugin_dir: Path, marker: str) -> None:
     )
     (plugin_dir / "plugin.py").write_text(
         f"""
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class {marker}:
@@ -125,8 +133,8 @@ def test_same_class_name_in_two_plugins_both_apply(tmp_path: Path) -> None:
     assert apply_plugin_app_middleware(app, tmp_path, plugin_configs={}) == 2
     applied = app_setup_mod._applied_hooks(app)
     assert applied == {
-        "plugins.alpha_mw.plugin.MyPlugin",
-        "plugins.beta_mw.plugin.MyPlugin",
+        "baselith.plugins.alpha_mw.plugin.MyPlugin",
+        "baselith.plugins.beta_mw.plugin.MyPlugin",
     }
 
 
@@ -171,8 +179,8 @@ def test_restart_required_recorded_when_middleware_is_frozen() -> None:
 def test_enable_endpoint_returns_restart_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from core.middleware.security import require_admin
-    from core.plugins import api as api_mod
+    from baselith.core.middleware.security import require_admin
+    from baselith.core.plugins import api as api_mod
 
     class _Controller:
         lifecycle = SimpleNamespace(get_state=lambda name: None)

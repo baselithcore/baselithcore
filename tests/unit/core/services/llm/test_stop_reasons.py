@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.errors import LLMRefusalError
-from core.services.llm.stop_reasons import (
+from baselith.core.services.llm.errors import LLMRefusalError
+from baselith.core.services.llm.stop_reasons import (
     MAX_PAUSE_TURN_CONTINUATIONS,
     apply_stop_reason,
     is_paused,
     stop_details_from,
 )
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.tool_calling import LLMResult
 
 
 class TestApplyStopReason:

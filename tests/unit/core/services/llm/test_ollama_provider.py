@@ -1,5 +1,5 @@
 """
-Tests for core/services/llm/providers/ollama_provider.py
+Tests for baselith/core/services/llm/providers/ollama_provider.py
 
 Tests Ollama LLM provider with mocked API calls.
 """
@@ -12,13 +12,13 @@ import pytest
 class TestOllamaProviderInit:
     """Tests for OllamaProvider initialization."""
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_init_with_api_base(self, mock_ollama):
         """Verify provider initializes with custom API base."""
         mock_client = MagicMock()
         mock_ollama.AsyncClient.return_value = mock_client
 
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider(api_base="http://localhost:11434")
 
@@ -32,12 +32,12 @@ class TestOllamaProviderInit:
         assert provider._timeout.connect is not None
         assert provider._timeout.read is not None
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_init_without_api_base(self, mock_ollama):
         """Verify provider initializes with default settings."""
         mock_client = MagicMock()
         mock_ollama.AsyncClient.return_value = mock_client
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         # Clear env var
         with patch.dict("os.environ", {}, clear=True):
@@ -48,11 +48,11 @@ class TestOllamaProviderInit:
         assert provider.client is not None
         mock_ollama.AsyncClient.assert_called_once()
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_init_uses_the_dedicated_ollama_endpoint(self, mock_ollama):
         """The dedicated ``LLM_OLLAMA_API_BASE`` wins for this provider."""
-        from core.config.services import LLMConfig
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         # Set through the environment, the way an operator does. The dict is
         # cleared first because ``LLMConfig`` is a ``BaseSettings``: the repo's
@@ -67,27 +67,27 @@ class TestOllamaProviderInit:
                 model="gpt-4o-mini",
                 api_base="https://openai-gateway.internal/v1",
             )
-        with patch("core.config.services.get_llm_config", return_value=config):
+        with patch("baselith.core.config.services.get_llm_config", return_value=config):
             provider = OllamaProvider()
 
         assert provider.api_base == "http://ollama-box:11434"
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_init_uses_api_base_when_ollama_is_the_default(self, mock_ollama):
         """With Ollama as the deployment default, ``api_base`` is its endpoint."""
-        from core.config.services import LLMConfig
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         with patch.dict("os.environ", {}, clear=True):
             config = LLMConfig(
                 provider="ollama", model="llama3.2", api_base="http://env-host:11434"
             )
-        with patch("core.config.services.get_llm_config", return_value=config):
+        with patch("baselith.core.config.services.get_llm_config", return_value=config):
             provider = OllamaProvider()
 
         assert provider.api_base == "http://env-host:11434"
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_init_ignores_another_providers_api_base(self, mock_ollama):
         """A policy-routed Ollama call must not inherit the default's endpoint.
 
@@ -97,8 +97,8 @@ class TestOllamaProviderInit:
         the call stalled until the read timeout and surfaced as a timeout: a
         misconfiguration wearing the costume of a slow model.
         """
-        from core.config.services import LLMConfig
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         with patch.dict("os.environ", {}, clear=True):
             config = LLMConfig(
@@ -107,7 +107,7 @@ class TestOllamaProviderInit:
                 api_base="https://openai-gateway.internal/v1",
             )
         with (
-            patch("core.config.services.get_llm_config", return_value=config),
+            patch("baselith.core.config.services.get_llm_config", return_value=config),
             patch.dict("os.environ", {}, clear=True),
         ):
             provider = OllamaProvider()
@@ -129,9 +129,13 @@ class TestOllamaProviderGenerate:
         }
         mock_client.chat.return_value = mock_response
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
             content, tokens = await provider.generate("Test prompt", model="llama3.2")
@@ -145,9 +149,13 @@ class TestOllamaProviderGenerate:
         mock_response = {"message": {"content": "Response"}, "eval_count": 5}
         mock_client.chat.return_value = mock_response
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider(api_base="http://localhost:11434")
             content, tokens = await provider.generate("Prompt", model="llama3.2")
@@ -161,9 +169,13 @@ class TestOllamaProviderGenerate:
         mock_response = {"message": {"content": '{"key": "value"}'}}
         mock_client.chat.return_value = mock_response
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
             await provider.generate("Prompt", model="llama3.2", json_mode=True)
@@ -176,10 +188,14 @@ class TestOllamaProviderGenerate:
         mock_client = AsyncMock()
         mock_client.chat.side_effect = Exception("API error")
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.exceptions import LLMProviderError
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.exceptions import LLMProviderError
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
 
@@ -218,9 +234,13 @@ class TestOllamaProviderGenerateStream:
         ]
         mock_client.chat.return_value = AsyncIterator(mock_chunks)
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
             chunks = []
@@ -241,9 +261,13 @@ class TestOllamaProviderGenerateStream:
         ]
         mock_client.chat.return_value = AsyncIterator(mock_chunks)
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
             chunks = []
@@ -258,10 +282,14 @@ class TestOllamaProviderGenerateStream:
         mock_client = AsyncMock()
         mock_client.chat.side_effect = Exception("Stream error")
 
-        with patch("core.services.llm.providers.ollama_provider.ollama") as mock_ollama:
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
             mock_ollama.AsyncClient.return_value = mock_client
-            from core.services.llm.exceptions import LLMProviderError
-            from core.services.llm.providers.ollama_provider import OllamaProvider
+            from baselith.core.services.llm.exceptions import LLMProviderError
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
 
             provider = OllamaProvider()
 
@@ -275,10 +303,10 @@ class TestOllamaProviderGenerateStream:
 class TestOllamaProviderHelpers:
     """Tests for OllamaProvider helper methods."""
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_extract_content_from_dict(self, mock_ollama):
         """Verify _extract_content handles dict response."""
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
 
@@ -287,10 +315,10 @@ class TestOllamaProviderHelpers:
 
         assert result == "Content with spaces"
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_extract_content_from_object(self, mock_ollama):
         """Verify _extract_content handles object response."""
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
 
@@ -300,10 +328,10 @@ class TestOllamaProviderHelpers:
 
         assert result == "Object content"
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_extract_tokens_from_response(self, mock_ollama):
         """Verify _extract_tokens extracts token counts."""
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
 
@@ -312,10 +340,10 @@ class TestOllamaProviderHelpers:
 
         assert result == 150
 
-    @patch("core.services.llm.providers.ollama_provider.ollama")
+    @patch("baselith.core.services.llm.providers.ollama_provider.ollama")
     def test_extract_tokens_estimates_when_missing(self, mock_ollama):
         """Verify _extract_tokens estimates when counts not available."""
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
 

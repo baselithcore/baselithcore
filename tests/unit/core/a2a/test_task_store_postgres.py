@@ -3,8 +3,8 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.a2a.task_store_postgres import PostgresTaskStore
-from core.a2a.types import Task, TaskState, TaskStatus
+from baselith.core.a2a.task_store_postgres import PostgresTaskStore
+from baselith.core.a2a.types import Task, TaskState, TaskStatus
 
 
 def _task(task_id: str = "t1") -> Task:
@@ -24,7 +24,8 @@ class TestPostgresTaskStore:
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             await PostgresTaskStore().initialize()
         sql = cursor.execute.call_args.args[0]
@@ -34,7 +35,8 @@ class TestPostgresTaskStore:
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             await PostgresTaskStore().save(_task("t1"))
         sql = cursor.execute.call_args.args[0]
@@ -48,7 +50,8 @@ class TestPostgresTaskStore:
         cursor.execute = AsyncMock()
         cursor.fetchone = AsyncMock(return_value={"data": _task("t1").to_dict()})
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             task = await PostgresTaskStore().get("t1")
         assert task is not None
@@ -60,7 +63,8 @@ class TestPostgresTaskStore:
         cursor.execute = AsyncMock()
         cursor.fetchone = AsyncMock(return_value=None)
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             assert await PostgresTaskStore().get("missing") is None
 
@@ -69,12 +73,14 @@ class TestPostgresTaskStore:
         cursor.execute = AsyncMock()
         cursor.rowcount = 1
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             assert await PostgresTaskStore().delete("t1") is True
         cursor.rowcount = 0
         with patch(
-            "core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)
+            "baselith.core.a2a.task_store_postgres.get_async_cursor",
+            _cursor_ctx(cursor),
         ):
             assert await PostgresTaskStore().delete("t1") is False
 
@@ -83,9 +89,12 @@ class TestPostgresTaskStore:
         cursor.execute = AsyncMock()
         cursor.fetchone = AsyncMock(return_value=None)
         with (
-            patch("core.a2a.task_store_postgres.get_async_cursor", _cursor_ctx(cursor)),
             patch(
-                "core.a2a.task_store_postgres.get_current_tenant_id",
+                "baselith.core.a2a.task_store_postgres.get_async_cursor",
+                _cursor_ctx(cursor),
+            ),
+            patch(
+                "baselith.core.a2a.task_store_postgres.get_current_tenant_id",
                 return_value="acme",
             ),
         ):
@@ -96,6 +105,6 @@ class TestPostgresTaskStore:
         assert "acme" in params
 
     async def test_is_a_task_store(self):
-        from core.a2a.server import TaskStore
+        from baselith.core.a2a.server import TaskStore
 
         assert issubclass(PostgresTaskStore, TaskStore)

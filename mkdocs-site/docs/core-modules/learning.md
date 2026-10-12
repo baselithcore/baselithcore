@@ -3,7 +3,7 @@ title: Learning Loop & Evolution
 description: Continuous reinforcement learning and evaluation-driven self-improvement
 ---
 
-**Module**: `core/learning/`
+**Module**: `baselith/core/learning/`
 
 The framework includes autonomous mechanisms for continuous learning from past
 interactions. Agents collect experiences, score them with a reward model, and
@@ -24,7 +24,7 @@ automatic fine-tuning.
 ## Module Structure
 
 ```text
-core/learning/
+baselith/core/learning/
 ├── __init__.py            # Public exports
 ├── learning_loop.py       # ContinuousLearner, PersistentLearner
 ├── evolution.py           # EvolutionService
@@ -36,10 +36,10 @@ core/learning/
 └── types.py               # Experience, Episode, LearningPhase
 ```
 
-Public exports from `core.learning`:
+Public exports from `baselith.core.learning`:
 
 ```python
-from core.learning import (
+from baselith.core.learning import (
     FeedbackCollector,
     FeedbackItem,
     ContinuousLearner,
@@ -68,7 +68,7 @@ are recorded, automatically scored, and training fires every
 `training_interval` experiences.
 
 ```python
-from core.learning import ContinuousLearner
+from baselith.core.learning import ContinuousLearner
 
 learner = ContinuousLearner(
     buffer_capacity=10000,
@@ -122,7 +122,7 @@ Key methods (all synchronous):
 checkpointing. State auto-loads on init and auto-saves after training.
 
 ```python
-from core.learning import PersistentLearner
+from baselith.core.learning import PersistentLearner
 
 learner = PersistentLearner(learner_id="support_agent")  # loads prior state
 learner.record_experience(state, action, outcome)
@@ -145,8 +145,8 @@ events and reacts by writing memory entries (lessons learned / best practices)
 and optionally driving automatic fine-tuning.
 
 ```python
-from core.learning import EvolutionService
-from core.memory import AgentMemory
+from baselith.core.learning import EvolutionService
+from baselith.core.memory import AgentMemory
 
 evolution = EvolutionService(
     memory_manager=AgentMemory(),     # optional

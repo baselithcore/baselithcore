@@ -5,16 +5,16 @@ at first use makes the application role need DDL privileges in production, and
 leaves that table with no migration history and no rollback. These tests pin
 the invariant both ways:
 
-* every Postgres table a ``core/`` module self-initializes must also be created
+* every Postgres table a ``baselith/core/`` module self-initializes must also be created
   by a migration under ``migrations/versions/`` — otherwise a deployment that
   runs migrations as a pre-deploy job and revokes DDL from the runtime role
   crashes the first time that feature is touched;
 * the reverse direction is deliberately *not* enforced: migrations may own
   tables no module self-initializes (that is the goal state).
 
-SQLite file stores (``core.privacy``, ``core.incidents``, ``core.compliance``,
-``core.thirdparty``, ``core.observability.audit_chain``,
-``core.orchestration.checkpoint_sqlite``) are out of scope: they are embedded
+SQLite file stores (``baselith.core.privacy``, ``baselith.core.incidents``, ``baselith.core.compliance``,
+``baselith.core.thirdparty``, ``baselith.core.observability.audit_chain``,
+``baselith.core.orchestration.checkpoint_sqlite``) are out of scope: they are embedded
 single-file stores with no migration job, where self-initialization is the
 correct design. So is the pgvector provider, which creates one table per
 *collection* on demand — a data-plane operation, not a deploy-time schema.
@@ -28,14 +28,14 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATIONS_DIR = REPO_ROOT / "core" / "db" / "migrations" / "versions"
+MIGRATIONS_DIR = REPO_ROOT / "baselith" / "core" / "db" / "migrations" / "versions"
 
 #: Modules that self-initialize schema on the shared **Postgres** pool.
 POSTGRES_SELF_INIT_MODULES = (
-    "core/a2a/task_store_postgres.py",
-    "core/orchestration/checkpoint_postgres.py",
-    "core/prompts/store_postgres.py",
-    "core/storage/postgres.py",
+    "baselith/core/a2a/task_store_postgres.py",
+    "baselith/core/orchestration/checkpoint_postgres.py",
+    "baselith/core/prompts/store_postgres.py",
+    "baselith/core/storage/postgres.py",
 )
 
 _CREATE_TABLE_RE = re.compile(
@@ -113,7 +113,7 @@ def test_every_runtime_postgres_table_has_a_migration() -> None:
 def test_no_new_module_self_initializes_postgres_schema() -> None:
     """The self-init list is a closed set: a new entry needs a migration too."""
     suspects: list[str] = []
-    for path in sorted((REPO_ROOT / "core").rglob("*.py")):
+    for path in sorted((REPO_ROOT / "baselith" / "core").rglob("*.py")):
         if path.is_relative_to(MIGRATIONS_DIR.parent):
             continue  # the migrations ARE the owner, not a self-initializer
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -136,19 +136,19 @@ def test_no_new_module_self_initializes_postgres_schema() -> None:
 
 def test_runtime_ddl_is_gated_by_configuration() -> None:
     """Each self-init call site must honour the ``DB_RUNTIME_DDL`` gate."""
-    from core.db.ddl import runtime_ddl_allowed, skip_runtime_ddl
+    from baselith.core.db.ddl import runtime_ddl_allowed, skip_runtime_ddl
 
     assert callable(runtime_ddl_allowed)
     assert callable(skip_runtime_ddl)
     for relative in POSTGRES_SELF_INIT_MODULES:
         text = (REPO_ROOT / relative).read_text(encoding="utf-8")
-        assert "from core.db.ddl import" in text, relative
+        assert "from baselith.core.db.ddl import" in text, relative
         assert "skip_runtime_ddl(" in text, relative
 
 
 def test_rls_migration_covers_every_tenant_scoped_table() -> None:
     """Every migrated table with a ``tenant_id`` column gets an RLS policy."""
-    from core.db.ddl import RLS_PROTECTED_TABLES
+    from baselith.core.db.ddl import RLS_PROTECTED_TABLES
 
     migration_text = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted(MIGRATIONS_DIR.glob("*.py"))
@@ -168,13 +168,13 @@ def test_rls_migration_covers_every_tenant_scoped_table() -> None:
 
 
 def test_rls_table_list_matches_the_migrations() -> None:
-    """``core.db.ddl`` names exactly the tables the migrations protect.
+    """``baselith.core.db.ddl`` names exactly the tables the migrations protect.
 
     Migration 008 retrofits the policy onto the tables that predate it; every
     table added afterwards declares its own ``TENANT_SCOPED_TABLES`` in the
     migration that creates it. The union is the contract.
     """
-    from core.db.ddl import RLS_PROTECTED_TABLES
+    from baselith.core.db.ddl import RLS_PROTECTED_TABLES
 
     declared: set[str] = set()
     for path in sorted(MIGRATIONS_DIR.glob("*.py")):
@@ -190,8 +190,10 @@ def test_rls_table_list_matches_the_migrations() -> None:
 
 
 def test_ddl_module_has_no_core_to_plugin_import() -> None:
-    """``core.db.ddl`` stays domain-agnostic (Sacred Core)."""
-    tree = ast.parse((REPO_ROOT / "core" / "db" / "ddl.py").read_text(encoding="utf-8"))
+    """``baselith.core.db.ddl`` stays domain-agnostic (Sacred Core)."""
+    tree = ast.parse(
+        (REPO_ROOT / "baselith" / "core" / "db" / "ddl.py").read_text(encoding="utf-8")
+    )
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
             assert not node.module.startswith("plugins"), node.module

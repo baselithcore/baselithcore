@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.human.interaction import HumanIntervention
-from core.learning.feedback import FeedbackCollector
-from core.memory.manager import AgentMemory
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.human.interaction import HumanIntervention
+from baselith.core.learning.feedback import FeedbackCollector
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 @pytest.fixture

@@ -7,8 +7,8 @@ import socket
 import httpx
 import pytest
 
-from core.security.http import create_hardened_async_client
-from core.security.ssrf import SsrfError, SsrfPolicy
+from baselith.core.security.http import create_hardened_async_client
+from baselith.core.security.ssrf import SsrfError, SsrfPolicy
 
 
 def _dns(monkeypatch, mapping: dict[str, list[str]]) -> None:

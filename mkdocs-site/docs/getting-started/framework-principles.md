@@ -27,7 +27,7 @@ It provides the domain-agnostic infrastructure necessary to orchestrate, persist
     - **NOT a Vertical Product**: It's not a customer service chatbot or a financial analyst. It's the factory to build them.
     - **NOT an LLM Wrapper**: LLM calls are an implementation detail. The value is in orchestration, memory, and reasoning.
     - **NOT LangChain**: It's not a collection of heterogeneous utilities. It's an opinionated architecture with strong contracts.
-    - **NO Domain Logic in Core**: If you see an import like `from core.services import TrackerService`, you're violating the manifesto.
+    - **NO Domain Logic in Core**: If you see an import like `from baselith.core.services import TrackerService`, you're violating the manifesto.
 
 ---
 
@@ -82,8 +82,8 @@ No core component directly instantiates heavy dependencies (DB, LLM). Everything
 
 ```python
 # ✅ Correct
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol
 
 class MyHandler:
     def __init__(self):
@@ -119,12 +119,12 @@ Components communicate via interfaces (Protocols), never via concrete implementa
 
 ```python
 # ✅ Use Protocol
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol
 llm: LLMServiceProtocol = ServiceRegistry.get(LLMServiceProtocol)
 
 # ❌ Direct dependency
-from core.services.llm.providers.openai_provider import OpenAIProvider
+from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 llm = OpenAIProvider(api_key="sk-...")  # NO! Tight coupling
 ```
 
@@ -159,7 +159,7 @@ Errors are not strings; they are structured objects (`FrameworkErrorCode`). We a
 
 ```python
 # ✅ Structured errors
-from core.lifecycle.errors import RecoverableError, FrameworkErrorCode
+from baselith.core.lifecycle.errors import RecoverableError, FrameworkErrorCode
 
 raise RecoverableError(
     message="LLM request timed out",
@@ -179,7 +179,7 @@ The system is inherently multi-tenant. Every operation, from database queries to
 
 ```python
 # ✅ Tenant Context
-from core.context import set_tenant_context, reset_tenant_context
+from baselith.core.context import set_tenant_context, reset_tenant_context
 
 token = set_tenant_context("tenant-123")
 try:
@@ -210,7 +210,7 @@ Never mix keyspaces of different natures.
 ### Plugins Touching the Core
 
 ```python
-# NO! Never add a module to core/services/ for a plugin's sake
+# NO! Never add a module to baselith/core/services/ for a plugin's sake
 class JiraService:  # WRONG! Jira is a domain integration, not infrastructure
     ...
 ```
@@ -245,7 +245,7 @@ Solution: Use `httpx` with `async/await`.
 ### Domain Logic in Core
 
 ```python
-# NO! Specific business logic under core/
+# NO! Specific business logic under baselith/core/
 class CustomerSupportService:  # WRONG! Belongs in a plugin
     async def triage_ticket(self, ticket: dict) -> str: ...
 ```

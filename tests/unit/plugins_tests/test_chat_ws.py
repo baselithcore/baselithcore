@@ -17,11 +17,11 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.chat_ws as chat_ws_module
-from core.auth.types import AuthRole, AuthUser
-from core.config import SecurityConfig
-from core.middleware.security import SecurityManager
-from plugins.api_routers.chat_ws import router
+import baselith.plugins.api_routers.chat_ws as chat_ws_module
+from baselith.core.auth.types import AuthRole, AuthUser
+from baselith.core.config import SecurityConfig
+from baselith.core.middleware.security import SecurityManager
+from baselith.plugins.api_routers.chat_ws import router
 
 
 class _FakeChatService:
@@ -78,7 +78,7 @@ def _client(
     # exercised for real, only credentials and Redis are stubbed.
     manager = SecurityManager(_security_config())
     manager.rate_limiter = AsyncMock()
-    monkeypatch.setattr("core.auth.manager.get_auth_manager", lambda: auth)
+    monkeypatch.setattr("baselith.core.auth.manager.get_auth_manager", lambda: auth)
     monkeypatch.setattr(chat_ws_module, "_get_security_manager", lambda: manager)
     monkeypatch.setattr(chat_ws_module, "_get_chat_service", lambda: service)
     app = FastAPI()

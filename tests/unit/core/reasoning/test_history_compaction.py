@@ -4,14 +4,21 @@ import asyncio
 
 import pytest
 
-from core.orchestration.budget_context import activate_budget, deactivate_budget
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.reasoning.history import (
+from baselith.core.orchestration.budget_context import (
+    activate_budget,
+    deactivate_budget,
+)
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.reasoning.history import (
     compact_history,
     compact_messages,
     history_token_budget,
 )
-from core.services.llm._deadline import stream_within_deadline
+from baselith.core.services.llm._deadline import stream_within_deadline
 
 LONG = "observation " * 400  # ~ hundreds of tokens per entry
 
@@ -132,7 +139,7 @@ async def test_stalled_stream_maps_to_budget_exceeded():
 
 
 def test_effective_tool_timeout_shrinks_to_budget():
-    from core.reasoning.react import ReActAgent
+    from baselith.core.reasoning.react import ReActAgent
 
     agent = ReActAgent(tool_timeout=120.0)
     budget = LoopBudget(limits=LoopLimits(max_seconds=10.0))
@@ -147,7 +154,7 @@ def test_effective_tool_timeout_shrinks_to_budget():
 
 
 def test_effective_tool_timeout_none_without_budget_or_cap():
-    from core.reasoning.react import ReActAgent
+    from baselith.core.reasoning.react import ReActAgent
 
     assert ReActAgent()._effective_tool_timeout() is None
 

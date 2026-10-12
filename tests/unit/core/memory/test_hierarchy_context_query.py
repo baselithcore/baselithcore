@@ -1,7 +1,7 @@
 """Query-aware context assembly: Background / Long-term sections are gated by
 relevance to the current query instead of pure recency."""
 
-from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
 
 async def _memory_with_old_relevant_mtm() -> HierarchicalMemory:

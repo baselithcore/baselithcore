@@ -3,10 +3,14 @@ title: Core Services
 description: LLM, VectorStore, Vision, Voice, and other services
 ---
 
-The `core/services` module provides domain-agnostic services. The chat service
-(`core/services/chat/`: request handling, streaming and per-conversation history)
+The `baselith/core/services` module provides domain-agnostic services. The chat service
+(`baselith/core/services/chat/`: request handling, streaming and per-conversation history)
 is documented in [Chat & RAG](chat.md), in particular
-[Conversation History](chat.md#conversation-history).
+[Conversation History](chat.md#conversation-history) and its
+[entry points](chat.md#entry-points) — `handle_chat_async` and
+`handle_chat_stream_async` take a stable `run_id` so a retried request resumes
+its durable run (a retried stream replays a completed answer, or resumes an
+interrupted run, through `services/chat/stream_session.py`).
 
 ## Overview
 
@@ -40,17 +44,17 @@ graph TB
 Abstraction for language model providers.
 
 !!! info "Provider SDKs are imported on demand"
-    `core.services.llm.provider_factory` imports a provider client inside the branch that builds it, never at module scope. A deployment configures one provider; importing this module used to import the anthropic, openai, ollama and huggingface clients in order to construct exactly one of them, costing 0.38 s and roughly 1 800 modules on every path that reached the service.
+    `baselith.core.services.llm.provider_factory` imports a provider client inside the branch that builds it, never at module scope. A deployment configures one provider; importing this module used to import the anthropic, openai, ollama and huggingface clients in order to construct exactly one of them, costing 0.38 s and roughly 1 800 modules on every path that reached the service.
 
 In tests, patch a provider where it is **defined** —
-`core.services.llm.providers.openai_provider.OpenAIProvider` — not as an
+`baselith.core.services.llm.providers.openai_provider.OpenAIProvider` — not as an
 attribute of the factory, which no longer has one. See
 [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
 
 ### LLM Structure
 
 ```text
-core/services/llm/
+baselith/core/services/llm/
 ├── __init__.py
 ├── service.py          # Main LLMService (generate_response + generate)
 ├── interfaces.py       # Provider protocol
@@ -73,7 +77,7 @@ core/services/llm/
 ### LLM Basic Usage
 
 ```python
-from core.services.llm import get_llm_service
+from baselith.core.services.llm import get_llm_service
 
 llm = get_llm_service()
 
@@ -103,7 +107,7 @@ answer.
 
 When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
 fills it on every path — text, streaming, structured and the message API —
-via `core.services.llm.model_capabilities.configured_max_tokens`. The setting
+via `baselith.core.services.llm.model_capabilities.configured_max_tokens`. The setting
 used to be bound and advertised but read by nothing, so it capped nothing and
 OpenAI/Gemini/Ollama calls ran to the model's own ceiling. Unset (the default)
 keeps each provider's default: Anthropic's per-family table, the model limit
@@ -116,7 +120,7 @@ a structured `LLMResult` (text and/or parsed tool calls), using each provider's
 native tool API where available:
 
 ```python
-from core.services.llm import get_llm_service, LLMToolSpec, ToolChoice, ResponseFormat
+from baselith.core.services.llm import get_llm_service, LLMToolSpec, ToolChoice, ResponseFormat
 
 llm = get_llm_service()
 
@@ -153,7 +157,7 @@ validation error fed back to the model:
 
 ```python
 from pydantic import BaseModel
-from core.services.llm import generate_typed, get_llm_service
+from baselith.core.services.llm import generate_typed, get_llm_service
 
 class Verdict(BaseModel):
     is_real: bool
@@ -180,7 +184,7 @@ because Pydantic emits the default beside the reference — `{"$ref": "#/$defs/
 Kind", "default": "fact"}` — which is rejected with `$ref cannot have keywords
 {'default'}`. The adapter reduces such a node to the bare `$ref`.
 
-`core/services/llm/_strict_schema.py::to_strict_schema` adapts the document
+`baselith/core/services/llm/_strict_schema.py::to_strict_schema` adapts the document
 (including nested models under `$defs`) on the way out, so a response model
 may keep its defaults. Requiring a defaulted field costs nothing: the model
 now always emits a value, so the default is simply never exercised. A field
@@ -192,7 +196,7 @@ recommended way to express "optional". The adaptation is skipped for
 sits next to the text seams rather than in each caller:
 
 ```python
-from core.services.llm import generate_image, get_llm_service
+from baselith.core.services.llm import generate_image, get_llm_service
 
 image = await generate_image(
     get_llm_service(),
@@ -217,9 +221,9 @@ Providers return base64 text, and two things go wrong there without raising.
 gateway that answers with a data URL (`data:image/png;base64,…`) decodes into a
 corrupt image that only shows up as a broken `<img>` much later; and the
 documented format is not always what arrives — the GPT image models return
-WebP for some requests. `core/services/llm/images.py::decode_image_payload`
+WebP for some requests. `baselith/core/services/llm/images.py::decode_image_payload`
 strips any data-URL prefix, decodes with `validate=True`, and identifies the
-result with `core.utils.images.sniff_image_type` (PNG, JPEG, GIF, WebP by
+result with `baselith.core.utils.images.sniff_image_type` (PNG, JPEG, GIF, WebP by
 magic bytes). Bytes that are not a recognised image raise `LLMProviderError`
 quoting their head — an HTML error page from a proxy reads as
 `3c 68 74 6d 6c` — so a caller stores a real image or a reason, never a
@@ -251,7 +255,7 @@ When native tools are off or the provider lacks support, `generate()` falls back
 to **prompt coercion**: the tool catalog (and any response schema) is injected
 into the system prompt, JSON mode is requested via the legacy string path, and a
 `{"tool": ..., "arguments": {...}}` object is parsed back into a `ToolCall`
-(`core.services.llm._coercion`). The parse fails closed: only a leading,
+(`baselith.core.services.llm._coercion`). The parse fails closed: only a leading,
 closed `<think>…</think>` block, surrounding whitespace and one enclosing
 markdown code fence are removed, and what remains must be exactly one
 `{"tool": ...}`/`{"tool": null, "final": ...}` object. An unterminated leading
@@ -271,12 +275,19 @@ API on the coercion path, so the default is safe everywhere; set
 Token usage, the middleware cost controller, and the per-request `LoopBudget`
 are charged identically on both paths.
 
+**Streamed message turns.** `generate_messages(on_text=...)` streams a turn's
+text chunk by chunk on providers that declare `supports_streaming_tools`
+(OpenAI, vLLM; `generate_messages_stream`), while still returning the whole
+`LLMResult` with exactly one usage record. Coerced tools, structured output,
+other providers and `LLM_STREAM_AGENT_TEXT=false` keep the buffered turn. See
+[Messages](messages.md#streaming-a-turn-on_text).
+
 **Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
 fall through an ordered chain of `provider:model` stages when the primary
 provider fails or its circuit breaker is open — e.g.
 `LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
 fallback, the default). Each stage is a cached `LLMService` clone with the
-provider's dedicated credentials (`core.services.llm.fallback_runtime`, whose
+provider's dedicated credentials (`baselith.core.services.llm.fallback_runtime`, whose
 shared machinery lives in `_fallback_support`); a clone never recurses into its
 own chain. The span records `gen_ai.baselith.serving_provider` and
 `gen_ai.response.model`, and GenAI metrics are attributed to the provider that
@@ -302,7 +313,7 @@ operational event and not an implementation detail.
 **Cost follows the answer, not the request.** Every ledger — the middleware
 controller, the per-run `LoopBudget`, the tenant's cumulative spend and the
 GenAI cost metric — books the model that actually served, provider-namespaced
-when that provider is local (`core.models.pricing.qualified_model_id`). Two
+when that provider is local (`baselith.core.models.pricing.qualified_model_id`). Two
 bugs closed at once: a fallback answer used to be priced at the *primary's*
 rate, and a self-hosted model, having no pricing row, was priced through the
 unknown-model policy at `UNKNOWN_PRICE`'s punitive 100 $/M — spend that never
@@ -320,7 +331,7 @@ provider names in chain` on *every* call, turning a fallback into a total
 outage. The circuit breaker stays keyed by **provider** (a rate limit is a
 property of the provider, not of one model).
 
-**Startup posture check (`LLM_PREFLIGHT`).** `core.services.llm.preflight`
+**Startup posture check (`LLM_PREFLIGHT`).** `baselith.core.services.llm.preflight`
 runs once from the startup health checks and answers the question the runtime
 cannot: *will this deployment serve from what it thinks it will?* It reports
 
@@ -365,7 +376,7 @@ stage could spend `LLM_REQUEST_TIMEOUT` across the three rate-limit attempts of
 `_generate_with_retry` plus backoff, so a three-stage chain ran for many
 minutes on a single request. This is the wall-clock budget for `run()` end to
 end. Unset it and
-`core.services.llm.fallback_runtime._chain_timeout` **falls back to
+`baselith.core.services.llm.fallback_runtime._chain_timeout` **falls back to
 `LLM_REQUEST_TIMEOUT` (default `120.0`)** — the safe reading of "unset" here is
 *one request's worth of time*, not *forever*.
 
@@ -383,7 +394,7 @@ buffered, streaming and native-structured paths alike. See
 [Fallback chain](models.md#fallback-chain) for the primitive.
 
 The **streaming path** (`generate_response_stream()`) falls through the same
-chain via `core.services.llm._stream_fallback`, with one hard limit: failover
+chain via `baselith.core.services.llm._stream_fallback`, with one hard limit: failover
 happens only **before the first chunk reaches the caller**. Each candidate is
 opened and its first chunk awaited — a failure there is invisible to the
 consumer and switches provider, while a failure afterwards propagates, because
@@ -403,7 +414,7 @@ serving provider lands on the span identically.
 
 **Cost-aware routing (`LLM_ROUTING_ENABLED` / `LLM_ROUTING_POLICY`).**
 `generate_response()` and `generate()` accept a `task_category` hint (a
-`core.models.routing.TaskCategory` value, e.g. `"classification"`). When
+`baselith.core.models.routing.TaskCategory` value, e.g. `"classification"`). When
 routing is enabled, the hint resolves to a model tier via `ModelRouter`;
 `LLM_ROUTING_POLICY` is a JSON object mapping category to model id. Model
 precedence is **pinned > per-call `model=` > routed > config default**, and
@@ -462,15 +473,15 @@ where it does not.
 
 ### One round trip for a message history
 
-`core/services/llm/message_transport.py` is the single seam both agent loops
+`baselith/core/services/llm/message_transport.py` is the single seam both agent loops
 send a conversation through. Only one of them had it for a while: the typed
 [`Agent`](agent.md) spoke the [message API](messages.md), while the ReAct loop
 the orchestrator actually runs rebuilt a flat prompt every turn. This is that
 round trip, written once, so the two cannot drift apart again.
 
 ```python
-from core.services.llm.message_transport import generate_over_messages
-from core.services.llm.messages import Message
+from baselith.core.services.llm.message_transport import generate_over_messages
+from baselith.core.services.llm.messages import Message
 
 history = [Message.user("population of Rome?")]
 
@@ -487,7 +498,7 @@ result = await generate_over_messages(
 
 Everything after `history` is keyword-only, and the return is the ordinary
 `LLMResult`. Import it by path; it is deliberately not re-exported from
-`core.services.llm`.
+`baselith.core.services.llm`.
 
 **Two paths, one contract.** `service_supports_messages(service)` decides:
 `service.generate_messages(...)` when the service advertises
@@ -517,12 +528,12 @@ for what the ReAct loop appends between round trips.
 
 ### Streaming with tool calls
 
-`core/services/llm/stream_events.py` — stream a structured generation as a
+`baselith/core/services/llm/stream_events.py` — stream a structured generation as a
 neutral event sequence, so agent UIs can render text deltas and show tool
 invocations while the model emits them:
 
 ```python
-from core.services.llm.stream_events import (
+from baselith.core.services.llm.stream_events import (
     StreamEnd, TextDelta, ToolCallStarted, generate_stream_events,
 )
 
@@ -543,7 +554,7 @@ path is replayed as events — the consumer contract is identical. Deadline
 (`stream_within_deadline`) and token/cost accounting match the sibling paths.
 
 !!! danger "Anthropic deltas are read off `content_block_delta`"
-    The Anthropic reader (`core/services/llm/providers/_anthropic_streaming.py`)
+    The Anthropic reader (`baselith/core/services/llm/providers/_anthropic_streaming.py`)
     dispatched on `event.type == "text_delta"` — a shape no Anthropic SDK
     emits. The delta type lives on `event.delta.type`, inside a
     `content_block_delta` event, so the branch never matched and both
@@ -559,7 +570,7 @@ path is replayed as events — the consumer contract is identical. Deadline
 
 ### Batch generation (offline, −50% cost)
 
-`core/services/llm/batch.py` — for offline workloads (eval replays,
+`baselith/core/services/llm/batch.py` — for offline workloads (eval replays,
 consolidation summaries, labeling) that don't need interactive latency:
 
 !!! note "Library API — not wired by default"
@@ -567,7 +578,7 @@ consolidation summaries, labeling) that don't need interactive latency:
     offline jobs.
 
 ```python
-from core.services.llm.batch import BatchPrompt, generate_batch
+from baselith.core.services.llm.batch import BatchPrompt, generate_batch
 
 results = await generate_batch(service, [
     BatchPrompt(custom_id="case-1", prompt="Summarize ..."),
@@ -622,8 +633,8 @@ like Arize Phoenix key on. Opt in with `BASELITH_OPENINFERENCE_ENABLED=true`
 and `generate_response` / `stream_response` add `openinference.span.kind=LLM`,
 `llm.model_name`, `llm.provider` and
 `llm.token_count.prompt`/`.completion`/`.total` to each span
-(`core/observability/openinference.py`, wired in
-`core/services/llm/_generation.py` and `_streaming.py`) — the existing OTLP
+(`baselith/core/observability/openinference.py`, wired in
+`baselith/core/services/llm/_generation.py` and `_streaming.py`) — the existing OTLP
 exporter then feeds a Phoenix-style backend directly, with no second
 telemetry pipeline.
 
@@ -640,8 +651,8 @@ is not retained chunk-by-chunk. See
 constructor arguments. The constructor only controls caching and cost tracking:
 
 ```python
-from core.services.llm import LLMService
-from core.services.llm.cost_control import CostTracker
+from baselith.core.services.llm import LLMService
+from baselith.core.services.llm.cost_control import CostTracker
 
 # Provider/model come from LLMConfig (env LLM_PROVIDER / LLM_MODEL, etc.)
 llm = LLMService(
@@ -666,7 +677,7 @@ default (`api.openai.com`) applies. A self-hosted vLLM server has its own
 provider (below).
 
 ```python
-from core.services.llm.providers.openai_provider import OpenAIProvider
+from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
 provider = OpenAIProvider(
     api_key="sk-...",
@@ -711,7 +722,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **Several servers, one per model (`LLM_VLLM_ENDPOINTS`).** A vLLM server
   serves one model, so a second model is a second server on another port. List
   them once — `LLM_VLLM_ENDPOINTS=http://gpu:8002/v1,http://gpu:8003/v1` — and
-  name models, never ports: `core.services.llm.vllm_endpoints` reads each
+  name models, never ports: `baselith.core.services.llm.vllm_endpoints` reads each
   server's `GET {LLM_VLLM_API_BASE}/models` (cached 60 s; a model missing from the cache forces
   one refresh, so a newly started model is found on the next call) and routes
   every call to the server serving its model. The provider keeps one client
@@ -738,7 +749,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
   `--tool-call-parser` matching the model, set `LLM_VLLM_NATIVE_TOOLS=false`:
   tool use then goes through prompt coercion instead of a rejected request.
   That holds for the message path too (`generate_messages`, which every
-  `core.agent.Agent` turn takes): a turn that offers tools or carries tool
+  `baselith.core.agent.Agent` turn takes): a turn that offers tools or carries tool
   blocks is rendered as a transcript and coerced, so no `tools`/`tool_choice`
   ever reaches the server, while a tool-free turn still goes out as messages.
   A message-path fallback-chain stage in that state is skipped on a turn that
@@ -757,7 +768,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **Answers, not reasoning.** A thinking model (Qwen3, DeepSeek-R1) on a server
   started **without `--reasoning-parser`** returns its reasoning inside the
   answer — no opening tag, the reasoning closed by `</think>`, then the answer.
-  `core.services.llm.reasoning_text` drops it: `strip_reasoning` for whole
+  `baselith.core.services.llm.reasoning_text` drops it: `strip_reasoning` for whole
   answers, `ReasoningStreamFilter` for streams (it holds text back until the
   `</think>` or the end of the stream, and stops holding back as soon as the
   server streams a separate `reasoning_content`). The provider applies both; a
@@ -781,7 +792,7 @@ The "Anthropic API key is required" constructor check applies **only** to the
 `api` backend; `bedrock`/`vertex` accept `api_key=None` and authenticate
 through the cloud's own credential chain. An unknown backend raises
 `LLMProviderError` at construction. All three clients are built by
-`core/services/llm/providers/_anthropic_client.py` with the same discipline
+`baselith/core/services/llm/providers/_anthropic_client.py` with the same discipline
 as the rest of the stack: `max_retries=0` (the service owns retries) and an
 explicit `httpx.Timeout` (no 600 s SDK default).
 
@@ -827,13 +838,13 @@ names for the cloud backends).
 provider and/or model the shared funnel serves it — without the plugin changing
 a line of code. Three framework pieces compose the mechanism:
 
-1. **Plugin identity context** — `core.context.get_current_plugin()`. Bound only
+1. **Plugin identity context** — `baselith.core.context.get_current_plugin()`. Bound only
    at framework chokepoints, never self-declared: the pure-ASGI
    `PluginContextMiddleware` attributes each HTTP request to the plugin owning
    its route (router prefix, then mounted sub-app), and the orchestrator binds
    the owner of an intent's flow handler around dispatch
    (`PluginRegistry.get_flow_handler_owner`).
-2. **Policy seam** — `core.services.llm.set_plugin_llm_policy_resolver`. An
+2. **Policy seam** — `baselith.core.services.llm.set_plugin_llm_policy_resolver`. An
    admin-facing plugin registers a resolver at activation;
    `resolver(plugin_name)` returns a `PluginLLMPolicy(provider=..., model=...)`
    to pin that plugin's routing, or `None` to keep the deployment default. Like
@@ -845,8 +856,16 @@ a line of code. Three framework pieces compose the mechanism:
    `LLMService` clone built for the pinned `(provider, model)` pair, sharing
    the central config's timeouts, caching and cost accounting.
 
+Every provider takes `request_timeout` and `connect_timeout` from the
+`LLMConfig` its service was built with — Ollama included. A caller that builds
+`LLMService(config=LLMConfig(..., request_timeout=600))` for a slow local model
+gets that deadline; Ollama used to read the process-wide `LLM_REQUEST_TIMEOUT`
+instead, so a long structured generation on a large local model was cut off at
+the global default however long its own config allowed. A provider built
+directly with no explicit timeouts still falls back to the global values.
+
 ```python
-from core.services.llm import PluginLLMPolicy, set_plugin_llm_policy_resolver
+from baselith.core.services.llm import PluginLLMPolicy, set_plugin_llm_policy_resolver
 
 # resolver(plugin_name) -> PluginLLMPolicy | None (cheap, cached, never raises)
 set_plugin_llm_policy_resolver(my_policy_lookup)
@@ -874,9 +893,9 @@ one provider would have its HTTP calls served by that provider and its queued
 work by the deployment default. The same plugin, two different models, with
 nothing on screen to say so. So the enqueuing side (where the resolver lives)
 records the resolved policy on the job alongside its tenant and owning plugin
-(`core.task_queue.scheduler.ambient_job_meta`), and `TenantAwareWorker`
+(`baselith.core.task_queue.scheduler.ambient_job_meta`), and `TenantAwareWorker`
 restores all of it for the duration of the job
-(`core.services.llm.policy.bind_llm_policy`). A live resolver always wins over
+(`baselith.core.services.llm.policy.bind_llm_policy`). A live resolver always wins over
 the carried policy, so a process that *does* host plugins keeps resolving
 fresh. One consequence worth knowing: a self-rescheduling chain re-stamps what
 it is running under, so it keeps the pin that was in force when the chain
@@ -886,7 +905,7 @@ Credentials are **never** part of a policy. The primary `LLM_API_KEY` belongs
 to the default `LLM_PROVIDER`; policy-routed providers read their dedicated
 config fields — `LLM_ANTHROPIC_API_KEY`/`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 `LLM_HUGGINGFACE_API_KEY`/`HF_TOKEN`, `LLM_VLLM_API_KEY`/`VLLM_API_KEY`
-(`core.services.llm.runtime.api_key_for` resolves the lookup;
+(`baselith.core.services.llm.runtime.api_key_for` resolves the lookup;
 `provider_configured` reports which providers a policy may pin). Ollama stays
 keyless; vLLM is keyless-capable and counts as configured once
 `LLM_VLLM_API_BASE` names its server. A vLLM key may also arrive through the
@@ -899,7 +918,7 @@ and governed clients use the same one.
 stage) that switches provider must not inherit it: an OpenAI-compatible gateway
 serves nothing on Ollama's `/api/chat`, so a call aimed there stalls until the
 request timeout and then reports a timeout — a misconfiguration wearing the
-costume of a slow model. `core.services.llm.runtime.api_base_for` resolves the
+costume of a slow model. `baselith.core.services.llm.runtime.api_base_for` resolves the
 endpoint that belongs to the provider actually being called, and every seam that
 builds a provider client goes through it (the policy clone, the governed-client
 config, each fallback-stage clone, and the Ollama provider's own fallback).
@@ -921,7 +940,7 @@ resolution, so an empty `LLM_ANTHROPIC_API_KEY=` line does not shadow a real key
 supplied under the SDK-standard `ANTHROPIC_API_KEY`.
 
 When central configuration carries nothing for a provider, `api_key_for` makes
-one last call: `core.services.llm.credentials.resolve_llm_credential`. That is a
+one last call: `baselith.core.services.llm.credentials.resolve_llm_credential`. That is a
 registration seam — like the policy resolver, core exposes it and never imports
 whatever fills it — so a deployment can let an operator supply a missing key
 from an admin surface without the environment ever losing precedence. The
@@ -972,7 +991,7 @@ drop the feature, so instead they resolve the *effective* routing for their
 plugin and point their own client at that governed target:
 
 ```python
-from core.services.llm import resolve_governed_client_config
+from baselith.core.services.llm import resolve_governed_client_config
 
 gov = resolve_governed_client_config("my-plugin")   # None ⇒ keep your own defaults
 if gov is not None and gov.speaks_openai:            # openai or vllm
@@ -1037,7 +1056,7 @@ every scope alike).
 ### Cost Control
 
 ```python
-from core.services.llm.cost_control import CostTracker, estimate_tokens
+from baselith.core.services.llm.cost_control import CostTracker, estimate_tokens
 
 tracker = CostTracker(max_tokens=10000)
 
@@ -1052,11 +1071,11 @@ print(tracker.get_usage())
 # {"tokens_used": 150, "max_tokens": 10000, "remaining": 9850}
 ```
 
-Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `core.utils.tokens`. The tiktoken encoder is never loaded on a running event loop (its first load reads, or downloads, the BPE file): a sync `estimate_tokens` call there starts a one-shot background load and uses the heuristic until it lands, while `estimate_tokens_async` awaits the load in a worker thread and returns the exact count.
+Token estimation uses `tiktoken` when available (exact count per model encoding), with an intelligent character-class heuristic as fallback (different ratios for English prose, code, and CJK text). The implementation is shared via `baselith.core.utils.tokens`. The tiktoken encoder is never loaded on a running event loop (its first load reads, or downloads, the BPE file): a sync `estimate_tokens` call there starts a one-shot background load and uses the heuristic until it lands, while `estimate_tokens_async` awaits the load in a worker thread and returns the exact count.
 
 !!! note "Enforced per-request budget"
     Beyond token tracking, each `generate_response` call charges its **real USD
-    cost** (resolved from `core/models/pricing`) against the ambient per-request
+    cost** (resolved from `baselith/core/models/pricing`) against the ambient per-request
     `LoopBudget`, so `LoopLimits.budget_usd` is an **enforced** cap rather than
     advisory. Models absent from the pricing table are not charged, so self-hosted
     models never abort a request on an unknown price. See
@@ -1067,7 +1086,7 @@ Token estimation uses `tiktoken` when available (exact count per model encoding)
 The per-request `LoopBudget` caps one run; the **tenant cost budget** caps the
 ambient tenant's cumulative LLM spend over calendar windows. **All five**
 generation paths enforce it through the seam in
-`core/quotas/cost_enforcement.py` — plain generation (`_generation.py`),
+`baselith/core/quotas/cost_enforcement.py` — plain generation (`_generation.py`),
 streaming (`_streaming.py`), stream events (`stream_events.py`), the
 [message API](messages.md) (`message_runtime.py`) and structured output
 (`structured.py`):
@@ -1103,12 +1122,12 @@ per-tenant override). See
 
 Every generation path (string, structured, streaming, batch events) reports its
 measured input/output token counts through one funnel in
-`core.services.llm._telemetry`. Consumers that need to *observe* that usage —
+`baselith.core.services.llm._telemetry`. Consumers that need to *observe* that usage —
 accounting ledgers, dashboards, per-plugin attribution — subscribe with
 `register_token_sink` instead of patching internals:
 
 ```python
-from core.services.llm import register_token_sink, unregister_token_sink
+from baselith.core.services.llm import register_token_sink, unregister_token_sink
 
 def my_sink(count: int, model: str) -> None:
     ...  # input reports arrive with model="input"/"input_stream"
@@ -1135,7 +1154,7 @@ reports nothing at all. A consumer that prices usage — a spend ledger, a cost
 dashboard — subscribes to the usage seam instead:
 
 ```python
-from core.services.llm import UsageReport, register_usage_sink, unregister_usage_sink
+from baselith.core.services.llm import UsageReport, register_usage_sink, unregister_usage_sink
 
 def my_ledger(report: UsageReport) -> None:
     report.model      # the model that answered ("ollama/<tag>" when local)
@@ -1165,7 +1184,7 @@ inline, so the turn is never held up by the ledger (with no running loop — a
 sync script — it runs to completion in place). The module holds a strong
 reference to every pending sink task (the loop only holds them weakly), and
 the application lifespan awaits them at shutdown with
-`await drain_usage_sinks(timeout=5.0)` (from `core.services.llm.usage_sinks`):
+`await drain_usage_sinks(timeout=5.0)` (from `baselith.core.services.llm.usage_sinks`):
 a turn billed just before the stop signal still reaches the ledger, and a sink
 still running at the deadline is cancelled and logged.
 
@@ -1184,7 +1203,7 @@ counts — is invisible to every sink, so each such plugin read as having spent
 zero. `report_external_usage` is the seam for that measured usage:
 
 ```python
-from core.services.llm import report_external_usage
+from baselith.core.services.llm import report_external_usage
 
 report_external_usage("qwen3:8b", prompt_tokens=1200, completion_tokens=80)
 # streamed completion → stream=True (selects the "input_stream" sentinel)
@@ -1235,7 +1254,7 @@ providers, deepens the throttle. `_parse_retry_after(exc)` pulls the RFC 9110
 `_generate_with_retry` attaches it to the `RateLimitError` it re-raises:
 
 ```python
-from core.services.llm.exceptions import RateLimitError
+from baselith.core.services.llm.exceptions import RateLimitError
 
 err = RateLimitError("429 rate_limit_exceeded", retry_after=8.0)
 print(err.retry_after)   # 8.0 — None when the provider did not say
@@ -1255,6 +1274,17 @@ Three deliberate limits on what is honoured:
 
 `None` in any of those cases is not a failure: the retry layer simply falls back
 to its own exponential curve.
+
+### Error text in logs
+
+`describe_exception` (the text providers put into `LLMProviderError` messages
+and log lines) runs the upstream message through the shared
+`baselith.core.observability.redaction.redact_secrets`, so a bearer token, an `api_key=`
+pair or a JWT that a provider echoes back is masked. The message is cut to
+4096 characters before that pass, so a megabyte error body costs a bounded
+scan. `safe_error_text` is
+stricter and keeps only the class name and HTTP status; the streaming paths use
+it because a stream failure can carry request bodies.
 
 ### Concurrency Cap (per process)
 
@@ -1281,7 +1311,7 @@ The concurrency cap bounds calls *in flight*; `RESILIENCE_LLM_RATE_ENABLED=true`
 additionally bounds calls *per window*: at most `RESILIENCE_LLM_RATE_LIMIT`
 calls every `RESILIENCE_LLM_RATE_WINDOW` seconds (defaults 20 / 60), keyed by
 the service's configured provider unless `RESILIENCE_LLM_RATE_PER_PROVIDER=false`.
-`acquire_llm_call_slot()` (`core/services/llm/rate_limit.py`) is awaited once
+`acquire_llm_call_slot()` (`baselith/core/services/llm/rate_limit.py`) is awaited once
 per logical call on every generation path — text (after the response cache),
 `generate()`, `generate_messages()`, both streaming flavours, `generate_image()`
 and the Anthropic batch submission — after the tenant cost gate and before the
@@ -1303,7 +1333,7 @@ The Anthropic provider supports an optional per-call **thinking budget**. Match 
 It is **opt-in**: when neither `effort` nor `thinking_budget` is passed, behaviour is unchanged (no thinking block).
 
 ```python
-from core.services.llm.thinking import resolve_thinking, EffortLevel
+from baselith.core.services.llm.thinking import resolve_thinking, EffortLevel
 
 # Coarse effort tier → sweet-spot token budget
 plan = resolve_thinking(effort=EffortLevel.HIGH, max_tokens=4096)
@@ -1328,7 +1358,7 @@ When enabled, the provider sets `temperature=1` and grows `max_tokens` to leave 
 With `LLM_THINKING_ENABLED=true`, `generate_response()` calls that carry a
 `task_category` (and no explicit `effort`/`thinking_budget`) automatically get
 the default tier for that category
-(`core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY`):
+(`baselith.core.services.llm.thinking.DEFAULT_EFFORT_BY_TASK_CATEGORY`):
 
 | Task category | Default effort |
 | ------------- | -------------- |
@@ -1353,7 +1383,7 @@ Semantic search and vector indexing.
 ### VectorStore Structure
 
 ```text
-core/services/vectorstore/
+baselith/core/services/vectorstore/
 ├── __init__.py
 ├── service.py                # VectorStoreService
 ├── orchestrator.py           # SearchOrchestrator: retrieval, re-rank, result cache
@@ -1419,7 +1449,7 @@ core/services/vectorstore/
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier, embedding
-    dimension and document prompt** (`core.nlp.roles.cache_key`, role
+    dimension and document prompt** (`baselith.core.nlp.roles.cache_key`, role
     `document`) to prevent stale or cross-model hits. Switching
     `VECTORSTORE_EMBEDDING_MODEL`, `VECTORSTORE_EMBEDDING_DIM` or
     `BASELITH_EMBEDDING_DOCUMENT_PREFIX` addresses new entries; the old ones
@@ -1432,8 +1462,8 @@ core/services/vectorstore/
 ### VectorStore Basic Usage
 
 ```python
-from core.services.vectorstore import get_vectorstore_service
-from core.models.domain import Document
+from baselith.core.services.vectorstore import get_vectorstore_service
+from baselith.core.models.domain import Document
 
 vs = get_vectorstore_service()
 
@@ -1504,7 +1534,7 @@ tenant's points from **every** collection with
 a pgvector provider borrows the shared database pool and holds nothing).
 `close_vectorstore_service()` closes and drops the process-wide instance that
 `get_vectorstore_service()` hands out; the app's lifespan calls it on shutdown,
-next to `core.services.llm.runtime.close_llm_services()`, which closes the
+next to `baselith.core.services.llm.runtime.close_llm_services()`, which closes the
 default LLM service, every per-plugin policy clone and every fallback-stage
 clone once each.
 
@@ -1532,7 +1562,7 @@ The indexing pipeline owns six payload keys, and caller metadata may not
 shadow them:
 
 ```python
-# core/services/vectorstore/_indexing.py
+# baselith/core/services/vectorstore/_indexing.py
 RESERVED_PAYLOAD_KEYS = frozenset(
     {"text", "source", "document_id", "tenant_id", "chunk_index", "chunk_count"}
 )
@@ -1563,7 +1593,7 @@ path instead of issuing one query per document.
 
 ### Search Result Cache
 
-`SearchOrchestrator` (`core/services/vectorstore/orchestrator.py`) fronts the
+`SearchOrchestrator` (`baselith/core/services/vectorstore/orchestrator.py`) fronts the
 two-stage search with a Redis-backed result cache (`RedisCache(prefix="search")`),
 consulted whenever the caller leaves `use_cache=True`. Two declared
 `VectorStoreConfig` fields control it: `search_cache_enabled` (default `True`,
@@ -1591,8 +1621,8 @@ Note `retrieval_limit`, not `k`: a re-ranked search deepens retrieval to
 `max(k * 3, 20)`, and the cached rows are what the provider was actually asked
 for.
 
-The re-rank step itself (`core/services/retrieval/reranker.py`) scores pairs
-through `core.nlp.rerank.score_pairs` in a worker thread, which picks a
+The re-rank step itself (`baselith/core/services/retrieval/reranker.py`) scores pairs
+through `baselith.core.nlp.rerank.score_pairs` in a worker thread, which picks a
 device-sized batch (8 off CUDA, 32 on CUDA). Batch size changes padding only,
 never scores or order — see
 [Performance Tuning](../advanced/performance-optimizations.md#device-sized-rerank-batches).
@@ -1625,14 +1655,14 @@ entry for the whole TTL — the second caller was served the first caller's rows
 Embeddings are produced through an `EmbedderProtocol` implementation passed to
 `index()` / `search()` (or resolved from configuration). The vector store caches
 embeddings transparently via its model-scoped `embedding_cache`. There is no
-`EmbeddingService` export in `core.services.vectorstore`.
+`EmbeddingService` export in `baselith.core.services.vectorstore`.
 
 ### Recursive chunking (dependency-free)
 
 `chunk_text()` splits on `["\n\n", "\n", ". ", " ", ""]`, recursing into any
 piece that is still over `chunk_size` and packing the rest with
 `chunk_overlap`. The algorithm lives in
-`core/services/vectorstore/recursive_splitter.py`.
+`baselith/core/services/vectorstore/recursive_splitter.py`.
 
 It used to come from LangChain. One algorithm was pulling
 `langchain-text-splitters` → `langchain-core` → `langsmith` — ten packages, and
@@ -1647,7 +1677,7 @@ and `(chunk_size, chunk_overlap)` pairs.
 
 ### Document-Aware Splitters
 
-`core/services/vectorstore/splitters.py` adds structure-aware complements to
+`baselith/core/services/vectorstore/splitters.py` adds structure-aware complements to
 the default recursive splitting in `chunking.py` (which is **unchanged**).
 Every splitter conforms to the same `split_text(text) -> list[str]` interface
 and additionally offers `split(text) -> list[TextChunk]` carrying per-chunk
@@ -1668,7 +1698,7 @@ extension (`.md`/`.markdown`, `.py`/`.pyi`) or MIME type, returning
 `RecursiveTextSplitter` for unknown formats:
 
 ```python
-from core.services.vectorstore import select_splitter
+from baselith.core.services.vectorstore import select_splitter
 
 splitter = select_splitter("docs/guide.md")
 for chunk in splitter.split(markdown_text):
@@ -1677,7 +1707,7 @@ for chunk in splitter.split(markdown_text):
 
 ### Hierarchical Chunking (small-to-big retrieval)
 
-`core/services/vectorstore/chunking_hierarchical.py` splits a document into
+`baselith/core/services/vectorstore/chunking_hierarchical.py` splits a document into
 large **parent** chunks (`DEFAULT_PARENT_CHUNK_SIZE`, 2000 chars, overlap 0 so
 a child belongs to exactly one parent) and each parent into small **child**
 chunks (`DEFAULT_CHILD_CHUNK_SIZE`, 400 chars, overlap 50). Children are what
@@ -1690,7 +1720,7 @@ the two-method `put`/`get` Protocol for a durable backend). At query time
 sees full context while retrieval stays precise.
 
 ```python
-from core.services.vectorstore import (
+from baselith.core.services.vectorstore import (
     HierarchicalChunker,
     InMemoryParentStore,
     expand_to_parents,
@@ -1727,7 +1757,7 @@ Image analysis and OCR, plus native document (PDF) and audio analysis.
 ### Vision Structure
 
 ```text
-core/services/vision/
+baselith/core/services/vision/
 ├── __init__.py
 ├── service.py          # VisionService (routing, prompts, shared HTTP client)
 ├── backends.py         # Image provider calls (OpenAI, Anthropic, Google, Ollama)
@@ -1741,7 +1771,7 @@ core/services/vision/
 ### Vision Basic Usage
 
 ```python
-from core.services.vision import (
+from baselith.core.services.vision import (
     ImageContent,
     VisionRequest,
     VisionService,
@@ -1777,8 +1807,8 @@ answer = await vision.analyze_screenshot(
 that accept them **natively**, instead of flattening to extracted text:
 
 ```python
-from core.services.vision import AudioContent, DocumentContent, VisionService
-from core.services.vision.models import VisionProvider
+from baselith.core.services.vision import AudioContent, DocumentContent, VisionService
+from baselith.core.services.vision.models import VisionProvider
 
 vision = VisionService()
 
@@ -1801,7 +1831,7 @@ argument, else the service default.
 **Fail-closed content models.** `DocumentContent` takes exactly one of
 `data` (raw bytes) or `uri` (publicly reachable URL); `AudioContent` is
 bytes-only. Inline payloads are validated at construction against their own
-**magic bytes** (`core/utils/media.py` — `sniff_document_type`,
+**magic bytes** (`baselith/core/utils/media.py` — `sniff_document_type`,
 `sniff_audio_type`): a mislabeled or unrecognisable payload raises
 `ValueError` before it ever reaches a provider. Labels can lie, bytes
 cannot. The same sniffers back the orchestration modality router, so the
@@ -1864,31 +1894,36 @@ Speech synthesis and recognition.
 
 !!! note "Library API — not wired by default"
     No route or handler in the default app calls `VoiceService`, and the MCP
-    tool adapters in `core/services/voice/tools.py` and
-    `core/services/vision/tools.py` (`register_voice_tools(server)`,
+    tool adapters in `baselith/core/services/voice/tools.py` and
+    `baselith/core/services/vision/tools.py` (`register_voice_tools(server)`,
     `register_vision_tools(server)`) are not registered on any server the app
     mounts. Call the service directly, or register the tools on your own
     `MCPServer`.
 
 `VoiceService()` takes its default provider from `VOICE_PROVIDER`
-(`openai` | `elevenlabs` | `google`, default `openai`), the same way
-`VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to override
-it per instance.
+(`openai` | `elevenlabs` | `google` | `openai_compatible`, default `openai`; any other value is
+refused at startup), the same way `VisionService` reads `VISION_PROVIDER`; pass `default_provider=` to
+override it per instance.
 
 ### Voice Structure
 
 ```text
-core/services/voice/
+baselith/core/services/voice/
 ├── __init__.py
-├── service.py          # VoiceService
-├── tts.py              # Text-to-Speech
-└── stt.py              # Speech-to-Text
+├── service.py              # VoiceService
+├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429)
+├── _elevenlabs_calls.py    # ElevenLabs TTS / Scribe STT / voice list / key check
+├── _openai_wire.py         # OpenAI-compatible wire client (sidecars, governed pin)
+├── _routing.py             # which backend serves a call
+├── _usage.py               # usage-seam reporting
+├── errors.py               # typed VoiceError family with stable codes
+└── models.py               # requests, responses, VoiceInfo, VoiceOverrides, VoiceProbe
 ```
 
 ### Text-to-Speech
 
 ```python
-from core.services.voice import VoiceService
+from baselith.core.services.voice import VoiceService
 
 voice = VoiceService()  # keys resolved from env/config
 
@@ -1914,6 +1949,150 @@ print(response.content)
 text = await voice.transcribe("/path/to/audio.mp3")
 ```
 
+### Governed seam and OpenAI-compatible sidecars
+
+`VoiceService(plugin="my_plugin")` acts on behalf of a plugin. Each call resolves
+the plugin's central LLM policy for the `voice` scope
+(`resolve_governed_client_config(plugin, "voice")`): a pin to `openai` or `vllm`
+makes the pin's endpoint and credential serve the call, ahead of any `VOICE_*`
+key. A pin to a provider with no OpenAI audio API is ignored with a warning, and
+the pinned *chat model* is never applied: audio models are `VOICE_STT_MODEL` and
+`VOICE_TTS_MODEL`. Without a pin the `VOICE_*` configuration applies. The pin is
+resolved again on every call, so a console change needs no restart.
+
+`VOICE_PROVIDER=openai_compatible` (or the default `openai` provider with no
+OpenAI key but a base URL set) talks to any server speaking the OpenAI audio API,
+with **no external provider key**:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VOICE_STT_BASE_URL` / `VOICE_TTS_BASE_URL` | unset | API root **including `/v1`** |
+| `VOICE_COMPAT_API_KEY` | unset | Bearer key, if the server wants one |
+| `VOICE_STT_MODEL` / `VOICE_TTS_MODEL` / `VOICE_TTS_VOICE` | `whisper-1` / `tts-1` / `alloy` | Names sent to the server |
+| `VOICE_ALLOW_INTERNAL_ENDPOINTS` | `false` | Allow private, loopback and link-local servers |
+| `VOICE_MAX_AUDIO_BYTES` / `VOICE_MAX_RESPONSE_BYTES` | 10 MiB / 20 MiB | Request and response caps |
+| `VOICE_MAX_TTS_CHARS` / `VOICE_TIMEOUT_SECONDS` | 4096 / 30 | Text cap and per-request deadline |
+
+Calls go through the SSRF-hardened HTTP client: a sidecar on a private address
+(the usual case) is refused until `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`. Failures
+are typed (`VoiceError` with a stable `code`: `not_configured`, `egress_blocked`,
+`too_large`, `upstream_failed`, `timeout`, `invalid_input`) and never embed a
+response body. `VoiceService.capabilities()` reports, without a network probe,
+whether STT and TTS are configured.
+
+**Caps on every provider.** `VOICE_MAX_TTS_CHARS` and `VOICE_MAX_AUDIO_BYTES` are
+checked by `VoiceService` itself before any provider runs, so they hold for the
+OpenAI SDK and Google paths as well as for the wire and ElevenLabs clients. Audio
+passed as `audio_file=` is read once, in a worker thread, and an over-cap file is
+refused from its size before a byte is read; the bytes are then reused by the
+provider call and the usage report. An unreadable file raises `VoiceInputError`
+without echoing the path.
+
+**Google.** The Google Cloud TTS/STT calls carry the API key in the
+`X-Goog-Api-Key` header, never in the URL, so it cannot surface in an HTTP error
+message or a log line. They run under the same `VOICE_TIMEOUT_SECONDS` deadline,
+stream the response and abandon it at `VOICE_MAX_RESPONSE_BYTES` (counted on
+the decoded body as a gzip/deflate response is inflated; every voice provider
+and the inference HTTP client read through
+[bounded bodies](security.md#bounded-bodies)), and fail with
+the typed `VoiceError` family (`upstream_failed`, `timeout`, `too_large`) without
+embedding the response body.
+
+**Usage.** Every call is reported through the same usage seam as LLM calls
+(`report_external_usage`) as a token-equivalent estimate under the model labels
+`stt:<model>` and `tts:<model>`: STT prompt = `ceil(seconds * 50)` (the
+`duration_seconds` argument, else `bytes / 12000`), completion = `ceil(chars / 4)`;
+TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
+
+### ElevenLabs (native provider)
+
+ElevenLabs is not OpenAI-compatible, so `VOICE_PROVIDER=elevenlabs` has its own adapter in
+`baselith/core/services/voice/_elevenlabs*.py`. It serves **both directions**: text-to-speech
+(ElevenLabs' `/v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
+(ElevenLabs' `/v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VOICE_ELEVENLABS_API_KEY` (or `ELEVENLABS_API_KEY`) | unset | The API key (`SecretStr`) |
+| `VOICE_ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io` | API root; **https only** (a data-residency endpoint such as `https://api.eu.residency.elevenlabs.io` goes here). `http` is accepted only together with `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`, for a local fake |
+| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency (an assistant speaks sentence by sentence) and cost (about half the credits per character), and is multilingual, Italian included; use `eleven_multilingual_v2` or `eleven_v3` for richer prosody |
+| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v1` | Scribe model (`scribe_v2` is available) |
+| `VOICE_ELEVENLABS_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` | Default voice (the premade "Rachel"); a call may name another id |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play) |
+| `VOICE_ELEVENLABS_STABILITY` / `_SIMILARITY_BOOST` / `_STYLE` | `0.5` / `0.75` / `0.0` | Voice settings |
+| `VOICE_ELEVENLABS_RETRIES` | `2` | Retries after an HTTP 429, inside the request deadline |
+
+Safety properties: the egress policy allows exactly the base URL's host and no redirect is
+followed (a 3xx is an error, so the key can never be steered elsewhere); the voice id is
+checked against `[A-Za-z0-9_-]{1,64}` before it enters the URL path; request and response
+bodies are capped by `VOICE_MAX_AUDIO_BYTES` / `VOICE_MAX_RESPONSE_BYTES` and one
+`VOICE_TIMEOUT_SECONDS` deadline covers the exchange, retries included. A provider error body is read
+only to choose a stable code and is never echoed or logged. The codes (all `VoiceUpstreamError`
+subclasses, so `except VoiceUpstreamError` still works): `key_invalid` (401/403),
+`permission_missing` (the key lacks a permission), `quota_exceeded`, `voice_not_found`,
+`rate_limited` (429 after the retries), `provider_unavailable` (5xx, redirect, unreachable).
+
+**Latency.** The adapter keeps its connection pool alive (idle connections are kept for 45 s), so a
+voice assistant that speaks sentence by sentence does not pay a DNS lookup, a TCP handshake and a TLS
+handshake for every sentence. The hardened client disables keep-alive by default so that one pool never
+coalesces two validated hostnames behind a shared pinned IP; this adapter's egress policy admits exactly
+one host, so there is nothing to coalesce. For a smaller payload at the same cost per character set
+`VOICE_ELEVENLABS_OUTPUT_FORMAT=mp3_24000_48`.
+
+**Continuity and tuning per call.** `text_to_speech(..., language=, context=, tuning=)` accepts three
+optional, provider-neutral arguments that only the ElevenLabs path uses:
+
+- `context=SpeechContext(previous_text, next_text, previous_request_ids, normalization)` is the
+  neighbourhood of the passage. The adapter sends it as ElevenLabs request stitching: `previous_request_ids`
+  (at most three, validated, taking precedence) else `previous_text`, `next_text` (each cut to 600
+  characters) and `apply_text_normalization`. `eleven_v3` has no stitching, so those fields are dropped
+  silently; a caller can always ask for the best continuity. The provider's `request-id` response header comes
+  back in `VoiceResponse.metadata["request_id"]` (with `stitched`), which is what the next passage chains to.
+  Ids are valid for about two hours; the chain itself (who owns it, how long it lives) is the host's job.
+- `language` becomes `language_code` for the models that take it (`eleven_flash_v2_5`, `eleven_turbo_v2_5`,
+  `eleven_v3`); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to 0.7-1.2.
+- `tuning=SpeechTuning(model, stability, similarity_boost, style)` states preferred values for this call. A
+  value the operator set explicitly (`VOICE_ELEVENLABS_*` in the environment, or a host override's model)
+  always wins; `VoiceService.elevenlabs_explicit()` says which ones those are, so a host can show the source.
+
+Billing is unchanged by stitching: only the passage's own characters are reported.
+
+A host that layers settings on top of `VOICE_*` at call time (an admin console) passes
+`VoiceService(overrides=callable)`; the callable returns a `VoiceOverrides` (provider, key, default voice,
+model) and is read on every call. **The environment's key always wins** over the override's.
+
+**Usage.** ElevenLabs bills characters and audio seconds, which the token-shaped usage seam cannot
+name, so they ride in the prompt field with the unit in the label: `tts:elevenlabs/<model>` reports
+**characters**, `stt:elevenlabs/<model>` reports **audio seconds** (the length ElevenLabs returns, else
+the caller's `duration_seconds`, else `bytes / 12000`). Unpriced, attributed to the plugin and scope bound
+to the call. Never the text or the audio.
+
+!!! warning "Privacy"
+    With this provider the text to synthesize and the recorded audio are sent to ElevenLabs.
+
+Reference sidecars (not started by the framework):
+
+```yaml
+services:
+  stt:
+    image: fedirz/faster-whisper-server:latest-cpu
+    environment: { WHISPER__MODEL: Systran/faster-whisper-small }
+    ports: ["127.0.0.1:8001:8000"]
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest # or any Piper OpenAI wrapper
+    ports: ["127.0.0.1:8002:8880"]
+# VOICE_PROVIDER=openai_compatible
+# VOICE_STT_BASE_URL=http://127.0.0.1:8001/v1  VOICE_STT_MODEL=Systran/faster-whisper-small
+# VOICE_TTS_BASE_URL=http://127.0.0.1:8002/v1  VOICE_TTS_MODEL=kokoro  VOICE_TTS_VOICE=af_heart
+# VOICE_ALLOW_INTERNAL_ENDPOINTS=true
+```
+
+**Browsers.** Capturing the microphone with `getUserMedia` needs HTTPS (or
+`localhost`) and a `Permissions-Policy` that allows it: the framework default and
+the reference nginx edge send `microphone=(self)` (own origin only; camera,
+geolocation and the rest stay denied). A custom `PERMISSIONS_POLICY` or proxy
+header of `microphone=()` blocks voice input.
+
 ### Shared OpenAI client
 
 Like `VisionService`, `VoiceService` builds its `AsyncOpenAI` client lazily
@@ -1926,22 +2105,16 @@ service.aclose()` closes it together with the shared `httpx` client.
 
 ## Evaluation Service
 
-!!! warning "Deprecated — `core.services.evaluation` is a shim"
-    `core.services.evaluation` used to carry its own DeepEval wrapper, a
-    duplicate of `core/evaluation/` that nothing in the runtime imported. It
-    shared one set of metric objects across concurrent calls (so one call could
-    read another's score) and exported the LLM API key into `os.environ`.
-    `EvaluationService` and `get_evaluation_service` now remain only for one
-    deprecation cycle (announced in 0.40.0, removed in 0.41.0) and warn on use:
-    `EvaluationService` is a subclass of the live, event-driven
-    `core.evaluation.EvaluationService`, and its `evaluate_rag_response()`
-    delegates to `core.evaluation.metrics.FaithfulnessEvaluator` /
-    `AnswerRelevancyEvaluator` with fresh metric objects per call.
+!!! warning "Removed in 1.0 — `baselith.core.services.evaluation`"
+    `baselith.core.services.evaluation` used to carry its own DeepEval wrapper, a
+    duplicate of `baselith/core/evaluation/` that nothing in the runtime imported.
+    It was deprecated in 0.40.0 and is removed in 1.0, together with its
+    `EvaluationService` alias and `get_evaluation_service()`.
 
 Use the live package instead — see [Evaluation](evaluation.md):
 
 ```python
-from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
+from baselith.core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
 faithfulness = FaithfulnessEvaluator(threshold=0.7).measure(
     "What is the capital of Italy?",
@@ -1967,7 +2140,7 @@ over.
 Secure code execution.
 
 ```python
-from core.services.sandbox import SandboxService
+from baselith.core.services.sandbox import SandboxService
 
 sandbox = SandboxService()
 
@@ -1995,7 +2168,7 @@ BaselithCore supports two types of sandboxing for secure code execution:
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
 - **Network Isolation**: All sandboxes are launched with networking disabled by default (or strictly limited via `sbx` profiles).
   For the Docker provider, `build_sandbox_runtime_kwargs(enable_network=None)`
-  (`core/services/sandbox/policy.py`) returns `network_mode="none"` unless
+  (`baselith/core/services/sandbox/policy.py`) returns `network_mode="none"` unless
   `SANDBOX_ENABLE_NETWORK=true`, which switches it to `"bridge"`, Docker's
   default network. Nothing else in the hardened policy changes: no
   capabilities, no privilege escalation, read-only root, non-root uid,
@@ -2004,14 +2177,14 @@ BaselithCore supports two types of sandboxing for secure code execution:
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 - **Pre-execution static analysis**: Python payloads are AST-analyzed before
-  any container spins up (`core/services/sandbox/static_analysis.py`, on by
+  any container spins up (`baselith/core/services/sandbox/static_analysis.py`, on by
   default via `SANDBOX_STATIC_ANALYSIS`). Syntax errors are rejected
   outright; imports on `SANDBOX_STATIC_ANALYSIS_DENIED_IMPORTS` (default
   `ctypes,socket,subprocess`, incl. `__import__`/`importlib` string
   literals) are logged in `warn` mode or rejected with
   `SANDBOX_STATIC_ANALYSIS_MODE=block`. The analysis only parses — it never
   executes the payload.
-- **Reproducible image**: the bundled `core/services/sandbox/Dockerfile.sandbox`
+- **Reproducible image**: the bundled `baselith/core/services/sandbox/Dockerfile.sandbox`
   is built on the host the first time a sandbox is needed, so nothing about it
   is allowed to float. The base image is digest-pinned, and the data-science
   stack installs from `requirements.sandbox.txt` — a compiled closure where
@@ -2021,10 +2194,23 @@ BaselithCore supports two types of sandboxing for secure code execution:
   the same sandbox, and the one that runs agent-supplied code is the one that
   was reviewed. Edit the direct pins in `requirements.sandbox.in` and recompile
   with the `uv pip compile` line in its header; never hand-edit the `.txt`.
+  Besides numpy, pandas, matplotlib and scikit-learn the image carries
+  `pytest`, so a coding agent can run the tests it writes: write the code and the
+  test file under `/tmp` (the only writable path) and call `pytest.main` with
+  `-p no:cacheprovider`. An image built before pytest was added has to be
+  rebuilt (from the repository root: `docker build -t agent-sandbox:latest -f
+  baselith/core/services/sandbox/Dockerfile.sandbox baselith/core/services/sandbox`), or removed so
+  the first run builds it again.
+- **Read-only mounts**: `execute_code_async(..., mounts=..., mounts_read_only=True)`
+  binds every `mounts` entry read-only (docker provider; the sbx provider refuses
+  it with `ValueError` before anything runs). A caller that hands the sandbox a
+  directory of files to read, such as a coding agent staging a repository
+  workspace, uses it so the code under test cannot write back to the host; it
+  copies what it needs to `/tmp` first.
 - **No toolchain in the image**: the wheels-only install above leaves nothing to
   compile, so the image installs no compiler — a C toolchain sitting in the one
   image that executes agent-supplied code is a capability handed to the payload.
-- **The recipe ships**: `core/services/sandbox/Dockerfile.sandbox` and its
+- **The recipe ships**: `baselith/core/services/sandbox/Dockerfile.sandbox` and its
   `requirements.sandbox.txt` are package data, carried by the wheel and the
   sdist, so a `pip install baselith-core` can build the hardened image. They
   were absent from the distribution up to 0.37.0, which left installed
@@ -2055,8 +2241,8 @@ tool's structured error result.
 
 `execute_code_stream()` (same parameters as `execute_code_async`, including
 `budget=`) yields output incrementally as plain-dict frames
-(`core/services/sandbox/streaming.py`, `StreamFrame` exported from
-`core.services.sandbox`):
+(`baselith/core/services/sandbox/streaming.py`, `StreamFrame` exported from
+`baselith.core.services.sandbox`):
 
 ```python
 async for frame in sandbox.execute_code_stream("print('hi')"):
@@ -2133,7 +2319,7 @@ TLS variables, the default socket). `SANDBOX_DOCKER_SOCKET` pins it to
 
 ## Optimizer
 
-LLM-driven prompt tuning for agents (`core/optimization/optimizer.py`).
+LLM-driven prompt tuning for agents (`baselith/core/optimization/optimizer.py`).
 `PromptOptimizer` takes the `FeedbackCollector` it mines for negative feedback
 (the LLM service is resolved lazily through `get_llm_service()`) and an
 optional `tune_evaluator` consulted by the auto-tune eval gate
@@ -2141,7 +2327,7 @@ optional `tune_evaluator` consulted by the auto-tune eval gate
 applications are refused — fail closed).
 
 ```python
-from core.optimization.optimizer import PromptOptimizer, TuneResult
+from baselith.core.optimization.optimizer import PromptOptimizer, TuneResult
 
 optimizer = PromptOptimizer(feedback_collector=collector)
 
@@ -2181,7 +2367,7 @@ print(optimizer.get_history())   # [{agent_id, suggestion, applied, dry_run}, ..
 The `OptimizationLoop` subscribes to `EVALUATION_COMPLETED` events and triggers `auto_tune()` automatically when an agent's score drops below a threshold.
 
 ```python
-from core.optimization import OptimizationLoop
+from baselith.core.optimization import OptimizationLoop
 
 loop = OptimizationLoop(
     feedback_collector=collector,
@@ -2194,7 +2380,7 @@ loop.start()   # subscribes to EventBus
 loop.stop()
 ```
 
-**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_COMPLETED` → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+**Event flow**: `FLOW_COMPLETED` → `EvaluationService` (judged share of the sampled flows, `EVAL_ONLINE_JUDGE_RATE`) → `EVALUATION_COMPLETED` → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
 
 ---
 
@@ -2203,7 +2389,7 @@ loop.stop()
 Incremental document indexing with fingerprint-based change detection.
 
 ```python
-from core.services.indexing import get_indexing_service
+from baselith.core.services.indexing import get_indexing_service
 
 indexing = get_indexing_service()
 
@@ -2282,7 +2468,7 @@ Documents that are no longer present in any active source are automatically dele
 
 ### Background runs: `IndexBootstrapper`
 
-`core/services/bootstrap.py` owns the one in-process indexing task slot the
+`baselith/core/services/bootstrap.py` owns the one in-process indexing task slot the
 HTTP surface shares. `schedule()` is the startup/bootstrap path (honours
 `INDEX_BOOTSTRAP_ENABLED` and the change-detection shortcut);
 `schedule_manual(mode)` is the operator path behind `POST /reindex` and
@@ -2298,7 +2484,7 @@ run), which is what `GET /index/status` — the routes' `status_url` — serves.
 Standard mechanisms for agents to request human intervention, approval, or clarification.
 
 ```python
-from core.human import HumanIntervention
+from baselith.core.human import HumanIntervention
 
 intervention = HumanIntervention(callback=my_ui_callback)
 
@@ -2328,18 +2514,19 @@ Timeouts are enforced via `asyncio.wait_for()`. If no response is received withi
 All services follow the protocol pattern:
 
 ```python
-# core/interfaces/services.py
+# baselith/core/interfaces/services.py
 class LLMServiceProtocol(Protocol):
     async def generate_response(
         self, prompt: str, model: str | None = None, json: bool = False
     ) -> str: ...
 
-    async def generate_response_stream(
+    # A plain ``def``: the type of an async generator function.
+    def generate_response_stream(
         self, prompt: str, model: str | None = None
     ) -> AsyncIterator[str]: ...
 
 
-# Implementation (core/services/llm/service.py) — satisfies the protocol
+# Implementation (baselith/core/services/llm/service.py) — satisfies the protocol
 # structurally and accepts additional optional tuning parameters
 class LLMService:
     async def generate_response(
@@ -2364,8 +2551,8 @@ class LLMService:
 Access services via DI:
 
 ```python
-from core.di import ServiceRegistry
-from core.interfaces import LLMServiceProtocol, VectorStoreProtocol
+from baselith.core.di import ServiceRegistry
+from baselith.core.interfaces import LLMServiceProtocol, VectorStoreProtocol
 
 # In a handler
 class MyHandler:
@@ -2416,15 +2603,15 @@ VOICE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 ## Inference services
 
-`core.services.inference` provides `EmbeddingService`, `RerankService` and a
+`baselith.core.services.inference` provides `EmbeddingService`, `RerankService` and a
 tenant-scoped `ScopedVectorStore` over one server-mode Qdrant client, plus a
 blocking bridge for synchronous plugins. Plugins call these instead of loading
 models or opening Qdrant clients themselves. The wire protocol is pluggable
-(`core/services/inference/_protocols.py`): TEI by default, or an
+(`baselith/core/services/inference/_protocols.py`): TEI by default, or an
 OpenAI-compatible `/embeddings` and a Cohere- or NIM-style rerank for a
 customer's own servers. `EmbeddingService` refuses vectors whose size differs
 from the configured `dim` before they reach a collection. See
 [Inference Services](../advanced/inference-services.md).
 
-`core.services.retrieval.Reranker` follows the same rule: with the rerank
+`baselith.core.services.retrieval.Reranker` follows the same rule: with the rerank
 service configured it scores through TEI instead of loading a CrossEncoder.

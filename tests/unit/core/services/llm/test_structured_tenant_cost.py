@@ -19,9 +19,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.errors import LLMRefusalError
-from core.services.llm.service import LLMService
-from core.services.llm.structured import generate_structured
+from baselith.core.services.llm.errors import LLMRefusalError
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.structured import generate_structured
 
 pytestmark = [pytest.mark.unit]
 
@@ -29,7 +29,7 @@ MODEL = "gpt-4o-mini"
 
 
 def _service(*, native: bool) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -52,7 +52,9 @@ def booked(monkeypatch):
     async def _record(usd, **_kwargs):
         recorded.append(usd)
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
     return recorded
 
 
@@ -86,11 +88,11 @@ class TestNativePath:
     """The provider's tool-calling API — the same gap, same fix."""
 
     async def test_the_turn_reaches_the_tenant_ledger(self, booked):
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         service = _service(native=True)
         with patch(
-            "core.services.llm.structured._native_with_retry",
+            "baselith.core.services.llm.structured._native_with_retry",
             AsyncMock(return_value=LLMResult(text="ok", tokens_used=300)),
         ):
             await generate_structured(service, "prompt", model=MODEL)

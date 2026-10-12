@@ -173,7 +173,7 @@ async def run_async_benchmarks(quick: bool) -> list[BenchmarkResult]:
     async_warmup = 10 if quick else 25
 
     try:
-        from core.events import EventBus
+        from baselith.core.events import EventBus
 
         async def noop_handler(_data: dict[str, object]) -> None:
             return None
@@ -216,7 +216,7 @@ async def run_async_benchmarks(quick: bool) -> list[BenchmarkResult]:
         print(f"Event bus benchmarks skipped: {exc}")
 
     try:
-        from core.cache.local_cache import TTLCache
+        from baselith.core.cache.local_cache import TTLCache
 
         cache = TTLCache(maxsize=512, ttl=60, metrics_name="benchmark_local_cache")
         items = [(f"bench:{idx}", {"value": idx}) for idx in range(64)]
@@ -255,7 +255,7 @@ async def run_async_benchmarks(quick: bool) -> list[BenchmarkResult]:
         print(f"Local cache benchmarks skipped: {exc}")
 
     try:
-        from core.optimization.caching import get_semantic_cache
+        from baselith.core.optimization.caching import get_semantic_cache
 
         semantic_cache = get_semantic_cache()
         prompt = "What is the meaning of life?"
@@ -282,7 +282,7 @@ async def run_async_benchmarks(quick: bool) -> list[BenchmarkResult]:
         print(f"Semantic cache benchmarks skipped: {exc}")
 
     try:
-        from core.cache import close_redis_pools, create_redis_client
+        from baselith.core.cache import close_redis_pools, create_redis_client
 
         redis_url = "redis://localhost:6379/0"
 
@@ -335,7 +335,7 @@ def run_benchmarks(*, quick: bool = False) -> list[BenchmarkResult]:
     sync_iterations = 25 if quick else 100
 
     try:
-        from core.config import get_app_config
+        from baselith.core.config import get_app_config
 
         result = benchmark_function(
             get_app_config,
@@ -350,7 +350,7 @@ def run_benchmarks(*, quick: bool = False) -> list[BenchmarkResult]:
 
     try:
         result = benchmark_subprocess(
-            "import core.chat.service",
+            "import baselith.core.chat.service",
             name="chat_service_import_cold",
             iterations=3 if quick else 8,
             warmup=0,
@@ -361,7 +361,7 @@ def run_benchmarks(*, quick: bool = False) -> list[BenchmarkResult]:
         print(f"Chat import benchmark skipped: {exc}")
 
     try:
-        from core.services.llm import get_llm_service
+        from baselith.core.services.llm import get_llm_service
 
         result = benchmark_function(
             get_llm_service,
@@ -375,7 +375,7 @@ def run_benchmarks(*, quick: bool = False) -> list[BenchmarkResult]:
         print(f"LLM service benchmark skipped: {exc}")
 
     try:
-        from core.services.vectorstore import get_vectorstore_service
+        from baselith.core.services.vectorstore import get_vectorstore_service
 
         result = benchmark_function(
             get_vectorstore_service,
@@ -408,7 +408,7 @@ def main() -> list[BenchmarkResult]:
     """CLI entry point."""
     logging.getLogger().setLevel(logging.ERROR)
     try:
-        from core.observability.logging import configure_logging
+        from baselith.core.observability.logging import configure_logging
 
         configure_logging(level="ERROR", stream=sys.stderr)
     except Exception:

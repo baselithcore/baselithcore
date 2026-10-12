@@ -12,14 +12,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.chat.agent_state import AgentState
-from core.chat.workflow_retrieval import RetrievalPipeline
-from core.context import (
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.chat.workflow_retrieval import RetrievalPipeline
+from baselith.core.context import (
     TenantContextError,
     reset_tenant_context,
     set_tenant_context,
 )
-from core.models.chat import ChatRequest
+from baselith.core.models.chat import ChatRequest
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ async def test_two_tenants_never_share_a_cache_entry(service):
 async def test_cache_is_skipped_when_no_tenant_is_bound(service, monkeypatch):
     """An unbound tenant withholds the key instead of sharing a bucket."""
     monkeypatch.setattr(
-        "core.chat.mixins.retrieval_context.get_current_tenant_id",
+        "baselith.core.chat.mixins.retrieval_context.get_current_tenant_id",
         MagicMock(side_effect=TenantContextError("no tenant bound")),
     )
     pipeline = RetrievalPipeline(service)
@@ -89,7 +89,7 @@ async def test_cache_is_skipped_when_no_tenant_is_bound(service, monkeypatch):
 async def test_unexpected_tenant_lookup_failure_is_not_swallowed(service, monkeypatch):
     """Only TenantContextError degrades to a cache skip; a bug must surface."""
     monkeypatch.setattr(
-        "core.chat.mixins.retrieval_context.get_current_tenant_id",
+        "baselith.core.chat.mixins.retrieval_context.get_current_tenant_id",
         MagicMock(side_effect=RuntimeError("accessor is broken")),
     )
     pipeline = RetrievalPipeline(service)
@@ -101,7 +101,7 @@ async def test_unexpected_tenant_lookup_failure_is_not_swallowed(service, monkey
 @pytest.fixture
 def local_backend(monkeypatch) -> None:
     """Force the default (``local``) cache backend."""
-    from core.chat import dependencies
+    from baselith.core.chat import dependencies
 
     monkeypatch.setattr(dependencies, "CACHE_BACKEND", "local")
 
@@ -110,10 +110,10 @@ async def test_local_backend_is_tenant_scoped_too(local_backend):
     """The in-process backend is the DEFAULT — it must isolate like Redis does.
 
     Chat history is keyed on the client-supplied ``conversation_id``
-    (``core/services/chat/utils/history.py``), so an unscoped process-wide
+    (``baselith/core/services/chat/utils/history.py``), so an unscoped process-wide
     ``TTLCache`` handed one tenant another's conversation by guessing an id.
     """
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="history")
     conversation_id = "conv-42"
@@ -133,7 +133,7 @@ async def test_local_backend_is_tenant_scoped_too(local_backend):
 
 
 async def test_local_backend_clear_is_scoped_to_the_tenant(local_backend):
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="history")
 
@@ -161,7 +161,7 @@ async def test_local_backend_clear_is_scoped_to_the_tenant(local_backend):
 
 
 async def test_local_backend_bulk_ops_are_tenant_scoped(local_backend):
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="rerank")
 
@@ -229,7 +229,7 @@ class _FakePipeline:
 
 @pytest.fixture
 def redis_backend(monkeypatch) -> _FakeRedis:
-    from core.chat import dependencies
+    from baselith.core.chat import dependencies
 
     fake = _FakeRedis()
     monkeypatch.setattr(dependencies, "CACHE_BACKEND", "redis")
@@ -239,7 +239,7 @@ def redis_backend(monkeypatch) -> _FakeRedis:
 
 
 async def test_redis_prefix_is_scoped_to_the_current_tenant(redis_backend):
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="response")
 
@@ -254,7 +254,7 @@ async def test_redis_prefix_is_scoped_to_the_current_tenant(redis_backend):
 
 
 async def test_clear_only_flushes_the_current_tenants_namespace(redis_backend):
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="response")
 
@@ -277,7 +277,7 @@ async def test_clear_only_flushes_the_current_tenants_namespace(redis_backend):
 
 
 async def test_one_tenant_cannot_read_anothers_redis_entry(redis_backend):
-    from core.chat.dependencies import _build_cache
+    from baselith.core.chat.dependencies import _build_cache
 
     cache = _build_cache(16, 60.0, namespace="response")
     key = ("shared", "q", "h")
@@ -304,8 +304,8 @@ async def test_the_key_annotation_matches_what_is_written(service):
     import inspect
     import typing
 
-    from core.chat.agent_state import AgentState as _AgentState
-    from core.chat.mixins import retrieval_context
+    from baselith.core.chat.agent_state import AgentState as _AgentState
+    from baselith.core.chat.mixins import retrieval_context
 
     key = await _key_for_tenant(service, "acme")
     assert key is not None and len(key) == 3

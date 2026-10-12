@@ -8,7 +8,7 @@ verbatim — thinking blocks included, or the provider rejects the turn.
 
 from types import SimpleNamespace
 
-from core.services.llm.messages import (
+from baselith.core.services.llm.messages import (
     ImageBlock,
     Message,
     TextBlock,
@@ -20,7 +20,7 @@ from core.services.llm.messages import (
     to_anthropic,
     to_openai,
 )
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class TestNeutralTypes:

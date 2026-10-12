@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.config.services import LLMConfig
-from core.services.llm.preflight import (
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.preflight import (
     LLMPreflightError,
     check_configuration,
     check_local_endpoints,
@@ -43,7 +43,7 @@ def _neutral_vision_config():
     one repository and failing in its sibling. The one test that cares about a
     vision target sets it up explicitly.
     """
-    from core.config import multimodal
+    from baselith.core.config import multimodal
 
     original = multimodal._vision_config
     multimodal._vision_config = multimodal.VisionConfig(
@@ -108,7 +108,8 @@ class TestLocalEndpointFindings:
     async def test_an_unreachable_endpoint_is_reported(self):
         config = _config(provider="ollama", model="llama3.2")
         with patch(
-            "core.services.llm.preflight.probe_ollama", AsyncMock(return_value=None)
+            "baselith.core.services.llm.preflight.probe_ollama",
+            AsyncMock(return_value=None),
         ):
             findings = await check_local_endpoints(config)
         assert "ollama_unreachable" in _codes(findings)
@@ -117,7 +118,7 @@ class TestLocalEndpointFindings:
         """Several gigabytes is an operator's decision, not a boot step."""
         config = _config(provider="ollama", model="llama3.2")
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"mistral:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -128,7 +129,7 @@ class TestLocalEndpointFindings:
         """Ollama reports ``llama3.2:latest``; configuration says ``llama3.2``."""
         config = _config(provider="ollama", model="llama3.2")
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"llama3.2:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -142,7 +143,7 @@ class TestLocalEndpointFindings:
             fallback_chain="ollama:qwen2.5:7b-instruct",
         )
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value=set()),
         ):
             findings = await check_local_endpoints(config)
@@ -155,7 +156,7 @@ class TestLocalEndpointFindings:
         anything saying so, which is how ``llava`` comes to be missing on a
         machine that otherwise looks correctly configured.
         """
-        from core.config import multimodal
+        from baselith.core.config import multimodal
 
         config = _config(provider="openai", model="gpt-4o-mini")
         multimodal._vision_config = multimodal.VisionConfig(
@@ -165,7 +166,7 @@ class TestLocalEndpointFindings:
             ollama_url="http://localhost:11434",
         )
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"llama3.2:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -178,7 +179,7 @@ class TestLocalEndpointFindings:
         had been removed from the Ollama host it pointed at — while nothing
         running there used vision at all.
         """
-        from core.config import multimodal
+        from baselith.core.config import multimodal
 
         config = _config(provider="openai", model="gpt-4o-mini")
         multimodal._vision_config = multimodal.VisionConfig(
@@ -188,7 +189,7 @@ class TestLocalEndpointFindings:
             ollama_url="http://localhost:11434",
         )
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"mistral:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -196,7 +197,7 @@ class TestLocalEndpointFindings:
         assert [f.severity for f in findings] == ["warning"]
 
     async def test_an_unreachable_vision_only_endpoint_warns(self):
-        from core.config import multimodal
+        from baselith.core.config import multimodal
 
         config = _config(provider="openai", model="gpt-4o-mini")
         multimodal._vision_config = multimodal.VisionConfig(
@@ -206,7 +207,8 @@ class TestLocalEndpointFindings:
             ollama_url="http://vision-box:11434",
         )
         with patch(
-            "core.services.llm.preflight.probe_ollama", AsyncMock(return_value=None)
+            "baselith.core.services.llm.preflight.probe_ollama",
+            AsyncMock(return_value=None),
         ):
             findings = await check_local_endpoints(config)
         assert "ollama_vision_unreachable" in _codes(findings)
@@ -216,7 +218,7 @@ class TestLocalEndpointFindings:
         """The model that answers every request is not an optional feature."""
         config = _config(provider="ollama", model="llama3.2")
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"mistral:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -230,9 +232,9 @@ class TestLocalEndpointFindings:
         moves the primary — hardcoding either would quietly compare two
         unrelated targets and prove nothing.
         """
-        from core.config import multimodal
-        from core.services.llm.preflight import DEFAULT_OLLAMA_ENDPOINT
-        from core.services.llm.runtime import api_base_for
+        from baselith.core.config import multimodal
+        from baselith.core.services.llm.preflight import DEFAULT_OLLAMA_ENDPOINT
+        from baselith.core.services.llm.runtime import api_base_for
 
         config = _config(provider="ollama", model="llama3.2")
         shared = api_base_for(config, "ollama") or DEFAULT_OLLAMA_ENDPOINT
@@ -243,7 +245,7 @@ class TestLocalEndpointFindings:
         assert multimodal._vision_config.ollama_url == shared
 
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"mistral:latest"}),
         ):
             findings = await check_local_endpoints(config)
@@ -251,7 +253,9 @@ class TestLocalEndpointFindings:
 
     async def test_a_hosted_only_deployment_probes_nothing(self):
         config = _config(provider="openai", model="gpt-4o-mini")
-        with patch("core.services.llm.preflight.probe_ollama", AsyncMock()) as probe:
+        with patch(
+            "baselith.core.services.llm.preflight.probe_ollama", AsyncMock()
+        ) as probe:
             await check_local_endpoints(config)
         probe.assert_not_awaited()
 
@@ -263,7 +267,7 @@ class TestModes:
         with (
             patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=True),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -275,7 +279,7 @@ class TestModes:
         with (
             patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=True),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -284,7 +288,9 @@ class TestModes:
 
     async def test_off_skips_everything(self):
         config = _config(provider="ollama", model="llama3.2", preflight="off")
-        with patch("core.services.llm.preflight.probe_ollama", AsyncMock()) as probe:
+        with patch(
+            "baselith.core.services.llm.preflight.probe_ollama", AsyncMock()
+        ) as probe:
             assert await run_llm_preflight(config) == []
         probe.assert_not_awaited()
 
@@ -292,9 +298,11 @@ class TestModes:
         config = _config(provider="ollama", model="llama3.2", preflight="auto")
         with (
             patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=True),
-            patch("core.config.environment.is_production_env", return_value=True),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.config.environment.is_production_env", return_value=True
+            ),
+            patch(
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -305,9 +313,11 @@ class TestModes:
         config = _config(provider="ollama", model="llama3.2", preflight="auto")
         with (
             patch.dict(os.environ, {"LLM_PROVIDER": "ollama"}, clear=True),
-            patch("core.config.environment.is_production_env", return_value=False),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.config.environment.is_production_env", return_value=False
+            ),
+            patch(
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value=None),
             ),
         ):
@@ -324,6 +334,6 @@ class TestProbe:
 
 
 async def run_probe(url: str):
-    from core.services.llm.preflight import probe_ollama
+    from baselith.core.services.llm.preflight import probe_ollama
 
     return await probe_ollama(url, timeout=0.2)

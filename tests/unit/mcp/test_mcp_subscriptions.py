@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
-from core.mcp.server import MCPServer
-from core.mcp.subscriptions import (
+from baselith.core.mcp.modern import MODERN_PROTOCOL_VERSION, PROTOCOL_VERSION_KEY
+from baselith.core.mcp.server import MCPServer
+from baselith.core.mcp.subscriptions import (
     ACKNOWLEDGED,
     RESOURCES_UPDATED,
     SUBSCRIPTION_ID_KEY,

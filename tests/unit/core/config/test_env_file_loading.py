@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from core.config import env as env_module
+from baselith.core.config import env as env_module
 
 pytestmark = [pytest.mark.unit]
 
@@ -88,7 +88,7 @@ class TestUntrustedEnvFile:
         path = tmp_path / ".env"
         path.write_text("X=1\n")
         path.chmod(mode)
-        with caplog.at_level("WARNING", logger="core.config.env"):
+        with caplog.at_level("WARNING", logger="baselith.core.config.env"):
             assert not env_module.is_trusted_env_file(path)
         assert "writable" in caplog.text
 

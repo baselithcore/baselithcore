@@ -14,7 +14,7 @@ import asyncio
 
 import pytest
 
-from core.memory.scratchpad import (
+from baselith.core.memory.scratchpad import (
     InMemoryScratchpadBackend,
     Scratchpad,
     ScratchpadOverflowError,

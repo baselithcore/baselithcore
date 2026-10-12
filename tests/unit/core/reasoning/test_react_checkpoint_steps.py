@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
 
 def _autonomous_policy() -> AutonomyPolicy:

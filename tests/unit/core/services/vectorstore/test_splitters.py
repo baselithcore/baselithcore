@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from core.services.vectorstore.splitters import (
+from baselith.core.services.vectorstore.splitters import (
     MarkdownHeaderSplitter,
     PythonCodeSplitter,
     RecursiveTextSplitter,

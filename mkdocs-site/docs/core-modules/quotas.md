@@ -3,7 +3,7 @@ title: Usage Quotas
 description: Persistent per-key request budgets and per-tenant/per-identity USD cost budgets over calendar windows
 ---
 
-The `core/quotas` module enforces **persistent usage budgets** over calendar
+The `baselith/core/quotas` module enforces **persistent usage budgets** over calendar
 windows — daily and monthly — at two independent scopes: **per identity** (API
 key / user) and **per tenant** (aggregate across all the tenant's members). It is
 a distinct layer from the two existing controls:
@@ -21,7 +21,7 @@ Opt-in via `QUOTAS_ENABLED`; default-off and a no-op until configured.
 
 ## Automatic enforcement
 
-`QuotaMiddleware` (`core/middleware/quota.py`, pure ASGI, registered in the app
+`QuotaMiddleware` (`baselith/core/middleware/quota.py`, pure ASGI, registered in the app
 factory) enforces both scopes transparently. On every **authenticated** request it
 consumes one unit from the caller's identity budget *and* their tenant's aggregate
 budget; if either window is exhausted it returns `429` before the route runs,
@@ -41,7 +41,7 @@ first and the request is rejected *without consuming* if either would exceed, so
 a rejected request never burns budget.
 
 ```python
-from core.quotas import get_quota_manager, QuotaExceededError
+from baselith.core.quotas import get_quota_manager, QuotaExceededError
 
 manager = get_quota_manager()
 try:
@@ -108,7 +108,7 @@ A `QuotaExceededError` raised inside a request is rendered by the
 Defaults apply to every identity; raise (or lower) them per key at runtime:
 
 ```python
-from core.config.quotas import set_key_quota, set_tenant_quota
+from baselith.core.config.quotas import set_key_quota, set_tenant_quota
 
 set_key_quota("partner-key-id", daily=100_000, monthly=2_000_000)
 set_tenant_quota("tenant-123", daily=1_000_000, monthly=20_000_000)  # tenant plan
@@ -129,7 +129,7 @@ all requests. Configure defaults via `QUOTA_TENANT_DAILY_COST_USD` /
 `QUOTAS_ENABLED=true`), and override per tenant at runtime:
 
 ```python
-from core.config.quotas import get_tenant_cost_overrides, set_tenant_cost_budget
+from baselith.core.config.quotas import get_tenant_cost_overrides, set_tenant_cost_budget
 
 set_tenant_cost_budget("tenant-123", daily=25.0, monthly=400.0)
 get_tenant_cost_overrides("tenant-123")   # (25.0, 400.0); (None, None) if unset
@@ -152,8 +152,8 @@ from enforcement:
   (`limit_usd`, `used_usd`, `remaining_usd`) without consuming anything.
 
 ```python
-from core.quotas import get_quota_manager
-from core.quotas.manager import CostBudgetExceededError
+from baselith.core.quotas import get_quota_manager
+from baselith.core.quotas.manager import CostBudgetExceededError
 
 manager = get_quota_manager()
 try:
@@ -172,17 +172,17 @@ integer increments (`INCRBY`) stay exact — no float drift across workers. No
 counters are written for tenants with no cost limits configured, so the
 feature adds zero store traffic until a budget exists.
 
-The engine itself lives in `core/quotas/cost_budgets.py` (`CostBudgetMixin`,
+The engine itself lives in `baselith/core/quotas/cost_budgets.py` (`CostBudgetMixin`,
 mixed into `QuotaManager`), with the shared calendar-window helpers
-(`QuotaWindow`, period ids, TTLs) in `core/quotas/windows.py` — both split out
-of `manager.py` for the 500-line cap. `core.quotas.manager` remains the
+(`QuotaWindow`, period ids, TTLs) in `baselith/core/quotas/windows.py` — both split out
+of `manager.py` for the 500-line cap. `baselith.core.quotas.manager` remains the
 compatibility import path: `CostBudgetExceededError`, `CostWindowStatus`,
 `TenantCostStatus`, and `QuotaWindow` are re-exported there (and from the
-`core.quotas` package root), so existing imports keep working.
+`baselith.core.quotas` package root), so existing imports keep working.
 
 ### Automatic enforcement in the LLM service
 
-`core/quotas/cost_enforcement.py` is the ambient seam wired into
+`baselith/core/quotas/cost_enforcement.py` is the ambient seam wired into
 [`LLMService`](services.md#cost-control) on **all five** generation paths:
 plain generation (`_generation.py`), streaming (`_streaming.py`), stream events
 (`stream_events.py`), the [message API](messages.md) (`message_runtime.py`) and
@@ -194,9 +194,9 @@ structured output (`structured.py`).
   (at stream end for streaming), pricing the whole four-bucket `Usage` record so
   a cache read is billed at its own tier.
 - The tenant is resolved from the ambient context
-  (`core.context.get_tenant_or_default()`), same as tenant request quotas —
+  (`baselith.core.context.get_tenant_or_default()`), same as tenant request quotas —
   no plumbing through call sites. When an ambient user id is bound
-  (`core.context.get_current_user_id()`), the same gate and booking also
+  (`baselith.core.context.get_current_user_id()`), the same gate and booking also
   apply to that identity's [budget](#identity-usd-cost-budgets): tenant
   **and** identity budgets both enforce.
 - Both helpers **fail open on infrastructure errors**: a quota-store outage
@@ -219,7 +219,7 @@ the pricing table is priced:
 | `reject` | Raises `UnknownModelCostRejected` instead of billing anything. |
 
 A **locally-served** model never reaches this policy. Its id is namespaced by
-provider (`ollama/llama3.2`, via `core.models.pricing.qualified_model_id`) and
+provider (`ollama/llama3.2`, via `baselith.core.models.pricing.qualified_model_id`) and
 priced at zero, because self-hosted inference is capacity-bound rather than
 price-bound. Before that, a bare local tag had no pricing row and was therefore
 treated as unknown: under the default `charge` policy a 4k-token turn on a
@@ -256,8 +256,8 @@ runtime, and use the mirrored manager API — identical post-paid semantics,
 counters under an `identity:<id>:cost` prefix:
 
 ```python
-from core.config.quotas import get_key_cost_overrides, set_key_cost_budget
-from core.quotas import get_quota_manager
+from baselith.core.config.quotas import get_key_cost_overrides, set_key_cost_budget
+from baselith.core.quotas import get_quota_manager
 
 set_key_cost_budget("partner-key-id", daily=5.0, monthly=80.0)
 get_key_cost_overrides("partner-key-id")  # (5.0, 80.0); (None, None) if unset

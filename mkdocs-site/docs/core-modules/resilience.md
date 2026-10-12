@@ -3,7 +3,7 @@ title: Resilience
 description: Circuit breaker, rate limiting, retry and bulkhead
 ---
 
-The `core/resilience` module provides resilience patterns to manage failures and high loads.
+The `baselith/core/resilience` module provides resilience patterns to manage failures and high loads.
 
 ---
 
@@ -21,7 +21,7 @@ The `core/resilience` module provides resilience patterns to manage failures and
 ## Module Structure
 
 ```text
-core/resilience/
+baselith/core/resilience/
 ├── __init__.py           # Public exports
 ├── circuit_breaker.py    # Circuit breaker
 ├── rate_limiter.py       # Rate limiting (In-memory & Redis)
@@ -39,7 +39,7 @@ Prevents a failed service from causing cascade failures.
 Supports **both sync and async** functions — the decorator auto-detects coroutine functions:
 
 ```python
-from core.resilience import CircuitBreaker, CircuitBreakerError
+from baselith.core.resilience import CircuitBreaker, CircuitBreakerError
 
 cb = CircuitBreaker(
     name="external-api",
@@ -121,7 +121,7 @@ returns a read-only snapshot of every registered breaker keyed by name — the
 registry itself stays private, so consumers can observe but never mutate:
 
 ```python
-from core.resilience import all_circuit_breaker_stats
+from baselith.core.resilience import all_circuit_breaker_stats
 
 for name, stats in all_circuit_breaker_stats().items():
     print(name, stats["state"], stats["failures"])
@@ -134,7 +134,7 @@ for name, stats in all_circuit_breaker_stats().items():
 Limits the number of requests to protect resources. `RateLimiter(limit, window, backend)` — `limit`/`window` default from config when omitted; the default backend is `InMemoryRateLimiter`:
 
 ```python
-from core.resilience import RateLimiter, InMemoryRateLimiter
+from baselith.core.resilience import RateLimiter, InMemoryRateLimiter
 
 # 100 requests per 60s window, in-memory backend (default)
 limiter = RateLimiter(limit=100, window=60, backend=InMemoryRateLimiter())
@@ -157,7 +157,7 @@ async def handle_request(request):
 Two module-level helpers return limiters pre-bound to config values:
 
 ```python
-from core.resilience import RedisRateLimiter, get_api_limiter, get_llm_limiter
+from baselith.core.resilience import RedisRateLimiter, get_api_limiter, get_llm_limiter
 
 api = get_api_limiter()   # uses api_rate_limit / api_rate_window
 llm = get_llm_limiter()   # uses the more restrictive llm_rate_limit / llm_rate_window
@@ -176,7 +176,7 @@ llm = get_llm_limiter(backend=RedisRateLimiter())  # any backend
 
 ### LLM call rate limit
 
-`core.services.llm.rate_limit.acquire_llm_call_slot` is awaited on every LLM
+`baselith.core.services.llm.rate_limit.acquire_llm_call_slot` is awaited on every LLM
 generation path, right after the tenant cost gate and before the provider is
 contacted: `generate_response()` (after the response cache, so hits are free),
 `generate()` (structured / native tool calling), `generate_messages()`,
@@ -214,9 +214,9 @@ Using Redis for multi-instance applications (sliding window). It falls back to
 `InMemoryRateLimiter` automatically when Redis is unavailable:
 
 ```python
-from core.resilience import RateLimiter, RedisRateLimiter
+from baselith.core.resilience import RateLimiter, RedisRateLimiter
 
-# Reads the Redis URL from core.config when redis_url is omitted
+# Reads the Redis URL from baselith.core.config when redis_url is omitted
 limiter = RateLimiter(limit=1000, window=60, backend=RedisRateLimiter())
 
 # Atomic sliding window via a registered Lua script
@@ -236,7 +236,7 @@ every argument is optional and falls back to the resilience config when omitted.
 auto-detects coroutine functions and wraps them accordingly:
 
 ```python
-from core.resilience import retry
+from baselith.core.resilience import retry
 
 @retry(
     max_attempts=3,
@@ -277,12 +277,12 @@ raised exception for a `retry_after` attribute before computing a backoff:
 - absent, non-numeric, or `<= 0` → the exponential curve above, jitter included.
 
 The lookup (`_server_requested_delay`) is deliberately **duck-typed**: it reads a
-plain attribute rather than importing an exception class, so `core/resilience`
+plain attribute rather than importing an exception class, so `baselith/core/resilience`
 stays free of any dependency on the LLM stack and *any* error type can opt in by
 exposing the same attribute:
 
 ```python
-from core.resilience import retry
+from baselith.core.resilience import retry
 
 
 class ThrottledError(Exception):
@@ -299,7 +299,7 @@ async def call_quota_limited_api():
 ```
 
 The in-tree producer of that attribute is
-`core.services.llm.exceptions.RateLimitError`, which the LLM service populates
+`baselith.core.services.llm.exceptions.RateLimitError`, which the LLM service populates
 from the provider's RFC 9110 `Retry-After` header — see
 [Services › Retry & Circuit-Breaker Layering](services.md#retry-circuit-breaker-layering).
 
@@ -315,7 +315,7 @@ Restrict which exceptions trigger a retry with `retryable_exceptions` (defaults 
 `(Exception,)`):
 
 ```python
-from core.resilience import retry
+from baselith.core.resilience import retry
 
 @retry(
     max_attempts=3,
@@ -327,11 +327,11 @@ async def api_call():
 
 ### Timeout
 
-`core.resilience` also exports a `timeout` decorator for async functions (raises
-`core.resilience.TimeoutError` after `seconds`):
+`baselith.core.resilience` also exports a `timeout` decorator for async functions (raises
+`baselith.core.resilience.TimeoutError` after `seconds`):
 
 ```python
-from core.resilience import timeout, TimeoutError
+from baselith.core.resilience import timeout, TimeoutError
 
 @timeout(5.0)
 async def slow_operation():
@@ -347,7 +347,7 @@ number of concurrent in-flight operations. `Bulkhead(max_concurrent=None, name="
 is used **directly as a decorator** (it only supports async functions):
 
 ```python
-from core.resilience import Bulkhead
+from baselith.core.resilience import Bulkhead
 
 # Limit concurrency to 10 (defaults to bulkhead_max_concurrent from config when omitted)
 llm_bulkhead = Bulkhead(max_concurrent=10, name="llm")
@@ -376,7 +376,7 @@ print(cpu_bulkhead.available)  # slots currently free
 Patterns combine effectively:
 
 ```python
-from core.resilience import (
+from baselith.core.resilience import (
     CircuitBreaker,
     retry,
     Bulkhead,
@@ -415,7 +415,7 @@ async def resilient_call(user_id: str):
 Clean shutdown management:
 
 ```python
-from core.resilience import GracefulShutdown
+from baselith.core.resilience import GracefulShutdown
 
 shutdown = GracefulShutdown(timeout=30)  # max seconds for all callbacks
 
@@ -432,6 +432,11 @@ await shutdown.wait_for_shutdown()
 
 A process-wide singleton is available via `get_shutdown_handler()`.
 
+A signal that arrives *before* `wait_for_shutdown()` is called is not lost:
+the handler flags the shutdown, and the next `wait_for_shutdown()` returns at
+once and runs the callbacks. (Before 1.0 such a signal left the wait blocked
+forever, with every later signal ignored as "already shutting down".)
+
 !!! note "Library helper — not wired into the FastAPI runtime"
     `GracefulShutdown` is not part of the API server's shutdown path: the
     app's real teardown is the FastAPI lifespan plus uvicorn's
@@ -442,14 +447,14 @@ A process-wide singleton is available via `get_shutdown_handler()`.
 
 ## Distributed Lock
 
-In-memory coordination (e.g. `core.cache.single_flight`) only protects a single
+In-memory coordination (e.g. `baselith.core.cache.single_flight`) only protects a single
 process. Across multiple replicas — the normal production topology — periodic
 triggers, cron jobs, and run-once startup tasks would otherwise fire on **every**
 pod. `DistributedLock` is a Redis-backed mutex that guarantees exactly one
 replica runs such work.
 
 ```python
-from core.resilience import get_distributed_lock, LockNotAcquired
+from baselith.core.resilience import get_distributed_lock, LockNotAcquired
 
 # Guard a periodic trigger so only one replica enqueues the job.
 lock = get_distributed_lock("nightly-reindex", ttl_ms=60_000)
@@ -477,9 +482,12 @@ Correctness guarantees:
   caller still owns the unique token, so an expired-then-reacquired lock is never
   released by the previous holder.
 - **Auto-renew** — optional watchdog extends the TTL at ~⅓ of `ttl_ms`.
+- **Cancellation-safe release** — a caller cancelled while `release()` stops
+  the watchdog still deletes the key first, then gets its `CancelledError`;
+  the cancellation is deferred, never swallowed, and the lock is never stranded.
 
 `DistributedLock` is covered by the core strict-typing ratchet
-(`scripts/check_core_strict_typing.py`, which checks the whole `core.resilience`
+(`scripts/check_core_strict_typing.py`, which checks the whole `baselith.core.resilience`
 package under strict mypy flags).
 
 ---
@@ -487,7 +495,7 @@ package under strict mypy flags).
 ## Configuration
 
 ```python
-from core.config import get_resilience_config
+from baselith.core.config import get_resilience_config
 
 config = get_resilience_config()
 
@@ -501,7 +509,7 @@ print(config.retry_base_delay)        # 1.0
 ```
 
 All resilience settings share the `RESILIENCE_` env prefix
-(`core/config/resilience.py`):
+(`baselith/core/config/resilience.py`):
 
 ```env title=".env"
 # Circuit Breaker
@@ -528,14 +536,14 @@ BaselithCore uses these resilience patterns natively in its core providers to en
 
 - **LLM Providers**: the OpenAI, Anthropic and Gemini providers wrap each call in a named circuit breaker (`get_circuit_breaker("openai_provider")`, `"anthropic_provider"`, `"gemini_provider"`); `LLMService._generate_with_retry` and the structured-output path add `@retry` on top, and the fallback runtime skips any provider whose breaker is `OPEN`.
 - **VectorStore**: the Qdrant provider stacks `@get_circuit_breaker("vectorstore")` with `@retry(max_attempts=3, exponential_base=2.0)` on its operations.
-- **Database**: the feedback and documents DAOs (`core/db/feedback.py`, `core/db/documents.py`) and `TenantService` (`core/services/tenant/service.py`) wrap their queries in `@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)`.
+- **Database**: the feedback and documents DAOs (`baselith/core/db/feedback.py`, `baselith/core/db/documents.py`) and `TenantService` (`baselith/core/services/tenant/service.py`) wrap their queries in `@retry(max_attempts=3, base_delay=0.5, exponential_base=2.0)`.
 
 ---
 
 ## Metrics and Monitoring
 
-`core/resilience` registers **no Prometheus metrics** of its own, and none of
-the `mas_*` series in `core/observability/metrics.py` describe breakers,
+`baselith/core/resilience` registers **no Prometheus metrics** of its own, and none of
+the `mas_*` series in `baselith/core/observability/metrics.py` describe breakers,
 retries, rate limiters or bulkheads. Circuit-breaker state is exposed
 programmatically instead: `CircuitBreaker.get_stats()` for one breaker
 (`name`, `state`, `failures`, `total_failures`, `successes`, `fail_max`,

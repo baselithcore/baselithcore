@@ -2,9 +2,9 @@
 
 from unittest.mock import AsyncMock, patch
 
-from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
-_FLAG = "core.memory.hierarchy_search._HYBRID_RECALL_ENABLED"
+_FLAG = "baselith.core.memory.hierarchy_search._HYBRID_RECALL_ENABLED"
 
 
 def _orthogonal_embedder():
@@ -69,8 +69,8 @@ class TestFusionOffload:
     corpus threshold it must run on the inference executor, not the loop."""
 
     async def test_large_corpus_offloads_fusion(self, monkeypatch):
-        import core.memory.hierarchy_search as hs
-        from core.memory.hierarchy import HierarchicalMemory
+        import baselith.core.memory.hierarchy_search as hs
+        from baselith.core.memory.hierarchy import HierarchicalMemory
 
         store = HierarchicalMemory(embedder=None)
         for i in range(hs._FUSE_OFFLOAD_THRESHOLD + 1):
@@ -89,8 +89,8 @@ class TestFusionOffload:
         assert "_fuse_recall" in calls
 
     async def test_small_corpus_stays_inline(self, monkeypatch):
-        import core.memory.hierarchy_search as hs
-        from core.memory.hierarchy import HierarchicalMemory
+        import baselith.core.memory.hierarchy_search as hs
+        from baselith.core.memory.hierarchy import HierarchicalMemory
 
         store = HierarchicalMemory(embedder=None)
         await store.add("only document about testing")

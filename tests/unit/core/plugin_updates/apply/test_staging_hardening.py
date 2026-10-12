@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from core.plugin_updates.apply import staging as staging_mod
-from core.plugin_updates.apply.staging import StagingError, known_files_of
-from core.plugin_updates.release_manifest import sign_release_manifest
-from core.plugins.signing import generate_keypair_hex
+from baselith.core.plugin_updates.apply import staging as staging_mod
+from baselith.core.plugin_updates.apply.staging import StagingError, known_files_of
+from baselith.core.plugin_updates.release_manifest import sign_release_manifest
+from baselith.core.plugins.signing import generate_keypair_hex
 
 from ..test_checker import _signed_tarball
 from ._staging_fixtures import make_current, stage, store_is_clean
@@ -256,7 +256,7 @@ def test_link_inside_carried_dir_is_refused(tmp_path: Path, keys) -> None:
     ["../escape", "pinstall-bad", "pinstall-20260930T120000Z-0000abcd\n", "x"],
 )
 def test_run_id_must_match_the_store_format(tmp_path: Path, keys, run_id: str) -> None:
-    from core.plugin_updates.apply.staging import stage_release
+    from baselith.core.plugin_updates.apply.staging import stage_release
 
     tgz, meta = _signed_tarball(tmp_path, keys[0])
     with pytest.raises(StagingError) as err:

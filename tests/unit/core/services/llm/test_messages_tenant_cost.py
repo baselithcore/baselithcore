@@ -19,11 +19,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.services.llm.errors import LLMRefusalError
-from core.services.llm.message_runtime import generate_messages
-from core.services.llm.messages import Message
-from core.services.llm.service import LLMService
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.errors import LLMRefusalError
+from baselith.core.services.llm.message_runtime import generate_messages
+from baselith.core.services.llm.messages import Message
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.tool_calling import LLMResult
 
 pytestmark = [pytest.mark.unit]
 
@@ -32,7 +32,7 @@ HISTORY = [Message.user("q")]
 
 
 def _service(*, messages: bool) -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as config:
         config.return_value = Mock(
             provider="openai",
             model=MODEL,
@@ -57,7 +57,9 @@ def booked(monkeypatch):
     async def _record(usd, **_kwargs):
         recorded.append(usd)
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
     return recorded
 
 
@@ -65,7 +67,7 @@ class TestNativeMessagePath:
     async def test_the_turn_reaches_the_tenant_ledger(self, booked):
         service = _service(messages=True)
         with patch(
-            "core.services.llm.message_runtime._messages_with_retry",
+            "baselith.core.services.llm.message_runtime._messages_with_retry",
             AsyncMock(return_value=LLMResult(text="ok", tokens_used=300)),
         ):
             await generate_messages(service, HISTORY, model=MODEL)
@@ -78,7 +80,7 @@ class TestNativeMessagePath:
         path applies. Losing it here loses spend that already happened."""
         service = _service(messages=True)
         with patch(
-            "core.services.llm.message_runtime._messages_with_retry",
+            "baselith.core.services.llm.message_runtime._messages_with_retry",
             AsyncMock(side_effect=LLMRefusalError(category="safety", explanation="no")),
         ):
             with pytest.raises(LLMRefusalError):

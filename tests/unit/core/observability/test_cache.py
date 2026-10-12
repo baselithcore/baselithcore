@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.observability.cache import Cache, MemoryCache, RedisCache
+from baselith.core.observability.cache import Cache, MemoryCache, RedisCache
 
 
 @pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_cache_decorator():
 async def test_redis_cache_mock():
     # RedisCache is backed by the shared bounded pool factory, not a
     # per-instance redis.asyncio.from_url — patch the factory it calls.
-    with patch("core.cache.redis_cache.create_redis_client") as mock_factory:
+    with patch("baselith.core.cache.redis_cache.create_redis_client") as mock_factory:
         mock_client = AsyncMock()
         mock_factory.return_value = mock_client
         mock_client.get.return_value = b'"cached_value"'

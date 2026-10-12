@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.task_queue import worker
-from core.task_queue.worker import WorkerSupervisor
+from baselith.core.task_queue import worker
+from baselith.core.task_queue.worker import WorkerSupervisor
 
 pytest.importorskip("rq")
 

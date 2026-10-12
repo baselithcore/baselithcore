@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import jwt as pyjwt
 import pytest
 
-from core.auth._jwt_keys import JWTKeyRing, parse_key_map
+from baselith.core.auth._jwt_keys import JWTKeyRing, parse_key_map
 
 SECRET_A = "key-alpha-with-at-least-thirty-two-characters"
 SECRET_B = "key-bravo-with-at-least-thirty-two-characters"
@@ -19,10 +19,10 @@ SECRET_B = "key-bravo-with-at-least-thirty-two-characters"
 
 @pytest.fixture
 def handler_factory():
-    from core.auth.jwt import JWTHandler
+    from baselith.core.auth.jwt import JWTHandler
 
     def _make(**kwargs):
-        with patch("core.auth.jwt.create_redis_client") as redis_factory:
+        with patch("baselith.core.auth.jwt.create_redis_client") as redis_factory:
             # `get` must answer None, not a truthy Mock — otherwise every token
             # reads as blacklisted and the signature path is never reached.
             redis_factory.return_value = AsyncMock(get=AsyncMock(return_value=None))
@@ -137,14 +137,14 @@ async def test_unlabelled_legacy_token_verifies_after_the_ring_arrives(
 
 async def test_key_dropped_from_the_ring_stops_verifying(handler_factory):
     """Completing a rotation genuinely retires the old key."""
-    from core.auth.types import InvalidTokenError
+    from baselith.core.auth.types import InvalidTokenError
 
     old = handler_factory(keys={"k1": SECRET_A}, active_kid="k1")
     token = old.create_token("u-4")
     # SECRET_A is gone from both the ring and the deployment secret.
-    with patch("core.auth.jwt.create_redis_client") as redis_factory:
+    with patch("baselith.core.auth.jwt.create_redis_client") as redis_factory:
         redis_factory.return_value = AsyncMock(get=AsyncMock(return_value=None))
-        from core.auth.jwt import JWTHandler
+        from baselith.core.auth.jwt import JWTHandler
 
         retired = JWTHandler(
             secret_key=SECRET_B, keys={"k2": SECRET_B}, active_kid="k2"
@@ -162,7 +162,7 @@ async def test_expired_token_reports_expiry_not_a_key_problem(handler_factory):
     """
     import time as _time
 
-    from core.auth.types import TokenExpiredError
+    from baselith.core.auth.types import TokenExpiredError
 
     handler = handler_factory(keys={"k1": SECRET_A, "k2": SECRET_B}, active_kid="k1")
     expired = pyjwt.encode(
@@ -252,7 +252,7 @@ class TestMalformedRingNeverLogsKeyMaterial:
     """
 
     def _parse(self, monkeypatch, records: list, raw: str) -> dict:
-        from core.auth import _jwt_keys
+        from baselith.core.auth import _jwt_keys
 
         class _Recorder:
             def warning(self, message, **kwargs):

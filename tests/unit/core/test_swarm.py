@@ -6,7 +6,7 @@ Tests for auction, pheromones, team formation, and colony.
 
 import pytest
 
-from core.swarm import (
+from baselith.core.swarm import (
     AgentProfile,
     Bid,
     Colony,
@@ -15,7 +15,7 @@ from core.swarm import (
     TaskAuction,
     TeamFormationEngine,
 )
-from core.swarm.types import (
+from baselith.core.swarm.types import (
     AgentStatus,
     Capability,
     TaskPriority,

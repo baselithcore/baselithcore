@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from core.memory.optimization_batch import delete_items
+from baselith.core.memory.optimization_batch import delete_items
 
 
 async def test_delete_items_prefers_delete_many():

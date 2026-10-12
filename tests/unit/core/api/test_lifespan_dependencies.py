@@ -1,8 +1,8 @@
-"""``core.api.lifespan`` must not drag in dependencies nothing uses.
+"""``baselith.core.api.lifespan`` must not drag in dependencies nothing uses.
 
 ``fastapi-limiter`` used to be initialised at startup (opening a Redis client)
 although no route ever applied one of its dependencies — the framework's own
-``RateLimiter`` (``core.middleware.rate_limiter``) is the limiter. Importing the
+``RateLimiter`` (``baselith.core.middleware.rate_limiter``) is the limiter. Importing the
 lifespan must therefore not import the package at all; if it does, the dead
 dependency crept back in.
 """
@@ -14,7 +14,7 @@ import sys
 
 _PROBE = """
 import sys
-import core.api.lifespan  # noqa: F401
+import baselith.core.api.lifespan  # noqa: F401
 print("fastapi_limiter" in sys.modules)
 """
 

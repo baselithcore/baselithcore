@@ -1,5 +1,5 @@
 """
-Tests for core.storage modules.
+Tests for baselith.core.storage modules.
 """
 
 from uuid import UUID
@@ -10,19 +10,19 @@ class TestStorageModels:
 
     def test_interaction_model_import(self):
         """Interaction model can be imported."""
-        from core.storage.models import Interaction
+        from baselith.core.storage.models import Interaction
 
         assert Interaction is not None
 
     def test_feedback_model_import(self):
         """Feedback model can be imported."""
-        from core.storage.models import Feedback
+        from baselith.core.storage.models import Feedback
 
         assert Feedback is not None
 
     def test_interaction_creation(self):
         """Interaction can be created."""
-        from core.storage.models import Interaction
+        from baselith.core.storage.models import Interaction
 
         interaction = Interaction(
             session_id="session-123",
@@ -36,7 +36,7 @@ class TestStorageModels:
         """Feedback can be created."""
         from uuid import uuid4
 
-        from core.storage.models import Feedback
+        from baselith.core.storage.models import Feedback
 
         feedback = Feedback(interaction_id=uuid4(), score=0.8, label="positive")
         assert feedback.score == 0.8
@@ -47,7 +47,7 @@ class TestPostgresStorage:
 
     def test_postgres_storage_import(self):
         """PostgresStorage can be imported."""
-        from core.storage.postgres import PostgresStorage
+        from baselith.core.storage.postgres import PostgresStorage
 
         assert PostgresStorage is not None
 
@@ -57,6 +57,6 @@ class TestStorageInit:
 
     def test_get_storage_import(self):
         """get_storage can be imported."""
-        from core.storage import get_storage
+        from baselith.core.storage import get_storage
 
         assert callable(get_storage)

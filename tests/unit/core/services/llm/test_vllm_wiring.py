@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import SecretStr
 
-from core.config.services import LLMConfig
+from baselith.core.config.services import LLMConfig
 
 
 def _config(**kwargs) -> LLMConfig:
@@ -59,7 +59,7 @@ class TestConfig:
 
 class TestRuntime:
     def test_dedicated_endpoint_wins_and_stays_its_own(self):
-        from core.services.llm.runtime import api_base_for
+        from baselith.core.services.llm.runtime import api_base_for
 
         config = _config(
             provider="openai",
@@ -71,19 +71,19 @@ class TestRuntime:
         assert api_base_for(config, "openai") == "https://openai-gw/v1"
 
     def test_primary_base_serves_a_vllm_default(self):
-        from core.services.llm.runtime import api_base_for
+        from baselith.core.services.llm.runtime import api_base_for
 
         config = _config(provider="vllm", model="m", api_base="http://gpu:8000/v1")
         assert api_base_for(config, "vllm") == "http://gpu:8000/v1"
 
     def test_another_providers_base_is_never_borrowed(self):
-        from core.services.llm.runtime import api_base_for
+        from baselith.core.services.llm.runtime import api_base_for
 
         config = _config(provider="openai", model="m", api_base="https://gw/v1")
         assert api_base_for(config, "vllm") is None
 
     def test_configured_means_an_endpoint_not_a_key(self):
-        from core.services.llm.runtime import provider_configured
+        from baselith.core.services.llm.runtime import provider_configured
 
         keyless = _config(
             provider="openai",
@@ -96,7 +96,7 @@ class TestRuntime:
         )
 
     def test_dedicated_key_is_resolved(self):
-        from core.services.llm.runtime import api_key_from_config
+        from baselith.core.services.llm.runtime import api_key_from_config
 
         config = _config(
             provider="openai",
@@ -109,7 +109,7 @@ class TestRuntime:
     def test_the_primary_key_is_never_vllms(self):
         """``LLM_API_KEY`` doubles as ``LLM_OPENAI_API_KEY``; vLLM reads only
         its own key, even when it is the default provider."""
-        from core.services.llm.runtime import api_key_for, api_key_from_config
+        from baselith.core.services.llm.runtime import api_key_for, api_key_from_config
 
         config = _config(
             provider="vllm",
@@ -120,12 +120,13 @@ class TestRuntime:
         assert config.api_key is not None
         assert api_key_from_config(config, "vllm") is None
         with patch(
-            "core.services.llm.runtime.resolve_llm_credential", return_value=None
+            "baselith.core.services.llm.runtime.resolve_llm_credential",
+            return_value=None,
         ):
             assert api_key_for(config, "vllm") is None
 
     def test_setup_hint_names_the_endpoint(self):
-        from core.services.llm.runtime import provider_setup_hint
+        from baselith.core.services.llm.runtime import provider_setup_hint
 
         assert "LLM_VLLM_API_BASE" in provider_setup_hint("vllm")
         assert "API key" in provider_setup_hint("anthropic")
@@ -133,12 +134,12 @@ class TestRuntime:
 
 class TestProviderLists:
     def test_policy_can_pin_vllm(self):
-        from core.services.llm.policy import SUPPORTED_PROVIDERS
+        from baselith.core.services.llm.policy import SUPPORTED_PROVIDERS
 
         assert "vllm" in SUPPORTED_PROVIDERS
 
     def test_fallback_chain_accepts_a_vllm_stage(self):
-        from core.services.llm._fallback_support import parse_fallback_chain
+        from baselith.core.services.llm._fallback_support import parse_fallback_chain
 
         assert parse_fallback_chain("openai:gpt-4o-mini, vllm:Qwen/Qwen3-8B") == [
             ("openai", "gpt-4o-mini"),
@@ -146,13 +147,13 @@ class TestProviderLists:
         ]
 
     def test_telemetry_reports_vllm(self):
-        from core.services.llm._telemetry import gen_ai_system
+        from baselith.core.services.llm._telemetry import gen_ai_system
 
         assert gen_ai_system("vllm") == "vllm"
 
     def test_self_hosted_tokens_cost_nothing(self):
         """Billing them at UNKNOWN_PRICE would abort tenant budgets."""
-        from core.models.pricing import get_price, qualified_model_id
+        from baselith.core.models.pricing import get_price, qualified_model_id
 
         model_id = qualified_model_id("vllm", "Qwen/Qwen3-8B")
         assert model_id == "vllm/Qwen/Qwen3-8B"
@@ -163,7 +164,7 @@ class TestProviderLists:
 
 class TestPreflightConfiguration:
     def test_a_vllm_primary_without_endpoint_names_the_setting(self):
-        from core.services.llm.preflight import check_configuration
+        from baselith.core.services.llm.preflight import check_configuration
 
         config = _config(provider="vllm", model="m")
         with patch.dict(os.environ, {"LLM_PROVIDER": "vllm"}, clear=True):
@@ -172,14 +173,14 @@ class TestPreflightConfiguration:
         assert "LLM_VLLM_API_BASE" in finding.remedy
 
     def test_a_keyless_vllm_primary_is_fine(self):
-        from core.services.llm.preflight import check_configuration
+        from baselith.core.services.llm.preflight import check_configuration
 
         config = _config(provider="vllm", model="m", api_base="http://gpu:8000")
         with patch.dict(os.environ, {"LLM_PROVIDER": "vllm"}, clear=True):
             assert check_configuration(config) == []
 
 
-_PROBE = "core.services.llm._vllm_preflight.probe_vllm"
+_PROBE = "baselith.core.services.llm._vllm_preflight.probe_vllm"
 
 
 @pytest.mark.asyncio
@@ -187,14 +188,14 @@ class TestPreflightEndpoints:
     @pytest.fixture(autouse=True)
     def _no_ollama(self):
         with patch(
-            "core.services.llm.preflight.probe_ollama",
+            "baselith.core.services.llm.preflight.probe_ollama",
             AsyncMock(return_value={"llama3.2:latest"}),
         ):
             yield
 
     async def test_a_served_model_passes(self):
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(provider="vllm", model="Qwen/Qwen3-8B", api_base="http://g")
         with patch(_PROBE, AsyncMock(return_value=VLLMProbe("ok", {"Qwen/Qwen3-8B"}))):
@@ -202,8 +203,8 @@ class TestPreflightEndpoints:
 
     async def test_a_name_mismatch_is_reported_with_what_is_served(self):
         """The common one: ``--served-model-name`` differs from LLM_MODEL."""
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(provider="vllm", model="qwen3", api_base="http://g")
         with patch(_PROBE, AsyncMock(return_value=VLLMProbe("ok", {"Qwen/Qwen3-8B"}))):
@@ -214,8 +215,8 @@ class TestPreflightEndpoints:
 
     async def test_userinfo_never_reaches_a_finding(self):
         """Findings are logged and raised; a basic-auth URL must not leak."""
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(
             provider="vllm", model="m", api_base="http://ops:s3cret@gpu:8000"
@@ -229,16 +230,16 @@ class TestPreflightEndpoints:
         assert probe.call_args.args[0] == "http://ops:s3cret@gpu:8000/v1"
 
     async def test_an_unreachable_server_is_reported(self):
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(provider="vllm", model="m", api_base="http://g")
         with patch(_PROBE, AsyncMock(return_value=VLLMProbe("unreachable"))):
             assert _codes(await check_local_endpoints(config)) == {"vllm_unreachable"}
 
     async def test_a_rejected_key_is_not_called_unreachable(self):
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(provider="vllm", model="m", api_base="http://g")
         with patch(_PROBE, AsyncMock(return_value=VLLMProbe("unauthorized"))):
@@ -247,8 +248,8 @@ class TestPreflightEndpoints:
         assert "LLM_VLLM_API_KEY" in finding.remedy
 
     async def test_a_fallback_stage_is_probed_on_its_own_endpoint(self):
-        from core.services.llm._vllm_preflight import VLLMProbe
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm._vllm_preflight import VLLMProbe
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(
             provider="ollama",
@@ -265,7 +266,7 @@ class TestPreflightEndpoints:
         assert key == "tok"
 
     async def test_nothing_is_probed_without_a_vllm_target(self):
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         probe = AsyncMock()
         with patch(_PROBE, probe):
@@ -278,7 +279,7 @@ class TestProbe:
     async def test_reads_the_model_catalog(self):
         import httpx
 
-        from core.services.llm._vllm_preflight import probe_vllm
+        from baselith.core.services.llm._vllm_preflight import probe_vllm
 
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/v1/models"
@@ -294,7 +295,7 @@ class TestProbe:
     async def test_401_is_unauthorized(self):
         import httpx
 
-        from core.services.llm._vllm_preflight import probe_vllm
+        from baselith.core.services.llm._vllm_preflight import probe_vllm
 
         def handler(request: httpx.Request) -> httpx.Response:
             # A keyless deployment sends no header at all, never "Bearer None".
@@ -309,7 +310,7 @@ class TestProbe:
     async def test_connection_failure_is_unreachable(self):
         import httpx
 
-        from core.services.llm._vllm_preflight import probe_vllm
+        from baselith.core.services.llm._vllm_preflight import probe_vllm
 
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("refused")

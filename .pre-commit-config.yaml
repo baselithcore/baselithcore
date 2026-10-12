@@ -101,7 +101,7 @@ repos:
   #
   # It was the upstream per-file hook before, handed only the staged files and
   # narrowed further by an `exclude:` regex, while CI scanned four trees in
-  # full — `bandit -r core plugins sdk scripts`. A finding in an sdk/ or
+  # full — `bandit -r baselith sdk scripts`. A finding in an sdk/ or
   # scripts/ module that the commit did not touch was therefore invisible until
   # the pipeline, which is exactly the "green locally, red in CI" the rules at
   # the top of this file forbid. `pass_filenames: false` is what makes the two
@@ -113,7 +113,7 @@ repos:
     hooks:
       - id: bandit
         name: bandit
-        entry: bandit -r core plugins sdk scripts -ll --exclude tests --skip B101
+        entry: bandit -r baselith sdk scripts -ll --exclude tests --skip B101
         language: python
         pass_filenames: false
         files: \.py$
@@ -135,10 +135,10 @@ repos:
       # A plugin's shipped SPA bundle is generated output with two owners that
       # both compare it byte for byte, so no formatter may touch it:
       #
-      #   * the `ui_build` gate in ci.yml rebuilds plugins/baselithbot/ui from
-      #     a clean `npm ci` and diffs the result against what is committed;
+      #   * a drift gate that rebuilds the bundle from a clean `npm ci` and
+      #     diffs the result against what is committed;
       #   * ui/dist/** is inside the plugin-integrity hash surface
-      #     (core/plugins/integrity.py), so a rewritten byte invalidates the
+      #     (baselith/core/plugins/integrity.py), so a rewritten byte invalidates the
       #     manifest's integrity_sha256 and the plugin stops loading under
       #     BASELITH_REQUIRE_SIGNED_PLUGINS.
       #
@@ -148,7 +148,7 @@ repos:
       # hook put the newline back on the way into the commit.
       #
       # The pattern covers ui/{dist,out,build} for ANY plugin rather than
-      # naming baselithbot: the integrity surface already matches all three (a
+      # naming one plugin: the integrity surface already matches all three (a
       # Next.js export lands in ui/out, a Create React App build in ui/build),
       # so an exclusion that only knew `dist` would leave the same trap set for
       # the next plugin.
@@ -156,14 +156,14 @@ repos:
         exclude: |
           (?x)^(
             backstage-portal/
-            | plugins/[^/]+/ui/(dist|out|build)/
+            | baselith/plugins/[^/]+/ui/(dist|out|build)/
           )
       - id: mixed-line-ending
         args: ['--fix=lf']
         exclude: |
           (?x)^(
             backstage-portal/
-            | plugins/[^/]+/ui/(dist|out|build)/
+            | baselith/plugins/[^/]+/ui/(dist|out|build)/
           )
 
   - repo: local
@@ -173,12 +173,35 @@ repos:
         entry: python scripts/check_architecture_boundaries.py
         language: system
         pass_filenames: false
+      # Since 1.0 the only top-level package is `baselith`. An import, dotted
+      # string or path that still names the old top-level `core`/`plugins`
+      # (a stale mock.patch target, an RQ job path, a Dockerfile COPY) is
+      # exactly what scripts/migrate_namespace.py would rewrite, so its
+      # --check mode is the gate. language: python because it needs libcst,
+      # which the CI job's bare interpreter does not have.
+      - id: namespace-check
+        name: namespace-check
+        entry: python scripts/migrate_namespace.py --check --quiet
+        language: python
+        pass_filenames: false
+        additional_dependencies:
+          - libcst==1.9.0
       # Embedding, rerank and Qdrant are core services; a plugin that builds
       # its own model or client carries GiB per worker. Allowlist in
       # configs/inprocess_ml_allowlist.yaml only shrinks.
       - id: no-inprocess-ml
         name: no-inprocess-ml
         entry: python scripts/check_no_inprocess_ml.py
+        language: system
+        pass_filenames: false
+      # Model choice, provider keys and failover are central (baselith.core.services.llm
+      # and its per-plugin policy seam); a plugin that imports a provider SDK,
+      # names a provider API host or registers its own key resolver has a
+      # second path the policy and the cost ledger never see. Allowlist in
+      # configs/plugin_llm_keys_allowlist.yaml only shrinks.
+      - id: no-plugin-llm-keys
+        name: no-plugin-llm-keys
+        entry: python scripts/check_no_plugin_llm_keys.py
         language: system
         pass_filenames: false
       - id: file-size-cap
@@ -193,14 +216,14 @@ repos:
         entry: python scripts/check_exception_hygiene.py
         language: system
         pass_filenames: false
-      # Every literal core/**/__init__.py __all__ is snapshotted; a removed
+      # Every literal baselith/core/**/__init__.py __all__ is snapshotted; a removed
       # symbol is a breaking change under the versioning policy.
       - id: public-api-surface
         name: public-api-surface
         entry: python scripts/check_public_api.py
         language: system
         pass_filenames: false
-        files: ^core/.*__init__\.py$
+        files: ^baselith/core/.*__init__\.py$
       # DROP TABLE/COLUMN inside a migration's upgrade() destroys data the
       # moment it runs, and downgrade() recreates the structure, not the rows.
       # Deliberate ones carry `# migration-guard: allow-drop` plus a reason.
@@ -209,7 +232,7 @@ repos:
         entry: python scripts/check_migrations.py
         language: system
         pass_filenames: false
-        files: ^core/db/migrations/
+        files: ^baselith/core/db/migrations/
       # The hand-written SDKs must keep calling routes the spec still declares.
       - id: sdk-contract
         name: sdk-contract
@@ -231,7 +254,7 @@ repos:
         entry: python scripts/check_config_surface.py
         language: system
         pass_filenames: false
-        files: ^(core/config/|plugins/|\.env\.example|configs/\.env\.base|mkdocs-site/docs/getting-started/configuration\.md)
+        files: ^(baselith/core/config/|baselith/plugins/|\.env\.example|configs/\.env\.base|mkdocs-site/docs/getting-started/configuration\.md)
       # Docs ↔ code: paths, links, env vars and CLI commands the docs claim must
       # exist. Import and route verification (needs the app importable) runs in
       # the CI job `docs_consistency`.
@@ -240,9 +263,9 @@ repos:
         entry: python scripts/check_docs_consistency.py --fast
         language: system
         pass_filenames: false
-        files: ^(mkdocs-site/docs/|core/|plugins/|configs/|scripts/|\.env\.example|compose|docker-compose|Dockerfile)
+        files: ^(mkdocs-site/docs/|baselith/core/|baselith/plugins/|configs/|scripts/|\.env\.example|compose|docker-compose|Dockerfile)
       # The sibling of the gate above, and the one that was CI-only: it asks
-      # whether a changed core/ module's PAGE moved, not whether the prose is
+      # whether a changed baselith/core/ module's PAGE moved, not whether the prose is
       # still true. Left to the pull request it reported on a change that was
       # already pushed, and often by someone who no longer remembered it.
       #
@@ -298,8 +321,8 @@ repos:
       # Auto-rehash any plugin whose hashed files are staged. Runs BEFORE
       # plugin-integrity so the drift check sees a coherent manifest.
       #
-      # The trigger is every path under plugins/, deliberately: which files are
-      # hashed is decided by core.plugins.integrity.is_hashed_path, and the
+      # The trigger is every path under baselith/plugins/, deliberately: which files are
+      # hashed is decided by baselith.core.plugins.integrity.is_hashed_path, and the
       # script already applies it. A suffix list here would be a second copy of
       # that definition, free to drift from it — as it did, matching only
       # .py/.pyi while the hashed surface had grown to cover ui/dist/**,
@@ -311,7 +334,7 @@ repos:
         # PyYAML is not stdlib; see the note on plugin-integrity below.
         language: python
         pass_filenames: false
-        files: ^plugins/
+        files: ^baselith/plugins/
         # `pre-commit` only, deliberately. It derives its work from the STAGED
         # diff, so under `--all-files` (pre-push, CI) it has nothing to do —
         # and if it ever did rewrite a manifest there, it would hand the
@@ -327,7 +350,7 @@ repos:
         language: python
         pass_filenames: false
         # Same reasoning as above, plus the manifests that carry the digest.
-        files: ^plugins/
+        files: ^baselith/plugins/
         # PyYAML is not stdlib and the CI runner has a bare interpreter, so a
         # `language: system` spelling of this hook passes on any laptop with a
         # populated environment and dies in the pipeline. Same pin as the
@@ -442,14 +465,14 @@ repos:
         # A plugin's shipped SPA bundle is the same rule with more at stake:
         # `files:` above matches the bundles, the stylesheet and index.html
         # inside it, and prettier un-minifies what it formats — measured on
-        # baselithbot, one bundle went from 1 line to 237 and the stylesheet
-        # from 1 to 4493. A single `pre-commit run --all-files` would wedge the
-        # `ui_build` gate, invalidate the plugin's integrity_sha256 and ship an
+        # one plugin, one bundle went from 1 line to 237 and the stylesheet
+        # from 1 to 4493. A single `pre-commit run --all-files` would wedge a
+        # drift gate, invalidate the plugin's integrity_sha256 and ship an
         # un-minified dashboard in the wheel. See the end-of-file-fixer note.
         exclude: |
           (?x)^(
             backstage-portal/
-            | plugins/[^/]+/ui/(dist|out|build)/
+            | baselith/plugins/[^/]+/ui/(dist|out|build)/
             | sdk/openapi\.json$
             | mkdocs-site/docs/api/specs/openapi\.json$
             | scripts/public_api_baseline\.json$
@@ -469,7 +492,7 @@ repos:
   # the change; both invocations, same commit, opposite verdicts.
   #
   # So the hook now runs CI's command verbatim, with `pass_filenames: false`.
-  # `files:` decides only whether a commit touching core/ is worth the ~60s,
+  # `files:` decides only whether a commit touching baselith/core/ is worth the ~60s,
   # and `--all-files` (pre-push and CI) runs it unconditionally.
   #
   # ``redis`` is pinned as the RUNTIME package, not a ``types-redis`` stub:
@@ -481,8 +504,8 @@ repos:
     hooks:
       - id: mypy-core
         name: mypy-core
-        entry: mypy core baselith --ignore-missing-imports --incremental --fast-module-lookup
+        entry: mypy baselith --ignore-missing-imports --incremental --fast-module-lookup
         language: python
         pass_filenames: false
-        files: ^(core|baselith)/.*\.pyi?$
+        files: ^baselith/.*\.pyi?$
         additional_dependencies: *typing_gate_deps

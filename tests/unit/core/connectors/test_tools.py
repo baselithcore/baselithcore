@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from core.connectors import (
+from baselith.core.connectors import (
     ActionResult,
     ActionSpec,
     BaseConnector,
@@ -22,14 +22,14 @@ from core.connectors import (
     connector_tool_definitions,
     invoke_action,
 )
-from core.connectors import tools as tools_module
-from core.context import (
+from baselith.core.connectors import tools as tools_module
+from baselith.core.context import (
     reset_tenant_context,
     reset_user_context,
     set_tenant_context,
     set_user_context,
 )
-from core.observability.audit import AuditEventType
+from baselith.core.observability.audit import AuditEventType
 
 CREATE = ActionSpec(
     "create_ticket",

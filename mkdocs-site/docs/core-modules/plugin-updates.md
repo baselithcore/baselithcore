@@ -5,15 +5,18 @@ description: Plugin release detection, the two trust modes and the admin API
 
 <!-- markdownlint-disable-file MD046 -->
 
-The `core/plugin_updates` module watches GitHub releases and tells
+The `baselith/core/plugin_updates` module watches GitHub releases and tells
 administrators when a newer version exists: of the core itself (the system
 update notice, on by default) and of your plugins (only once a sources file is
 configured).
 
 What it contacts: `api.github.com` (or `PLUGIN_UPDATE_GITHUB_API_URL`), for the
-releases and published security advisories of `CORE_UPDATE_REPO`, about 60
+releases and published security advisories of `CORE_UPDATE_REPO`, 60 to 90
 seconds after boot and then every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS`. Each
-API worker process runs its own check. The requests are plain reads of release
+API worker process runs the loop, but the workers share one check per
+interval: a worker whose turn comes within half an interval of a sibling's
+check reuses the saved report instead of contacting GitHub (a *Check now* is
+never deferred this way). The requests are plain reads of release
 data: nothing about the deployment (its version, plugins, hosts or users) is
 sent beyond what any HTTPS request carries (the source address, the HTTP
 client's user agent and, when configured, the token). Set `CORE_UPDATE_REPO=""`
@@ -41,7 +44,8 @@ contacts GitHub.
 
 ## What it does
 
-Every six hours (and on demand) the service reads the sources file, asks each
+Every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` (six hours by default) and on
+demand, the service reads the sources file, asks each
 plugin repository for its latest release and judges it under the configured
 [trust mode](#trust-modes): by default its provenance (who created the
 release, and what the manifest says at the tagged commit), or, when
@@ -178,7 +182,7 @@ push — which is harmless: the next release carries its changes.
 ### Signed mode verification
 
 Only signed releases are offered in this mode. The verifier reuses the plugin signing
-machinery in `core/plugins/signing.py`: an Ed25519 signature over the
+machinery in `baselith/core/plugins/signing.py`: an Ed25519 signature over the
 manifest's `integrity_sha256`, checked against the deployment's trust store
 (with expiry and revocation). The digest covers the manifest itself, so the
 signature attests `version`, `permissions`, `python_dependencies` and
@@ -213,7 +217,10 @@ are small JSON documents: every metadata response and the `release.json`
 download are read through a **1 MiB** cap (`MAX_TEXT_FILE_BYTES`), streamed and
 cut off past it rather than buffered, so a compromised or misbehaving API host
 cannot exhaust the checker. Tarballs keep the separate
-`PLUGIN_UPDATE_MAX_ARTIFACT_MB` cap.
+`PLUGIN_UPDATE_MAX_ARTIFACT_MB` cap. Both caps count decoded bytes while a
+gzip/deflate body is inflated, so a compressed response cannot expand past
+them; any other `Content-Encoding` is refused
+([bounded bodies](security.md#bounded-bodies)).
 
 The signing key never leaves the maintainers, so a tag pushed by anyone else
 fails rule 3. Keep it off CI runners whose secrets anyone with push access can
@@ -249,7 +256,7 @@ extracted.
 An empty directory anywhere in the unpacked tree is `files_mismatch`: a file
 list cannot show it, yet it can turn an import into a namespace package.
 
-`core.plugin_updates.checker.verify_release_tarball` runs this same unpack and
+`baselith.core.plugin_updates.checker.verify_release_tarball` runs this same unpack and
 verification for callers outside the checker; the mirror release step uses it as
 a self-check, with a syntax-only dependency predicate so a release never depends
 on the publisher's installed packages.
@@ -287,20 +294,20 @@ refusal also removes the cached tarball of the refused version.
 
 The same periodic check compares the running core with the latest stable
 GitHub Release of the public core project, `CORE_UPDATE_REPO`. The installed
-version is `CORE_VERSION` from `core/_core_version.py`: the public core release
-the running `core/` tree corresponds to. The report gains a `system` section
+version is `CORE_VERSION` from `baselith/core/_core_version.py`: the public core release
+the running `baselith/core/` tree corresponds to. The report gains a `system` section
 (`component: "core"`): the latest release, how many releases the deployment is
 behind, whether the jump crosses a major version, and the published GitHub
 Security Advisories whose vulnerable range contains the installed version
 (highest severity wins; `security: true` on any match).
 
 **Why `CORE_VERSION` and not `__version__`.** In the core project the two are
-the same release: its release job rewrites `core/_version.py` and
-`core/_core_version.py` together, and `tests/unit/core/test_core_version.py`
-fails if they disagree. A downstream distribution that ships this `core/`
+the same release: its release job rewrites `baselith/core/_version.py` and
+`baselith/core/_core_version.py` together, and `tests/unit/core/test_core_version.py`
+fails if they disagree. A downstream distribution that ships this `baselith/core/`
 beside components of its own versions independently. It marks its
-`core/_version.py` with `__distribution__ = "<name>"`, keeps its own version
-there and receives `core/_core_version.py` unchanged through its normal core
+`baselith/core/_version.py` with `__distribution__ = "<name>"`, keeps its own version
+there and receives `baselith/core/_core_version.py` unchanged through its normal core
 alignment (its release job must never rewrite it; the same test checks that).
 The notice therefore always says which public core release a deployment runs
 and whether a newer one, or a security advisory against it, exists, whatever
@@ -478,7 +485,7 @@ Every method's checklist ends with `curl -fsS <APP_BASE_URL>/health/ready` and
 checking that the notice now shows the new release as installed.
 
 **Downstream distributions.** A distribution that marks its
-`core/_version.py` with `__distribution__` gets no public core steps, whatever
+`baselith/core/_version.py` with `__distribution__` gets no public core steps, whatever
 the method: installing the public package, image or chart would replace the
 distribution with the public release. The instructions carry
 `distribution` and a single step saying that its own procedure applies and
@@ -494,7 +501,7 @@ installed plugins' manifests cannot be read), never as an error.
 **Plugin compatibility.** The checklist lists installed plugins whose
 `min_core_version`/`max_core_version` exclude the target release, so they are
 updated or removed first. Plugins declare those bounds against the public
-core release (`CORE_VERSION` in `core/_core_version.py`) in every distribution,
+core release (`CORE_VERSION` in `baselith/core/_core_version.py`) in every distribution,
 the same number the plugin loader's compatibility gate compares with, so the
 target compares with them directly and the check is exact in a downstream
 distribution too. It is reported as not computed (`plugins.checked: false`)
@@ -528,7 +535,7 @@ same name and its `min_core_version`/`max_core_version` accept the running
 core. Otherwise it is logged (`refused (not_newer: overlay 1.3.0 <= bundled
 1.5.0)` or `refused (incompatible_core: ...)`) and the bundled plugin loads, so
 an image upgrade is never undone by an old overlay entry. An operator
-removes such entries with `core.plugins.overlay_prune.prune_stale_overlay`;
+removes such entries with `baselith.core.plugins.overlay_prune.prune_stale_overlay`;
 plain directories at the overlay root are reported, never deleted.
 
 An accepted entry is imported from its **resolved** store directory
@@ -794,7 +801,7 @@ keeps showing the instructions.
 
 ## One-click update: settings and run store
 
-`core.config.plugin_update_apply.UpdateApplyConfig` (prefix `UPDATE_APPLY_`)
+`baselith.core.config.plugin_update_apply.UpdateApplyConfig` (prefix `UPDATE_APPLY_`)
 holds the settings of host-side one-click updates. The kill switch
 `UPDATE_APPLY_ENABLED` is **off by default**. `UPDATE_APPLY_RESTART_COMMAND` is
 an argv run without a shell, given as a JSON array
@@ -808,7 +815,7 @@ Settings that fail to load never take the update checker down:
 `PluginUpdateService` logs the error's type and falls back to the defaults,
 so one-click updates stay off until the settings are fixed.
 
-`core.plugin_updates.apply.RunStore` is the file-based store the API workers
+`baselith.core.plugin_updates.apply.RunStore` is the file-based store the API workers
 and the updater process share. Each plugin has at most one active run: a
 per-plugin exclusive `flock` serialises every create and transition across
 threads and processes, records are written by atomic replace, and every
@@ -850,7 +857,7 @@ and then at most once an hour.
 
 Every available plugin update is served with an `apply` verdict
 (`PluginApplyStatus`: `installable`, `blockers`, `detail`, `active_run`),
-computed on each read by `core.plugin_updates.apply.eligibility.apply_status`
+computed on each read by `baselith.core.plugin_updates.apply.eligibility.apply_status`
 and never cached. Blockers, in console order: `apply_disabled`,
 `not_host_install`, `overlay_unconfigured`, `updater_offline` (no heartbeat
 within three `heartbeat_seconds`), `updater_mismatch` (the updater runs another
@@ -871,7 +878,7 @@ they are never installable: the check fails closed.
 
 ### Overlay swap and store pruning
 
-`core.plugin_updates.apply.swap` owns the plugin's link in the overlay.
+`baselith.core.plugin_updates.apply.swap` owns the plugin's link in the overlay.
 `point_to` switches `<overlay>/<plugin>` to `.store/<plugin>-<version>` with a
 temporary relative symlink, `os.replace` and a directory `fsync`, so a reader
 sees the old or the new target and never neither; `None` unlinks (back to the
@@ -880,7 +887,7 @@ plain directory or a link that leaves `.store`. `prune_store` removes the
 oldest store entries of one plugin down to `UPDATE_APPLY_KEEP_VERSIONS`,
 never the linked target or a name in `keep`, never follows a symlink, and
 clears `.staging-*` / `.trash-*` scratch older than a day. It complements
-`core.plugins.overlay_prune`, which removes entries the bundled plugin has
+`baselith.core.plugins.overlay_prune`, which removes entries the bundled plugin has
 overtaken.
 
 The link may be relative or absolute: `current_target` applies the loader's
@@ -893,7 +900,7 @@ alone and only clears stale scratch.
 
 ### Staging a release
 
-`core.plugin_updates.apply.staging.stage_release` turns the approved, cached
+`baselith.core.plugin_updates.apply.staging.stage_release` turns the approved, cached
 tarball into `.store/<plugin>-<version>/` plus the sidecar
 `.store/<plugin>-<version>.release.json` (the signed `release.json`, read back
 by `known_files_of`). Each step raises `StagingError` with a run failure code:
@@ -939,8 +946,8 @@ to the overlay root (a bundled installed tree shows as `<installed>`).
 ### Boot report
 
 After the plugins are up, every API worker calls
-`core.plugin_updates.apply.boot_report.write_boot_report` (from
-`core.api._runtime_services`, only when `UPDATE_APPLY_ENABLED`). It first
+`baselith.core.plugin_updates.apply.boot_report.write_boot_report` (from
+`baselith.core.api._runtime_services`, only when `UPDATE_APPLY_ENABLED`). It first
 activates each plugin that has a pending expectation (a lazily loaded plugin
 would otherwise never show up), then writes
 `boot/<pid>.json` by atomic replace: the worker's pid, boot time, core
@@ -962,7 +969,7 @@ five-second `asyncio.wait_for` margin as a backstop.
 
 ### Health check
 
-`core.plugin_updates.apply.health.wait_healthy` decides whether a restart
+`baselith.core.plugin_updates.apply.health.wait_healthy` decides whether a restart
 succeeded. `evaluate_boot_reports` requires every worker that booted after
 `restart_at` to show the target plugin active, on the expected version and
 release directory (or off the overlay for a rollback to the bundled copy) with
@@ -982,7 +989,7 @@ deadline.
 
 ### Executing a run
 
-`core.plugin_updates.apply.executor.Executor` takes one approved run to a
+`baselith.core.plugin_updates.apply.executor.Executor` takes one approved run to a
 terminal state; only the updater process calls it, and it never imports the
 `plugins` package. An update:
 
@@ -1014,7 +1021,7 @@ terminal state; only the updater process calls it, and it never imports the
 5. records on the run, once, the plugins the newest boot report shows active
    (`must_stay_active`, the API as it ran before the run, read in step 1), journals
    `migrating` with the previous and new link targets, and runs
-   `python -m core.cli plugin schema-init --plugin <name>` with the process
+   `python -m baselith.core.cli plugin schema-init --plugin <name>` with the process
    environment — **minus** the names `PLUGIN_UPDATE_GITHUB_TOKEN`,
    `ADMIN_PASS`, `ADMIN_PASS_HASHED`, `METRICS_PASSWORD` and every
    `UPDATE_APPLY_*` variable, which a plugin's schema step has no use for —
@@ -1066,7 +1073,7 @@ loader would, and removed afterwards (the same scratch technique as
 `verification_failed` with the live link untouched; so does an I/O error
 while building or walking the scratch entry (the detail names the error type,
 never a path), and the claim is released. Only the structured
-`not_newer` refusal (`core.plugins._overlay_guard.overlay_refusal_code`: the
+`not_newer` refusal (`baselith.core.plugins._overlay_guard.overlay_refusal_code`: the
 bundled plugin has overtaken the entry) falls back to the bundled copy; an
 unreadable bundled version is a refusal. A rollback run never runs
 `schema-init`; like an update, it switches the live link only right before
@@ -1084,7 +1091,7 @@ pruning, commands, boot-report reads) runs in worker threads.
 `resume_activation`, `redo_rollback` and `undo_swap` are the reconciliation
 entry points for an updater that died mid-run.
 
-`core.plugin_updates.apply._io` holds the seams: `subprocess_runner` (an argv
+`baselith.core.plugin_updates.apply._io` holds the seams: `subprocess_runner` (an argv
 list, `shell=False`, the exit code or `-1` on timeout / `OSError`; only the
 program name is logged), `schema_env` (raises `SchemaEnvError`, without the
 path, for a configured file it cannot read), `GitHubReleaseFetcher` (one
@@ -1094,7 +1101,7 @@ GitHub API lookup of the `v<version>` release tag for the repository slug, throu
 
 ### Crash reconciliation
 
-`core.plugin_updates.apply.reconcile.reconcile(store, executor)` brings every
+`baselith.core.plugin_updates.apply.reconcile.reconcile(store, executor)` brings every
 run a dead updater left behind to a terminal state. It expires
 stale approval requests first, then, per unfinished run:
 
@@ -1115,7 +1122,7 @@ rolled back (`health_failed`, "no boot report yet …").
 
 ### The updater service
 
-`baselith plugin-updater serve` (`core.plugin_updates.apply.updater.serve`)
+`baselith plugin-updater serve` (`baselith.core.plugin_updates.apply.updater.serve`)
 is a separate host process: it never serves HTTP, never imports the
 `plugins` package (it refuses to run if plugin code was loaded, and the CLI
 skips its plugin-CLI scan for this command) and never starts Sentry or any
@@ -1152,8 +1159,8 @@ bus is not shared with the API workers, so subscribers in the API see the
 event only when the web tier re-announces the outcome it audits once per run.
 
 The event name and payload builder are public:
-`core.plugin_updates.apply.ROLLBACK_FAILED_EVENT` and
-`core.plugin_updates.apply.rollback_failed_payload(run)`, so a web tier that
+`baselith.core.plugin_updates.apply.ROLLBACK_FAILED_EVENT` and
+`baselith.core.plugin_updates.apply.rollback_failed_payload(run)`, so a web tier that
 records the outcome re-announces it with the same payload.
 
 `build_executor(config)` wires the production executor: the overlay from

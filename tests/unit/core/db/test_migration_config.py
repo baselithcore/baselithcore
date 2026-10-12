@@ -2,7 +2,7 @@
 
 A wheel-installed deployment has no ``alembic.ini`` and no ``migrations/``
 directory in its working directory; before the scripts moved into
-``core/db/migrations`` every path that ran or inspected them resolved both from
+``baselith/core/db/migrations`` every path that ran or inspected them resolved both from
 ``os.getcwd()`` and failed (or, in ``baselith doctor``, passed while unable to
 find them).
 """
@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from alembic.script import ScriptDirectory
 
-from core.db import migration_config
-from core.db.migration_config import (
+from baselith.core.db import migration_config
+from baselith.core.db.migration_config import (
     MigrationsNotFoundError,
     build_alembic_config,
     migration_heads,
@@ -98,7 +98,9 @@ def test_base_install_can_run_the_async_alembic_environment() -> None:
     from packaging.requirements import Requirement
 
     root = Path(__file__).resolve().parents[4]
-    env_source = (root / "core" / "db" / "migrations" / "env.py").read_text()
+    env_source = (
+        root / "baselith" / "core" / "db" / "migrations" / "env.py"
+    ).read_text()
     assert "create_async_engine" in env_source
 
     deps = tomllib.loads((root / "pyproject.toml").read_text())["project"][

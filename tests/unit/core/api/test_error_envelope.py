@@ -5,18 +5,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from core.api.errors import install_error_handlers
-from core.auth.types import (
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.auth.types import (
     InsufficientPermissionsError,
     InsufficientScopeError,
 )
-from core.exceptions import (
+from baselith.core.exceptions import (
     BaselithError,
     ItemNotFoundError,
     PluginConfigError,
     PluginIntegrityError,
 )
-from core.quotas.manager import QuotaExceededError, QuotaWindow
+from baselith.core.quotas.manager import QuotaExceededError, QuotaWindow
 
 PROBLEM_JSON = "application/problem+json"
 

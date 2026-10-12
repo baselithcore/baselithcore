@@ -13,9 +13,12 @@ from typing import Any
 
 import pytest
 
-from core.context import reset_plugin_context, set_plugin_context
-from core.observability.agent_spans import PLUGIN_KEY
-from core.services.llm._generation import _build_span_attributes, _current_plugin
+from baselith.core.context import reset_plugin_context, set_plugin_context
+from baselith.core.observability.agent_spans import PLUGIN_KEY
+from baselith.core.services.llm._generation import (
+    _build_span_attributes,
+    _current_plugin,
+)
 
 
 class _Config:
@@ -77,12 +80,12 @@ def test_a_failing_context_lookup_does_not_fail_the_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Attribution is telemetry: it must never break a completion."""
-    import core.context
+    import baselith.core.context
 
     def explode() -> str | None:
         raise RuntimeError("context backend down")
 
-    monkeypatch.setattr(core.context, "get_current_plugin", explode)
+    monkeypatch.setattr(baselith.core.context, "get_current_plugin", explode)
 
     assert _current_plugin() is None
     assert PLUGIN_KEY not in attributes()

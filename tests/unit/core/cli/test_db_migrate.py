@@ -16,15 +16,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.cli.commands import db as db_cmd
-from core.cli.commands.doctor_checks import CheckResult
-from core.db import migrate, migration_config, schema
-from core.db.migration_config import MigrationsNotFoundError
+from baselith.core.cli.commands import db as db_cmd
+from baselith.core.cli.commands.doctor_checks import CheckResult
+from baselith.core.db import migrate, migration_config, schema
+from baselith.core.db.migration_config import MigrationsNotFoundError
 
 
 @pytest.fixture
 def postgres_up(monkeypatch: pytest.MonkeyPatch) -> None:
-    import core.cli.commands.doctor as doctor
+    import baselith.core.cli.commands.doctor as doctor
 
     monkeypatch.setattr(
         doctor, "check_postgres", lambda: CheckResult("PostgreSQL", True, "ok")
@@ -47,7 +47,7 @@ def test_cli_runs_the_packaged_upgrade_outside_the_repo(
     monkeypatch.setattr(db_cmd.subprocess, "run", _run)
 
     assert db_cmd.cmd_migrate(json_output=True) == 0
-    assert seen["cmd"] == [sys.executable, "-m", "core.db.migrate"]
+    assert seen["cmd"] == [sys.executable, "-m", "baselith.core.db.migrate"]
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
 
 

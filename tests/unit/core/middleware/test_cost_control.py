@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.middleware.cost_control import (
+from baselith.core.middleware.cost_control import (
     BudgetExceededError,
     CostController,
     CostControlMiddleware,
@@ -113,7 +113,7 @@ async def test_middleware_catches_budget_error():
 
 def test_llm_service_reports_tokens_to_middleware():
     """LLMService must forward token counts to the global cost_controller."""
-    from core.services.llm.service import _report_tokens_to_middleware
+    from baselith.core.services.llm.service import _report_tokens_to_middleware
 
     cost_controller.initialize()
     _report_tokens_to_middleware(42, model="input")
@@ -125,11 +125,11 @@ def test_llm_service_reports_tokens_to_middleware():
 
 def test_llm_service_budget_error_propagates():
     """Middleware budget overrun raised by the bridge must surface unwrapped."""
-    # The token-reporting bridge lives in core.services.llm._telemetry (re-exported
+    # The token-reporting bridge lives in baselith.core.services.llm._telemetry (re-exported
     # from service as _report_tokens_to_middleware); patch cost_controller there.
-    import core.services.llm._telemetry as telemetry_module
-    from core.middleware.cost_control import CostController
-    from core.services.llm.service import _report_tokens_to_middleware
+    import baselith.core.services.llm._telemetry as telemetry_module
+    from baselith.core.middleware.cost_control import CostController
+    from baselith.core.services.llm.service import _report_tokens_to_middleware
 
     controller = CostController(agent_max_tokens=10)
     controller.initialize()
@@ -144,7 +144,7 @@ def test_llm_service_budget_error_propagates():
 
 def test_db_tracking_cursor_increments_queries():
     """TrackingCursor subclasses must report each executed query exactly once."""
-    from core.db.connection import _track_db_query
+    from baselith.core.db.connection import _track_db_query
 
     cost_controller.initialize()
     _track_db_query("SELECT 1")
@@ -159,7 +159,7 @@ def test_tracking_cursor_subclasses_psycopg_cursor():
     """Tracking cursor factories must be subclasses of psycopg cursors."""
     from psycopg import AsyncCursor, Cursor
 
-    from core.db.connection import TrackingAsyncCursor, TrackingCursor
+    from baselith.core.db.connection import TrackingAsyncCursor, TrackingCursor
 
     assert issubclass(TrackingCursor, Cursor)
     assert issubclass(TrackingAsyncCursor, AsyncCursor)
@@ -168,7 +168,7 @@ def test_tracking_cursor_subclasses_psycopg_cursor():
 def test_track_sql_query_stringifies_lazily():
     """Non-str query objects (psycopg Composed/SQL) are stringified only when a
     positive sql_query_limit actually consumes the text."""
-    from core.middleware.cost_control import CostController
+    from baselith.core.middleware.cost_control import CostController
 
     class Explosive:
         """Object whose __str__ must NOT run on the default (limit=0) path."""
@@ -186,7 +186,7 @@ def test_track_sql_query_stringifies_lazily():
 
 
 def test_track_sql_query_logs_text_when_limit_set():
-    from core.middleware.cost_control import CostController
+    from baselith.core.middleware.cost_control import CostController
 
     class Composed:
         def __str__(self) -> str:
@@ -208,7 +208,7 @@ async def test_budget_exceeded_handler_renders_429_problem_document():
     intercepts it before CostControlMiddleware's own except branch)."""
     import orjson
 
-    from core.api.errors import budget_exceeded_handler
+    from baselith.core.api.errors import budget_exceeded_handler
 
     request = MagicMock()
     request.url.path = "/chat"

@@ -7,8 +7,8 @@ class TestGenerateTyped:
     def _service(self):
         from unittest.mock import AsyncMock, patch
 
-        from core.config.services import LLMConfig
-        from core.services.llm.service import LLMService
+        from baselith.core.config.services import LLMConfig
+        from baselith.core.services.llm.service import LLMService
 
         config = LLMConfig(provider="ollama", model="llama3.2")
         with patch.object(LLMService, "_create_provider", return_value=AsyncMock()):
@@ -19,8 +19,8 @@ class TestGenerateTyped:
 
         from pydantic import BaseModel
 
-        from core.services.llm.structured import generate_typed
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm.structured import generate_typed
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         class Verdict(BaseModel):
             is_real: bool
@@ -28,7 +28,7 @@ class TestGenerateTyped:
 
         service = self._service()
         with patch(
-            "core.services.llm.structured.generate_structured",
+            "baselith.core.services.llm.structured.generate_structured",
             AsyncMock(
                 return_value=LLMResult(
                     text='{"is_real": true, "confidence": 0.9}', native=True
@@ -47,15 +47,15 @@ class TestGenerateTyped:
 
         from pydantic import BaseModel
 
-        from core.services.llm.structured import generate_typed
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm.structured import generate_typed
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         class Answer(BaseModel):
             value: int
 
         service = self._service()
         with patch(
-            "core.services.llm.structured.generate_structured",
+            "baselith.core.services.llm.structured.generate_structured",
             AsyncMock(
                 return_value=LLMResult(text='```json\n{"value": 7}\n```', native=True)
             ),
@@ -68,8 +68,8 @@ class TestGenerateTyped:
 
         from pydantic import BaseModel
 
-        from core.services.llm.structured import generate_typed
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm.structured import generate_typed
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         class Answer(BaseModel):
             value: int
@@ -80,7 +80,7 @@ class TestGenerateTyped:
             LLMResult(text='{"value": 3}', native=True),
         ]
         with patch(
-            "core.services.llm.structured.generate_structured",
+            "baselith.core.services.llm.structured.generate_structured",
             AsyncMock(side_effect=responses),
         ) as gen:
             answer = await generate_typed(service, "p", Answer, retries=1)
@@ -95,16 +95,16 @@ class TestGenerateTyped:
         import pytest as _pytest
         from pydantic import BaseModel
 
-        from core.services.llm.exceptions import LLMProviderError
-        from core.services.llm.structured import generate_typed
-        from core.services.llm.tool_calling import LLMResult
+        from baselith.core.services.llm.exceptions import LLMProviderError
+        from baselith.core.services.llm.structured import generate_typed
+        from baselith.core.services.llm.tool_calling import LLMResult
 
         class Answer(BaseModel):
             value: int
 
         service = self._service()
         with patch(
-            "core.services.llm.structured.generate_structured",
+            "baselith.core.services.llm.structured.generate_structured",
             AsyncMock(return_value=LLMResult(text='{"wrong": 1}', native=True)),
         ):
             with _pytest.raises(LLMProviderError, match="validation"):

@@ -3,7 +3,7 @@ title: Swarm Intelligence
 description: Multi-agent coordination with Colony, Auction, and Pheromones
 ---
 
-The `core/swarm` module implements **collective intelligence** patterns, where multiple agents collaborate to solve complex problems.
+The `baselith/core/swarm` module implements **collective intelligence** patterns, where multiple agents collaborate to solve complex problems.
 
 ## Swarm Intelligence Explained
 
@@ -34,7 +34,7 @@ Inspired by nature (ants, bees), the swarm coordinates specialized agents that:
 ## Structure
 
 ```text
-core/swarm/
+baselith/core/swarm/
 ├── __init__.py
 ├── colony.py           # Agent colony & Memory integration
 ├── colony_ops.py       # ColonyOpsMixin: team formation, messaging, pheromone decay, self-healing
@@ -43,13 +43,13 @@ core/swarm/
 ├── team_formation.py   # Dynamic team formation
 └── types.py            # Common types & Context requirements
 
-core/orchestration/handlers/
+baselith/core/orchestration/handlers/
 ├── swarm_handler.py        # Orchestration with Dynamic Personas
 ├── swarm_colony.py         # Per-request / per-tenant Colony ownership
 ├── swarm_agents.py         # VirtualAgentSpec, default roster, memory/persona resolution
 └── simulation_handler.py   # Multi-turn Scenario Simulation
 
-core/memory/
+baselith/core/memory/
 └── graph_provider.py       # GraphRAG entity relationships
 ```
 
@@ -79,9 +79,9 @@ The swarm leverages a `GraphMemoryProvider` to handle structural knowledge. This
 **Setup with Colony**:
 
 ```python
-from core.swarm.colony import Colony
-from core.memory.manager import AgentMemory
-from core.memory.graph_provider import SimpleGraphMemoryProvider
+from baselith.core.swarm.colony import Colony
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.graph_provider import SimpleGraphMemoryProvider
 
 # Create graph provider
 graph = SimpleGraphMemoryProvider()
@@ -112,7 +112,7 @@ Each sub-task the handler fans out is a full LLM call. To keep a large
 decomposition from opening dozens of simultaneous provider calls (a 429 storm
 plus an unmetered cost spike), `SwarmHandler` bounds the fan-out with an
 `asyncio.Semaphore` sized by `SwarmConfig.max_concurrent_subtasks`
-(`core/config/swarm.py`, env `SWARM_MAX_CONCURRENT_SUBTASKS`, **default `5`**,
+(`baselith/core/config/swarm.py`, env `SWARM_MAX_CONCURRENT_SUBTASKS`, **default `5`**,
 minimum `1`). The per-request `LoopBudget` still caps the **total** number of
 sub-tasks; this setting caps only how many run **at once**.
 
@@ -123,7 +123,7 @@ export SWARM_MAX_CONCURRENT_SUBTASKS=8
 
 #### Per-subagent scope
 
-`VirtualAgentSpec` (`core/orchestration/handlers/swarm_agents.py`) carries
+`VirtualAgentSpec` (`baselith/core/orchestration/handlers/swarm_agents.py`) carries
 three optional scope fields so each sub-agent runs with its own boundaries
 instead of inheriting the full request context:
 
@@ -134,7 +134,7 @@ instead of inheriting the full request context:
 | `model` | Per-agent model override for its LLM calls — a cheap-executor / strong-reviewer split. `None` uses the service default. |
 
 ```python
-from core.orchestration.handlers.swarm_agents import (
+from baselith.core.orchestration.handlers.swarm_agents import (
     VirtualAgentSpec,
     contract_for_spec,
     detect_scope_conflicts,
@@ -174,6 +174,55 @@ profile's metadata (dynamic agents registered via `register_dynamic_agent`
 copy `spec.model` into `metadata["model"]`) or from the matching spec, and
 passes it to `llm_service.generate_response(prompt, model=model_override)`.
 
+### Durable swarm runs
+
+Under the run's checkpoint (the orchestrator wires it), `SwarmHandler` records
+three kinds of steps under a `swarm` child scope
+([composite runners](orchestration.md#composite-runners-child-scopes-and-what-each-one-records)):
+
+- **the decomposition** — the LLM's sub-task list. A resumed run gets the
+  same sub-tasks back without asking the model again (a fresh decomposition
+  could split the work differently and orphan every recorded result); the
+  dynamic agents it named are re-registered in the new request colony from
+  the record.
+- **each sub-task result**, keyed by its index and definition — a recorded
+  sub-task replays with no auction, no LLM call and no budget charge; a
+  sub-task that raised is not recorded and runs again.
+- **the synthesis** call.
+
+A crash during the synthesis therefore resumes into a single LLM call. The
+colony's in-memory state (pheromones, auction history, stats) is rebuilt per
+request and is not part of the record. The `SimulationHandler` records the
+same steps per round under the run's checkpoint.
+
+### Durable colony batches
+
+`Colony.execute_batch(tasks, execute_fn)` auctions every task, then runs the
+winners concurrently. With an ambient checkpoint — a workflow
+`ColonyNodeAdapter` node binds its visit's scope, or any caller can bind one —
+the batch records under a `colony_batch` child scope
+(`baselith/core/swarm/colony_batch.py`), per task:
+
+- **the auction** — every bid (`agent_id`, `score`, `estimated_time`,
+  `confidence`) and the winner, or that nobody won. A resumed batch reinstates
+  the recorded winner (`Colony.restore_assignment`) instead of auctioning
+  again: the auction's inputs — agent load, success rates, pheromones — lived
+  in the crashed process, so a fresh auction could hand finished work to a
+  different agent;
+- **the execution** — the value `execute_fn` returned. A finished task is
+  never executed again (its result replays and `complete_task` still updates
+  the colony's bookkeeping); an unfinished one runs on its recorded winner,
+  with its own `colony_task` scope bound as the ambient checkpoint so the
+  durable work inside it (an agent's turns and tool calls, a crew) resumes too.
+
+A task that raised is not recorded and runs again, like a failed swarm
+sub-task. Results must be JSON-serialisable. Tasks are identified by their
+content (description, capabilities, priority, parameters) and position in the
+batch, never by the random `Task.id`. A recorded winner that is no longer
+registered in the resumed colony can still replay a recorded result; if its
+execution was never recorded, the task fails naming the agent rather than
+being silently re-auctioned. Without a checkpoint nothing changes.
+
 ### Scenario Simulation Mode
 
 The `SimulationHandler` enables **multi-turn social or technical evolution**. Outcomes from Round N are saved to episodic memory (when the colony has a memory manager) and used to update the "World State" for Round N+1.
@@ -187,7 +236,7 @@ non-integer value falls back to the default. The result metadata reports
 simulation early) and `requested_rounds`.
 
 ```python
-from core.orchestration.handlers.simulation_handler import SimulationHandler
+from baselith.core.orchestration.handlers.simulation_handler import SimulationHandler
 
 handler = SimulationHandler()
 # Simulate a 3-turn cyber-attack scenario. `context` is required: it is the
@@ -205,10 +254,10 @@ results = await handler.handle_simulation(
 The recommended way to use swarm features is through the Orchestrator with intent classification:
 
 ```python
-from core.orchestration import Orchestrator
-from core.memory.manager import AgentMemory
-from core.memory.graph_provider import SimpleGraphMemoryProvider
-from core.memory.providers import VectorMemoryProvider
+from baselith.core.orchestration import Orchestrator
+from baselith.core.memory.manager import AgentMemory
+from baselith.core.memory.graph_provider import SimpleGraphMemoryProvider
+from baselith.core.memory.providers import VectorMemoryProvider
 
 # Setup memory with graph support
 graph_provider = SimpleGraphMemoryProvider()
@@ -258,7 +307,7 @@ not the default, mode.
 The orchestrator builds **one `SwarmHandler` for the whole process**. The colony
 it serves is not process-wide: `SwarmHandler.handle()` mints a fresh `Colony` per
 request and binds it for the duration
-(`core/orchestration/handlers/swarm_colony.py`).
+(`baselith/core/orchestration/handlers/swarm_colony.py`).
 
 A shared colony meant one agent registry, one auction and — the sharp edge —
 **one pheromone field**: a failure signal deposited while serving tenant A
@@ -294,7 +343,7 @@ work with `submit_task()` (single task → winning agent ID) or `execute_batch()
 (parallel allocation + execution):
 
 ```python
-from core.swarm import Colony, AgentProfile, Capability, Task
+from baselith.core.swarm import Colony, AgentProfile, Capability, Task
 
 # Create colony
 colony = Colony()
@@ -351,7 +400,7 @@ default — binds a single budget built from the orchestrator's `LoopLimits()`
 for the duration of `execute_batch`, shared by every sub-task exactly like a
 request's (so a breach aborts the batch the same way). An ambient budget always
 wins; `loop_limits=LoopLimits(...)` sets the caps, `loop_limits=None` disables
-the default (`batch_limits` in `core/swarm/colony_ops.py`).
+the default (`batch_limits` in `baselith/core/swarm/colony_ops.py`).
 
 ### Handoff — structured task transfer
 
@@ -380,7 +429,7 @@ Knowing what was **already attempted** keeps the receiver from blindly
 retrying failed approaches:
 
 ```python
-from core.swarm import HandoffBrief
+from baselith.core.swarm import HandoffBrief
 
 ho = await colony.handoff(
     from_agent="researcher",
@@ -398,14 +447,14 @@ ho = await colony.handoff(
 **Cycle guard.** Nothing above stops A→B→A ping-pong: without a guard, a
 cycling handoff only ends when the ambient loop budget dies — burning the
 whole budget on routing instead of work. `HandoffCycleGuard`
-(`core/swarm/types.py`) tracks, per task, the ordered chain of agents that
+(`baselith/core/swarm/types.py`) tracks, per task, the ordered chain of agents that
 have held it; `Colony.handoff` refuses a transfer (returns `None`, with a
 `handoff_refused` warning) when the recipient already appears in that chain
 or the chain has reached the hop cap. Each accepted `Handoff` records its
 position: `hop_count` (1-based hop number) and `visited` (the chain of prior
 holders).
 
-On by default via `SwarmConfig` (`core/config/swarm.py`):
+On by default via `SwarmConfig` (`baselith/core/config/swarm.py`):
 
 | Field | Default | Env |
 |-------|---------|-----|
@@ -423,7 +472,7 @@ resolve to the highest combined score. (The `Colony` uses one internally; you ca
 drive it directly.)
 
 ```python
-from core.swarm import TaskAuction, AgentProfile, Capability, Task
+from baselith.core.swarm import TaskAuction, AgentProfile, Capability, Task
 
 auction = TaskAuction()
 agent = AgentProfile(id="researcher", name="Researcher",
@@ -442,7 +491,7 @@ winner_id = auction.resolve(task.id)       # -> agent id, or None
 **synchronous**:
 
 ```python
-from core.swarm import PheromoneSystem
+from baselith.core.swarm import PheromoneSystem
 
 pheromones = PheromoneSystem(decay_rate=0.1)
 
@@ -461,7 +510,7 @@ strongest = pheromones.get_strongest("success")     # -> location str | None
 a `TeamFormation` dataclass (or `None`):
 
 ```python
-from core.swarm import TeamFormationEngine, AgentProfile, Capability, Task
+from baselith.core.swarm import TeamFormationEngine, AgentProfile, Capability, Task
 
 engine = TeamFormationEngine(agents=[
     AgentProfile(id="r", name="Researcher", capabilities=[Capability("research")]),
@@ -480,7 +529,7 @@ if team:
 
 ## AgentProfile
 
-Agents in the swarm are described by the `AgentProfile` dataclass (`core/swarm/types.py`):
+Agents in the swarm are described by the `AgentProfile` dataclass (`baselith/core/swarm/types.py`):
 
 ```python
 @dataclass
@@ -541,7 +590,7 @@ Practical examples of swarm in action.
 **Swarm Design**:
 
 ```python
-from core.swarm import Colony, AgentProfile, Capability, Task
+from baselith.core.swarm import Colony, AgentProfile, Capability, Task
 
 colony = Colony()
 
@@ -610,7 +659,7 @@ feedback = consolidate_reviews(result.completed)
 well, and the router follows the strongest trail:
 
 ```python
-from core.swarm import PheromoneSystem
+from baselith.core.swarm import PheromoneSystem
 
 pheromones = PheromoneSystem()
 

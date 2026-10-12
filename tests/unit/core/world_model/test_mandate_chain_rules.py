@@ -13,7 +13,7 @@ import time
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from core.world_model.mandates import (
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     InMemoryReplayGuard,

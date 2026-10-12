@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.preflight import VLLMProbe
-from core.services.llm.vllm_endpoints import get_vllm_registry
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.preflight import VLLMProbe
+from baselith.core.services.llm.vllm_endpoints import get_vllm_registry
 
 A = "http://gpu:8002/v1"
 B = "http://gpu:8003/v1"
-_SDK = "core.services.llm.providers.openai_provider.openai"
-_PROBE = "core.services.llm.vllm_endpoints.probe_vllm"
+_SDK = "baselith.core.services.llm.providers.openai_provider.openai"
+_PROBE = "baselith.core.services.llm.vllm_endpoints.probe_vllm"
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ async def _catalog(endpoint, _key, timeout=2.0, **_kw):
 
 
 async def test_each_model_reaches_its_own_server():
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     factory, made = _clients()
     with patch(_SDK) as sdk, patch(_PROBE, _catalog):
@@ -67,7 +67,7 @@ async def test_each_model_reaches_its_own_server():
 
 
 async def test_an_unserved_model_names_what_is_served():
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     with patch(_PROBE, _catalog):
         provider = VLLMProvider(api_base=None, endpoints=[A, B])
@@ -77,7 +77,7 @@ async def test_an_unserved_model_names_what_is_served():
 
 async def test_all_servers_down_still_tries_the_first():
     """No catalog to consult: the call itself reports the connection error."""
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     factory, made = _clients()
 
@@ -92,7 +92,7 @@ async def test_all_servers_down_still_tries_the_first():
 
 
 async def test_streaming_is_routed_too():
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     async def chunks():
         yield SimpleNamespace(
@@ -121,7 +121,7 @@ async def test_streaming_is_routed_too():
 
 
 def test_the_factory_hands_over_every_endpoint():
-    from core.services.llm.provider_factory import create_provider
+    from baselith.core.services.llm.provider_factory import create_provider
 
     config = SimpleNamespace(
         provider="vllm",

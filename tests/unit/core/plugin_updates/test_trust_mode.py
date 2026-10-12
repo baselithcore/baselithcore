@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-import core.plugin_updates.service as svc_mod
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates.models import CheckReport, UpdateCandidate
+import baselith.core.plugin_updates.service as svc_mod
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates.models import CheckReport, UpdateCandidate
 
 
 def test_provenance_is_the_default(monkeypatch: pytest.MonkeyPatch) -> None:

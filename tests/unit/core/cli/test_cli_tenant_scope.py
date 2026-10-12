@@ -5,11 +5,11 @@ Nothing upstream of ``baselith <command>`` binds a tenant, so with
 ``TenantContextError`` — the pool refuses to invent a tenant rather than bind
 ``default`` and hand the operator another tenant's rows.
 
-The declaration is made **at the dispatch point** (``core.cli.handlers.
-run_command``, called from ``core.cli.__main__.main``), not by decorating the
+The declaration is made **at the dispatch point** (``baselith.core.cli.handlers.
+run_command``, called from ``baselith.core.cli.__main__.main``), not by decorating the
 handler functions. That distinction is the point of half this module: the real
 dispatch table lives in ``__main__`` and plugin CLIs inject into it at runtime
-(``plugins/baselithbot/diagnostics/cli.py``), or attach a handler with
+(``plugins/examplebot/diagnostics/cli.py``), or attach a handler with
 ``parser.set_defaults(handler=...)``. A per-function decorator covered neither,
 so every plugin-registered command ran unscoped while a coverage test that
 enumerated the *unused* map in ``handlers`` reported full classification.
@@ -42,10 +42,10 @@ from contextlib import contextmanager
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from core import context as core_context
-from core.cli import __main__ as cli_main
-from core.cli import handlers
-from core.db.session_setup import SYSTEM_TENANT_ID
+from baselith.core import context as core_context
+from baselith.core.cli import __main__ as cli_main
+from baselith.core.cli import handlers
+from baselith.core.db.session_setup import SYSTEM_TENANT_ID
 
 pytestmark = [pytest.mark.unit]
 
@@ -126,7 +126,7 @@ class TestLongLivedProcessesAreNotScoped:
     the pool's fail-closed check for everything inside it. That sentence is true
     verbatim of ``baselith queue worker`` — a blocking loop in the calling
     process — and of ``shell``. The worker already binds per unit of work
-    (``core.task_queue.worker._tenant_for``), so an outer binding buys nothing
+    (``baselith.core.task_queue.worker._tenant_for``), so an outer binding buys nothing
     and costs the check for RQ's bookkeeping, the scheduler poll and startup.
     """
 
@@ -170,7 +170,7 @@ class TestLongLivedProcessesAreNotScoped:
         has its own, finer-grained answer for every job."""
         import inspect
 
-        from core.task_queue import worker
+        from baselith.core.task_queue import worker
 
         assert "system_tenant_scope" in inspect.getsource(worker._tenant_for)
 
@@ -206,16 +206,16 @@ class TestLongLivedProcessesAreNotScoped:
 class TestPluginRegisteredCommands:
     """The hole the decorator left open.
 
-    ``plugins/baselithbot/diagnostics/cli.py`` writes straight into
-    ``core.cli.__main__.COMMAND_HANDLERS_MAP`` at parser-registration time, and
+    ``plugins/examplebot/diagnostics/cli.py`` writes straight into
+    ``baselith.core.cli.__main__.COMMAND_HANDLERS_MAP`` at parser-registration time, and
     plugin parsers also use ``set_defaults(handler=...)``. Neither passes
-    through anything ``core.cli.handlers`` can decorate, so both have to be
+    through anything ``baselith.core.cli.handlers`` can decorate, so both have to be
     covered by the dispatch itself.
     """
 
     @staticmethod
     def _dispatch(args: argparse.Namespace) -> int:
-        """The dispatch tail of ``core.cli.__main__.main``, verbatim."""
+        """The dispatch tail of ``baselith.core.cli.__main__.main``, verbatim."""
         handler = cli_main.COMMAND_HANDLERS_MAP.get(args.command) or getattr(
             args, "handler", None
         )
@@ -227,10 +227,10 @@ class TestPluginRegisteredCommands:
         self, monkeypatch, rls_on
     ):
         handler, seen = _probe()
-        monkeypatch.setitem(cli_main.COMMAND_HANDLERS_MAP, "baselithbot", handler)
+        monkeypatch.setitem(cli_main.COMMAND_HANDLERS_MAP, "examplebot", handler)
 
         with no_tenant():
-            self._dispatch(argparse.Namespace(command="baselithbot"))
+            self._dispatch(argparse.Namespace(command="examplebot"))
 
         assert seen == [SYSTEM_TENANT_ID]
 
@@ -253,10 +253,10 @@ class TestPluginRegisteredCommands:
 
 
 def _core_commands() -> set[str]:
-    """The commands ``core.cli.__main__`` itself declares.
+    """The commands ``baselith.core.cli.__main__`` itself declares.
 
     The dispatch map is the live one, and a plugin CLI injects into it at
-    parser-registration time (``baselithbot``), so enumerating it whole makes
+    parser-registration time (``examplebot``), so enumerating it whole makes
     the classification assertion depend on whether some earlier import
     registered a plugin. The handlers declared here are the module's own
     lambdas; an injected one belongs to the plugin module.
@@ -297,7 +297,7 @@ class TestCoverage:
             assert command not in handlers.UNSCOPED_COMMANDS
 
     def test_the_legacy_map_is_a_different_object(self):
-        """``core.cli.handlers.COMMAND_HANDLERS_MAP`` is a convenience view that
+        """``baselith.core.cli.handlers.COMMAND_HANDLERS_MAP`` is a convenience view that
         nothing dispatches through, so a plugin injecting into the real map never
         appears in it. Enumerating it was how a command could be 'classified' and
         unscoped at the same time."""
@@ -307,7 +307,7 @@ class TestCoverage:
 class TestABrokenConfigDoesNotBreakTheCli:
     """The commands you run *because* the configuration is broken must run.
 
-    ``_rls_enabled`` imports ``core.db.connection``, which evaluates
+    ``_rls_enabled`` imports ``baselith.core.db.connection``, which evaluates
     ``get_storage_config()`` at module scope. A malformed ``DB_*`` variable
     therefore raised a pydantic ``ValidationError`` out of the dispatcher — from
     ``baselith doctor``, ``info`` and ``config validate`` among others, which is
@@ -330,15 +330,15 @@ class TestABrokenConfigDoesNotBreakTheCli:
 
     @pytest.fixture
     def unloadable_db_module(self, monkeypatch):
-        """Stand in for ``core.db.connection`` failing to evaluate its config."""
+        """Stand in for ``baselith.core.db.connection`` failing to evaluate its config."""
         error = self._config_error()
-        module = types.ModuleType("core.db.connection")
+        module = types.ModuleType("baselith.core.db.connection")
 
         def _raise(_name: str):
             raise error
 
         module.__getattr__ = _raise  # type: ignore[method-assign]
-        monkeypatch.setitem(sys.modules, "core.db.connection", module)
+        monkeypatch.setitem(sys.modules, "baselith.core.db.connection", module)
         return error
 
     def test_the_probe_degrades_instead_of_raising(self, unloadable_db_module):
@@ -371,10 +371,10 @@ class TestABrokenConfigDoesNotBreakTheCli:
         """The original ``ImportError`` path is unchanged."""
 
         def _raise(_name: str):
-            raise ImportError("no core.db.connection")
+            raise ImportError("no baselith.core.db.connection")
 
-        module = types.ModuleType("core.db.connection")
+        module = types.ModuleType("baselith.core.db.connection")
         module.__getattr__ = _raise  # type: ignore[method-assign]
-        monkeypatch.setitem(sys.modules, "core.db.connection", module)
+        monkeypatch.setitem(sys.modules, "baselith.core.db.connection", module)
 
         assert handlers._rls_enabled() is False

@@ -15,15 +15,15 @@ import json
 
 import pytest
 
-import core.orchestration.handlers.swarm_handler as sh
-from core.config.swarm import SwarmConfig
-from core.context import reset_tenant_context, set_tenant_context
-from core.orchestration.handlers.swarm_colony import (
+import baselith.core.orchestration.handlers.swarm_handler as sh
+from baselith.core.config.swarm import SwarmConfig
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.orchestration.handlers.swarm_colony import (
     current_colony,
     request_colony_scope,
 )
-from core.orchestration.handlers.swarm_handler import SwarmHandler
-from core.swarm.colony import Colony
+from baselith.core.orchestration.handlers.swarm_handler import SwarmHandler
+from baselith.core.swarm.colony import Colony
 
 
 class _StubLLM:
@@ -195,7 +195,9 @@ class TestTenantIsolation:
         assert len(handler._tenant_colonies) <= sh.MAX_TENANT_COLONIES
 
     def test_simulation_handler_inherits_tenant_isolation(self) -> None:
-        from core.orchestration.handlers.simulation_handler import SimulationHandler
+        from baselith.core.orchestration.handlers.simulation_handler import (
+            SimulationHandler,
+        )
 
         handler = SimulationHandler(llm_service=_StubLLM())
         token = set_tenant_context("tenant-a")

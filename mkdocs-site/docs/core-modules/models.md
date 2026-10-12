@@ -3,7 +3,7 @@ title: Domain Models & Portability Primitives
 description: Chat/domain Pydantic models, pricing, routing, and fallback
 ---
 
-The `core/models` module holds the framework's domain Pydantic models (chat and
+The `baselith/core/models` module holds the framework's domain Pydantic models (chat and
 document/search types) plus the **provider-portability primitives**: a pricing
 table, a cost-aware model router, and a provider fallback chain. These
 primitives are provider-agnostic, so swapping LLM vendors does not touch
@@ -12,7 +12,7 @@ business logic.
 ## Overview
 
 ```text
-core/models/
+baselith/core/models/
 ├── __init__.py    # Re-exports domain models
 ├── chat.py        # ChatRequest, ChatResponse, FeedbackRequest, FeedbackDocumentReference
 ├── domain.py      # Document, SearchResult
@@ -25,7 +25,7 @@ core/models/
 The package `__init__` re-exports the domain models:
 
 ```python
-from core.models import (
+from baselith.core.models import (
     ChatRequest, ChatResponse,
     FeedbackRequest, FeedbackDocumentReference,
     Document, SearchResult,
@@ -33,13 +33,13 @@ from core.models import (
 ```
 
 The portability primitives are imported from their submodules
-(`core.models.pricing`, `core.models.routing`, `core.models.fallback`).
+(`baselith.core.models.pricing`, `baselith.core.models.routing`, `baselith.core.models.fallback`).
 
 ---
 
 ## Chat models
 
-`core/models/chat.py`.
+`baselith/core/models/chat.py`.
 
 ### `ChatRequest`
 
@@ -80,7 +80,7 @@ A source reference cited in an answer (`extra="forbid"`): `document_id`,
 
 ## Domain models
 
-`core/models/domain.py`.
+`baselith/core/models/domain.py`.
 
 ### `Document`
 
@@ -97,7 +97,7 @@ A vector-store hit (`extra="ignore"`): `document` (a `Document`) and `score`
 
 ## Pricing
 
-`core/models/pricing.py` — an LLM pricing table for cost-aware decisions.
+`baselith/core/models/pricing.py` — an LLM pricing table for cost-aware decisions.
 Prices are USD per 1M tokens, kept as a data table so a refresh is a single PR.
 
 ### `ModelPrice`
@@ -167,7 +167,7 @@ cache_write_tokens=0, batch=False) -> float`. A negative token count raises
   cache_write_tokens=0, batch=False, table=...)` — one-call USD estimate.
 
 ```python
-from core.models.pricing import estimate_cost
+from baselith.core.models.pricing import estimate_cost
 
 usd = estimate_cost("claude-sonnet-5", 1200, 400)
 
@@ -193,7 +193,7 @@ usd = estimate_cost(
 
 ## Model routing
 
-`core/models/routing.py` — picks a model that fits the task instead of always
+`baselith/core/models/routing.py` — picks a model that fits the task instead of always
 using the flagship. Policy-driven and provider-agnostic.
 
 ### Concepts
@@ -211,7 +211,7 @@ using the flagship. Policy-driven and provider-agnostic.
 - **`ModelRouter`**: a thin facade over a `RoutingPolicy`.
 
 ```python
-from core.models.routing import ModelRouter, TaskCategory, Complexity
+from baselith.core.models.routing import ModelRouter, TaskCategory, Complexity
 
 router = ModelRouter()
 decision = router.select(TaskCategory.EXECUTION, Complexity.COMPLEX)
@@ -221,12 +221,12 @@ print(decision.model_id, decision.rule)  # upgraded model, "complexity_upgrade"
 ### Learned routing (opt-in)
 
 A static table encodes what someone believed at design time; production
-traffic knows better. `core/models/routing_stats.py` turns the table into a
+traffic knows better. `baselith/core/models/routing_stats.py` turns the table into a
 scoreboard fed by observed outcomes.
 
 ```python
-from core.models.routing import TaskCategory
-from core.models.routing_stats import LearnedModelRouter, RoutingScoreboard
+from baselith.core.models.routing import TaskCategory
+from baselith.core.models.routing_stats import LearnedModelRouter, RoutingScoreboard
 
 board = RoutingScoreboard(min_samples=20, margin=0.05)
 board.record(TaskCategory.SUMMARIZATION, "claude-haiku-4-5",
@@ -257,7 +257,7 @@ tell a policy decision from a learned one. Without a scoreboard,
 
 ### Runtime wiring
 
-The router is wired into `LLMService` via `core.services.llm.model_routing`:
+The router is wired into `LLMService` via `baselith.core.services.llm.model_routing`:
 enable with `LLM_ROUTING_ENABLED=true` and (optionally) override the policy
 with `LLM_ROUTING_POLICY` — a JSON object mapping category values to model ids
 (e.g. `{"planning": "gpt-4o", "classification": "gpt-4o-mini"}`);
@@ -271,7 +271,7 @@ model precedence is **pinned > per-call > routed > config default**. See
 
 ## Fallback chain
 
-`core/models/fallback.py` — try a primary provider, then secondaries on
+`baselith/core/models/fallback.py` — try a primary provider, then secondaries on
 failure. Provider-agnostic and composable with circuit breakers.
 
 ### Concepts
@@ -296,7 +296,7 @@ breaker reports open, awaiting sync or async calls transparently, and returns
 the first success as a `FallbackOutcome`.
 
 ```python
-from core.models.fallback import FallbackChain, Provider
+from baselith.core.models.fallback import FallbackChain, Provider
 
 chain = FallbackChain(
     [
@@ -336,7 +336,7 @@ Skipped-on-deadline stages are visible in the outcome, so an operator can tell
 "every provider failed" from "we ran out of time":
 
 ```python
-from core.models.fallback import AllProvidersFailedError
+from baselith.core.models.fallback import AllProvidersFailedError
 
 try:
     outcome = await chain.run(prompt="…")
@@ -349,8 +349,8 @@ except AllProvidersFailedError as exc:
 ### Runtime wiring
 
 The chain is wired into `LLMService.generate_response()` via
-`core.services.llm.fallback_runtime`, and into
-`generate_response_stream()` via `core.services.llm._stream_fallback` (which
+`baselith.core.services.llm.fallback_runtime`, and into
+`generate_response_stream()` via `baselith.core.services.llm._stream_fallback` (which
 can only switch provider before the first chunk reaches the caller): declare ordered stages with
 `LLM_FALLBACK_CHAIN=provider:model,…` (empty disables it). Stages are cached
 `LLMService` clones with per-provider credentials; open circuit breakers are

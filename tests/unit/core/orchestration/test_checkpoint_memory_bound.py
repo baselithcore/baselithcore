@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.checkpoint import Checkpoint
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.checkpoint import Checkpoint
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 
 
 def test_checkpoint_enabled_defaults_to_true(monkeypatch):
     monkeypatch.delenv("ORCHESTRATOR_CHECKPOINT_ENABLED", raising=False)
-    from core.config.orchestration import OrchestrationConfig
+    from baselith.core.config.orchestration import OrchestrationConfig
 
     assert OrchestrationConfig().checkpoint_enabled is True
 

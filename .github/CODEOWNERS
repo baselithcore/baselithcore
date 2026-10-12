@@ -3,8 +3,8 @@
 
 # Security-sensitive surfaces: keep explicit even if the default matches, so
 # ownership survives future default changes.
-/core/auth/ @gippo-dev
-/core/security/ @gippo-dev
-/core/plugins/integrity.py @gippo-dev
-/core/plugins/signing.py @gippo-dev
+/baselith/core/auth/ @gippo-dev
+/baselith/core/security/ @gippo-dev
+/baselith/core/plugins/integrity.py @gippo-dev
+/baselith/core/plugins/signing.py @gippo-dev
 /.github/ @gippo-dev

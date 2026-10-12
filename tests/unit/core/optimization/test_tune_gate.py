@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.optimization.tune_gate import (
+from baselith.core.optimization.tune_gate import (
     eval_gate_enabled,
     review_candidate,
 )
-from core.prompts.registry import PromptRegistry
+from baselith.core.prompts.registry import PromptRegistry
 
 pytestmark = [pytest.mark.unit]
 
@@ -27,7 +27,7 @@ class TestReviewCandidate:
     async def test_accept_registers_candidate_version(self, monkeypatch):
         registry = PromptRegistry()
         monkeypatch.setattr(
-            "core.prompts.registry.get_prompt_registry", lambda: registry
+            "baselith.core.prompts.registry.get_prompt_registry", lambda: registry
         )
 
         async def evaluator(agent_id: str, prompt: str) -> float:
@@ -68,8 +68,8 @@ class TestReviewCandidate:
 
 class TestAutoTuneIntegration:
     async def test_gated_auto_tune_refuses_unvalidated_apply(self, monkeypatch):
-        from core.learning.feedback import FeedbackCollector
-        from core.optimization.optimizer import PromptOptimizer
+        from baselith.core.learning.feedback import FeedbackCollector
+        from baselith.core.optimization.optimizer import PromptOptimizer
 
         monkeypatch.setenv("BASELITH_OPTIMIZER_EVAL_GATE", "true")
 

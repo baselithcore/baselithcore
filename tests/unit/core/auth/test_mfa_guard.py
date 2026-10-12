@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from core.auth.mfa import (
+from baselith.core.auth.mfa import (
     InMemoryTOTPGuard,
     TOTPGuard,
     TOTPProvider,

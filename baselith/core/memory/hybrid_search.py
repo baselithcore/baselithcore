@@ -1,0 +1,295 @@
+"""
+Hybrid retrieval: BM25 keyword index + Reciprocal Rank Fusion.
+
+Vector-only search misses exact matches (error codes, identifiers, rare
+terms); BM25-only misses semantic neighbours. Fusing both via Reciprocal
+Rank Fusion (RRF) catches both classes of hit, and downstream
+cross-encoder rerank lifts top-k precision further (the rerank step
+already lives in ``baselith.core.chat.reranking``).
+
+This module is dependency-light by design:
+
+- ``BM25Index`` is a pure-Python BM25Okapi implementation; no external
+  package required. Switch to ``rank_bm25`` later if profile shows a hot
+  path; the public surface stays identical.
+- ``HybridSearcher`` is a pure fuser: it accepts ranked lists from any
+  source (vector store, keyword backend) and returns a fused ranking. It
+  does not own the storage layer.
+
+Usage::
+
+    bm25 = BM25Index()
+    bm25.index({"doc1": "the quick brown fox", "doc2": "lazy dog naps"})
+    bm25_hits = bm25.search("quick fox", top_k=5)
+
+    # ``dense_hits`` comes from an existing vector backend.
+    fused = HybridSearcher().fuse(bm25=bm25_hits, dense=dense_hits, top_k=3)
+"""
+
+from __future__ import annotations
+
+import heapq
+import math
+import re
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Final
+
+from baselith.core.utils.text_canon import canonicalize
+
+DEFAULT_BM25_K1: Final[float] = 1.5
+DEFAULT_BM25_B: Final[float] = 0.75
+DEFAULT_RRF_K: Final[int] = 60
+DEFAULT_BM25_WEIGHT: Final[float] = 0.5
+DEFAULT_DENSE_WEIGHT: Final[float] = 0.5
+
+# ``\w`` is Unicode-aware: after canonicalization (accents stripped,
+# casefolded) an Italian or CJK memory tokenizes into whole words instead of
+# being truncated at the first non-ASCII byte ("perché" -> "perch") or
+# dropped entirely.
+_TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"\w+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Canonicalized word-style tokenizer. Good-enough default for BM25."""
+    return _TOKEN_RE.findall(canonicalize(text))
+
+
+def bm25_doc_stats(text: str) -> tuple[Counter[str], int]:
+    """Per-document term frequencies + token count.
+
+    The building block of :meth:`BM25Index.index_tokenized` — callers that
+    rebuild an index over a mostly-stable corpus can cache these stats per
+    document and skip re-tokenization. Treat the returned ``Counter`` as
+    immutable once handed to an index.
+    """
+    tokens = _tokenize(text)
+    return Counter(tokens), len(tokens)
+
+
+@dataclass(frozen=True)
+class ScoredHit:
+    """A single ranked hit: ``doc_id`` plus its score in its source ranking."""
+
+    doc_id: str
+    score: float
+
+
+def _hit_score(hit: ScoredHit) -> float:
+    return hit.score
+
+
+def _rank_top(
+    scores: Mapping[int, float],
+    doc_id_at: Callable[[int], str],
+    top_k: int,
+) -> list[ScoredHit]:
+    """Top ``top_k`` positively-scored positions, best first.
+
+    ``heapq.nlargest`` keeps only ``top_k`` candidates in a heap — O(N log k)
+    against the O(N log N) of materializing every hit, sorting it and throwing
+    away all but the head.
+
+    Ordering is bit-for-bit what the previous ``sorted(..., reverse=True)``
+    produced: that sort was *stable* over positions emitted in ascending order,
+    so equal scores ranked by ascending position. Sorting ``(score, -position)``
+    tuples reproduces that tie-break explicitly (larger ``-position`` = smaller
+    position wins), which matters because ``nlargest`` would otherwise break
+    ties by iteration order — and a sparse dict does not iterate in position
+    order.
+    """
+    top = heapq.nlargest(
+        top_k, ((score, -pos) for pos, score in scores.items() if score > 0)
+    )
+    return [
+        ScoredHit(doc_id=doc_id_at(-neg_pos), score=score) for score, neg_pos in top
+    ]
+
+
+@dataclass
+class BM25Index:
+    """In-memory BM25Okapi index. Build once, query many."""
+
+    k1: float = DEFAULT_BM25_K1
+    b: float = DEFAULT_BM25_B
+    _doc_ids: list[str] = field(default_factory=list)
+    _doc_freqs: list[Counter[str]] = field(default_factory=list)
+    _doc_lengths: list[int] = field(default_factory=list)
+    _avgdl: float = 0.0
+    # Exact token total (int): search_with_extra recomputes the unified-corpus
+    # avgdl from it; deriving it from _avgdl * n would round.
+    _total_len: int = 0
+    _idf: dict[str, float] = field(default_factory=dict)
+    # Inverted index: term -> [(doc_idx, term_freq), ...]. Lets search touch only
+    # the documents containing each query term instead of scanning the whole
+    # corpus per term (O(query_terms × matching_docs) rather than × all_docs).
+    _postings: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
+
+    def index(self, docs: Mapping[str, str]) -> None:
+        """Build the index from a ``doc_id -> text`` mapping."""
+        self.index_tokenized({d: bm25_doc_stats(t) for d, t in docs.items()})
+
+    def index_tokenized(self, docs: Mapping[str, tuple[Counter[str], int]]) -> None:
+        """Build the index from pre-tokenized per-doc stats.
+
+        ``docs`` maps ``doc_id -> (term_freqs, token_count)`` as produced by
+        :func:`bm25_doc_stats`. Scoring is identical to :meth:`index`; this
+        variant exists so callers can memoize tokenization across rebuilds.
+        The passed ``Counter`` objects are stored by reference — do not
+        mutate them afterwards.
+        """
+        self._doc_ids = list(docs.keys())
+        self._doc_freqs = [docs[d][0] for d in self._doc_ids]
+        self._doc_lengths = [docs[d][1] for d in self._doc_ids]
+        n_docs = len(self._doc_ids)
+        self._total_len = sum(self._doc_lengths)
+        self._avgdl = (self._total_len / n_docs) if n_docs > 0 else 0.0
+        df: Counter[str] = Counter()
+        postings: dict[str, list[tuple[int, int]]] = {}
+        for i, freqs in enumerate(self._doc_freqs):
+            df.update(freqs.keys())
+            for term, tf in freqs.items():
+                postings.setdefault(term, []).append((i, tf))
+        self._postings = postings
+        self._idf = {
+            term: math.log(1 + (n_docs - df_t + 0.5) / (df_t + 0.5))
+            for term, df_t in df.items()
+        }
+
+    def search(self, query: str, top_k: int = 10) -> list[ScoredHit]:
+        """Return the top ``top_k`` documents for ``query``, descending score."""
+        if not self._doc_ids:
+            return []
+        if top_k <= 0:
+            raise ValueError("top_k must be > 0")
+        terms = _tokenize(query)
+        # Sparse accumulator keyed by doc index. A dense ``[0.0] * n_docs``
+        # array plus a full scan to collect the non-zeros made every query
+        # O(corpus) again — exactly what the inverted index exists to avoid.
+        # Here only documents reachable from a query term's posting list are
+        # ever allocated or inspected.
+        scores: dict[int, float] = {}
+        for term in terms:
+            idf = self._idf.get(term)
+            if idf is None:
+                continue
+            # Only the documents that actually contain the term (postings),
+            # instead of every document in the corpus.
+            for i, tf in self._postings.get(term, ()):
+                dl = self._doc_lengths[i] or 1
+                norm = 1 - self.b + self.b * (dl / (self._avgdl or 1))
+                scores[i] = scores.get(i, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
+        return _rank_top(scores, self._doc_ids.__getitem__, top_k)
+
+    def search_with_extra(
+        self,
+        query: str,
+        extra: Mapping[str, tuple[Counter[str], int]],
+        top_k: int = 10,
+    ) -> list[ScoredHit]:
+        """Search base ∪ ``extra`` with scores exactly equal to one fresh index
+        over the union — without rebuilding the base postings.
+
+        ``extra`` maps ``doc_id -> (term_freqs, token_count)`` (from
+        :func:`bm25_doc_stats`) and must not share ids with the base corpus.
+        df/idf/avgdl are recomputed over the union per query term, so scoring
+        is arithmetic-identical to :meth:`index` + :meth:`search` on the
+        combined mapping. Cost: O(query_terms × (matching base docs + |extra|))
+        per call, instead of an O(corpus) rebuild — the shape memory recall
+        needs, where per-query LTM candidates join a stable STM/MTM corpus.
+        """
+        if not extra:
+            return self.search(query, top_k=top_k)
+        if top_k <= 0:
+            raise ValueError("top_k must be > 0")
+
+        extra_stats = list(extra.values())
+        extra_ids = list(extra.keys())
+        base_n = len(self._doc_ids)
+        n_docs = base_n + len(extra_stats)
+        total_len = self._total_len + sum(length for _, length in extra_stats)
+        avgdl = (total_len / n_docs) if n_docs > 0 else 0.0
+
+        terms = _tokenize(query)
+        # One sparse accumulator over a unified position space: base documents
+        # keep their index, ``extra`` documents follow at ``base_n + j``. That
+        # ordering reproduces the base-before-extra tie-break of the previous
+        # "collect base hits, append extra hits, stable-sort" formulation.
+        scores: dict[int, float] = {}
+        for term in terms:
+            base_postings = self._postings.get(term, ())
+            df_t = len(base_postings) + sum(
+                1 for freqs, _ in extra_stats if term in freqs
+            )
+            if df_t == 0:
+                continue
+            idf = math.log(1 + (n_docs - df_t + 0.5) / (df_t + 0.5))
+            for i, tf in base_postings:
+                dl = self._doc_lengths[i] or 1
+                norm = 1 - self.b + self.b * (dl / (avgdl or 1))
+                scores[i] = scores.get(i, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
+            for j, (freqs, length) in enumerate(extra_stats):
+                tf = freqs.get(term, 0)
+                if not tf:
+                    continue
+                dl = length or 1
+                norm = 1 - self.b + self.b * (dl / (avgdl or 1))
+                pos = base_n + j
+                scores[pos] = scores.get(pos, 0.0) + idf * (tf * (self.k1 + 1)) / (
+                    tf + self.k1 * norm
+                )
+
+        def _doc_id_at(pos: int) -> str:
+            return self._doc_ids[pos] if pos < base_n else extra_ids[pos - base_n]
+
+        return _rank_top(scores, _doc_id_at, top_k)
+
+
+@dataclass
+class HybridSearcher:
+    """Reciprocal Rank Fusion over independent ranked lists."""
+
+    bm25_weight: float = DEFAULT_BM25_WEIGHT
+    dense_weight: float = DEFAULT_DENSE_WEIGHT
+    rrf_k: int = DEFAULT_RRF_K
+
+    def __post_init__(self) -> None:
+        if self.rrf_k <= 0:
+            raise ValueError("rrf_k must be > 0")
+        if self.bm25_weight < 0 or self.dense_weight < 0:
+            raise ValueError("weights must be non-negative")
+
+    def fuse(
+        self,
+        *,
+        bm25: Iterable[ScoredHit] | None = None,
+        dense: Iterable[ScoredHit] | None = None,
+        top_k: int = 10,
+    ) -> list[ScoredHit]:
+        """Return the top ``top_k`` documents fused from both rankings."""
+        if top_k <= 0:
+            raise ValueError("top_k must be > 0")
+        contributions: dict[str, float] = {}
+        for stream, weight in (
+            (bm25 or [], self.bm25_weight),
+            (dense or [], self.dense_weight),
+        ):
+            if weight == 0:
+                continue
+            for rank, hit in enumerate(stream, start=1):
+                contributions[hit.doc_id] = contributions.get(
+                    hit.doc_id, 0.0
+                ) + weight * (1.0 / (self.rrf_k + rank))
+        # O(N log top_k). ``nlargest`` breaks ties by iteration order exactly
+        # as the stable ``sorted(..., reverse=True)`` it replaces did, so
+        # equal-RRF-score documents keep ranking by first-seen order.
+        return heapq.nlargest(
+            top_k,
+            (ScoredHit(doc_id=d, score=s) for d, s in contributions.items()),
+            key=_hit_score,
+        )

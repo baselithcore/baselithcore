@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.auth.oauth import (
+from baselith.core.auth.oauth import (
     ACCESS_TOKEN_TYPE,
     ClientType,
     GrantType,
@@ -266,7 +266,7 @@ def test_may_act_lists_the_allowlist_and_is_absent_when_empty() -> None:
 # Rule 10 — RFC 8693 §2.1/§2.2.2 target (resource/audience) validation
 # --------------------------------------------------------------------------- #
 
-from core.auth.oauth import resolve_exchange_target  # noqa: E402
+from baselith.core.auth.oauth import resolve_exchange_target  # noqa: E402
 
 
 def _target_actor(resources: frozenset[str] = frozenset()) -> OAuthClient:

@@ -1,7 +1,7 @@
 """A subscription must outlive the pool's read deadline, and give its connection back.
 
 The shared Redis pool sets ``socket_timeout`` so a silent server cannot hang a
-caller forever (``core.cache.redis_cache.create_redis_client``). redis-py
+caller forever (``baselith.core.cache.redis_cache.create_redis_client``). redis-py
 applies that deadline to *every* read with no explicit timeout of its own —
 including the blocking read behind ``PubSub.listen()`` — so an idle subscriber
 used to die every ``socket_timeout`` seconds with
@@ -15,7 +15,7 @@ import asyncio
 
 import pytest
 
-from core.realtime.subscriptions import close_pubsub, iter_messages
+from baselith.core.realtime.subscriptions import close_pubsub, iter_messages
 
 
 class _FakePubSub:

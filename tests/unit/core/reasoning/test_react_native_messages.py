@@ -28,14 +28,14 @@ from typing import Any
 
 import pytest
 
-from core.reasoning.react import ReActAgent, ToolDefinition
-from core.services.llm.messages import (
+from baselith.core.reasoning.react import ReActAgent, ToolDefinition
+from baselith.core.services.llm.messages import (
     Message,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class MessageCapableLLM:
@@ -215,7 +215,7 @@ class TestMessageTransport:
         narrated the calls; a provider cannot pair those, and a cache cannot
         reuse a prefix that is rewritten each time.
         """
-        from core.services.llm.messages import to_anthropic
+        from baselith.core.services.llm.messages import to_anthropic
 
         llm = MessageCapableLLM(
             [
@@ -260,7 +260,7 @@ class TestLegacyServiceStillWorks:
 
     async def test_the_flattened_transcript_carries_the_convergence_nudge(self) -> None:
         """Without a tool_result block, it needs telling the work came back."""
-        from core.services.llm.messages import CONVERGENCE_NUDGE
+        from baselith.core.services.llm.messages import CONVERGENCE_NUDGE
 
         llm = LegacyTranscriptLLM(
             [

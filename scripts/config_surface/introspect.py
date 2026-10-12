@@ -1,7 +1,7 @@
 """Read the settings classes without importing them.
 
-Everything here is AST-based on purpose. Importing ``core.config`` would load
-the repository ``.env`` into ``os.environ`` (see ``core/config/env.py``), so a
+Everything here is AST-based on purpose. Importing ``baselith.core.config`` would load
+the repository ``.env`` into ``os.environ`` (see ``baselith/core/config/env.py``), so a
 developer's local overrides would leak into the generated reference as if they
 were the shipped defaults; plugin settings modules would additionally need
 their optional dependencies installed. Parsing the source avoids both and
@@ -17,12 +17,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Where settings classes are looked for, in the order their sections appear.
-SETTINGS_ROOTS: tuple[str, ...] = ("core/config", "core", "plugins")
+SETTINGS_ROOTS: tuple[str, ...] = (
+    "baselith/core/config",
+    "baselith/core",
+    "baselith/plugins",
+)
 
 #: Files scanned for bare ``"SOME_VAR"`` string literals, to recognise the
 #: variables that are read through ``os.getenv`` or module-level constants
 #: instead of a settings field.
-LITERAL_ROOTS: tuple[str, ...] = ("core", "plugins", "scripts", "backend.py")
+LITERAL_ROOTS: tuple[str, ...] = (
+    "baselith/core",
+    "baselith/plugins",
+    "scripts",
+    "backend.py",
+)
 
 #: Plugin manifests declare the configuration keys the loader injects, so a key
 #: can be bound without any Python literal naming it. Only manifests are read —
@@ -61,9 +70,14 @@ class Setting:
         return (self.env, *self.alternatives)
 
 
+#: Bases that make a class a settings class. ``AliasedSettings`` is
+#: ``BaseSettings`` with a constructor that accepts aliased fields by name.
+_SETTINGS_BASES = frozenset({"BaseSettings", "AliasedSettings"})
+
+
 def _is_settings_class(node: ast.ClassDef) -> bool:
     return any(
-        isinstance(base, ast.Name) and base.id == "BaseSettings" for base in node.bases
+        isinstance(base, ast.Name) and base.id in _SETTINGS_BASES for base in node.bases
     )
 
 
@@ -264,7 +278,7 @@ def env_literals(repo_root: Path) -> set[str]:
             continue
         text = file.read_text(encoding="utf-8", errors="ignore")
         names.update(ENV_LITERAL_RE.findall(text))
-    plugins_root = repo_root / "plugins"
+    plugins_root = repo_root / "baselith" / "plugins"
     if plugins_root.is_dir():
         for manifest in sorted(plugins_root.rglob("*")):
             if manifest.name in MANIFEST_NAMES and manifest.is_file():

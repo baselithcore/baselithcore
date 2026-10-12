@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from pydantic import SecretStr
 
-from core.auth._jwt_keys import parse_key_map
-from core.config.security import SecurityConfig
+from baselith.core.auth._jwt_keys import parse_key_map
+from baselith.core.config.security import SecurityConfig
 
 _RING = "k1=hmac-secret-alpha,k2=hmac-secret-bravo"
 

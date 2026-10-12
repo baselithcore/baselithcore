@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.loops.stall import StallGuard
+from baselith.core.loops.stall import StallGuard
 
 
 class TestStallGuard:

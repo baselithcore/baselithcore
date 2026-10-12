@@ -17,9 +17,9 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from core.api.errors import install_error_handlers
-from core.api.pagination import MAX_LIMIT, PageParams, page_params, paginated
-from core.models.chat import MAX_ID_LENGTH, ChatRequest
+from baselith.core.api.errors import install_error_handlers
+from baselith.core.api.pagination import MAX_LIMIT, PageParams, page_params, paginated
+from baselith.core.models.chat import MAX_ID_LENGTH, ChatRequest
 
 # --- the shared helper ----------------------------------------------------------
 
@@ -86,7 +86,7 @@ class TestPaginatedHelper:
 
 class TestWebhookBounds:
     def test_payload_limits(self) -> None:
-        from plugins.api_routers.webhooks import CreateWebhookRequest
+        from baselith.plugins.api_routers.webhooks import CreateWebhookRequest
 
         ok = {"url": "https://h.test/x"}
         CreateWebhookRequest(**ok)
@@ -104,7 +104,7 @@ class TestWebhookBounds:
                 CreateWebhookRequest(**payload)
 
     def test_list_endpoints_paginate(self) -> None:
-        from plugins.api_routers import webhooks
+        from baselith.plugins.api_routers import webhooks
 
         app = FastAPI()
         app.include_router(webhooks.router)
@@ -119,7 +119,7 @@ class TestWebhookBounds:
 
 class TestComplianceBounds:
     def test_register_payload_limits(self) -> None:
-        from plugins.api_routers.compliance import RegisterSystemRequest
+        from baselith.plugins.api_routers.compliance import RegisterSystemRequest
 
         RegisterSystemRequest(name="s")
         for payload in (
@@ -132,7 +132,7 @@ class TestComplianceBounds:
                 RegisterSystemRequest(**payload)
 
     def test_observation_context_is_size_bounded(self) -> None:
-        from plugins.api_routers.compliance import ObservationRequest
+        from baselith.plugins.api_routers.compliance import ObservationRequest
 
         ObservationRequest(metric="m", value=1.0, context={"k": "v"})
         with pytest.raises(ValidationError):
@@ -143,7 +143,7 @@ class TestComplianceBounds:
             )
 
     def test_every_list_endpoint_paginates(self) -> None:
-        from plugins.api_routers import compliance, compliance_artefacts
+        from baselith.plugins.api_routers import compliance, compliance_artefacts
 
         app = FastAPI()
         app.include_router(compliance.router)
@@ -171,7 +171,7 @@ class TestComplianceBounds:
 
 class TestPrompts:
     def test_list_bounds(self) -> None:
-        from plugins.api_routers.prompts import PromptVersionIn
+        from baselith.plugins.api_routers.prompts import PromptVersionIn
 
         PromptVersionIn(version="1", template="t", labels=["prod"])
         for payload in (
@@ -183,10 +183,10 @@ class TestPrompts:
                 PromptVersionIn(version="1", template="t", **payload)
 
     def test_listing_is_paginated_with_total(self, monkeypatch: Any) -> None:
-        import plugins.api_routers.prompts as prompts_module
-        from core.prompts.registry import PromptRegistry
-        from core.prompts.types import PromptVersion
-        from plugins.api_routers.admin import verify_credentials
+        import baselith.plugins.api_routers.prompts as prompts_module
+        from baselith.core.prompts.registry import PromptRegistry
+        from baselith.core.prompts.types import PromptVersion
+        from baselith.plugins.api_routers.admin import verify_credentials
 
         registry = PromptRegistry()
         for name in ("c", "a", "b"):
@@ -218,7 +218,7 @@ class TestIdBounds:
             ChatRequest(query="q", **{field: "x" * (MAX_ID_LENGTH + 1)})
 
     def test_tenant_create_payload_is_bounded(self) -> None:
-        from plugins.api_routers.tenant import CreateTenantRequest
+        from baselith.plugins.api_routers.tenant import CreateTenantRequest
 
         CreateTenantRequest(id="acme", name="Acme")
         for payload in (

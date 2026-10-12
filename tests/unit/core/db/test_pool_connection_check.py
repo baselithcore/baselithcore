@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-import core.db.connection as connection
+import baselith.core.db.connection as connection
 
 # Factory -> the name of the pool class it instantiates, and the module global
 # it caches the result in.

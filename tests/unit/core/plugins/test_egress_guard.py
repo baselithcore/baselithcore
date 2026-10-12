@@ -12,15 +12,15 @@ from collections.abc import Iterator
 
 import pytest
 
-from core.context import reset_plugin_context, set_plugin_context
-from core.plugins.egress import (
+from baselith.core.context import reset_plugin_context, set_plugin_context
+from baselith.core.plugins.egress import (
     EgressNotPermittedError,
     install_egress_guard,
     set_permissions_resolver,
     uninstall_egress_guard,
 )
-from core.plugins.permissions import parse_permissions
-from core.security.ssrf import SsrfError, assert_url_safe
+from baselith.core.plugins.permissions import parse_permissions
+from baselith.core.security.ssrf import SsrfError, assert_url_safe
 
 DECLARED = parse_permissions(
     {"network": {"egress": ["api.github.com", "*.openai.com"]}}

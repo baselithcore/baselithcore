@@ -3,11 +3,11 @@ title: Reflection
 description: Self-evaluation and iterative response refinement
 ---
 
-The `core/reflection` module empowers agents to **evaluate and improve their own responses** through an iterative process. This self-correction capability significantly enhances the quality and accuracy of agent outputs.
+The `baselith/core/reflection` module empowers agents to **evaluate and improve their own responses** through an iterative process. This self-correction capability significantly enhances the quality and accuracy of agent outputs.
 
 !!! note "Library API — not wired by default"
     No route, handler registration or startup hook in the default app invokes
-    `core/reflection`: answers from the orchestrator are not self-evaluated or
+    `baselith/core/reflection`: answers from the orchestrator are not self-evaluated or
     refined. Call `ReflectionAgent.reflect()` yourself — from a flow handler you
     register, or from plugin code — on the response you want refined.
 
@@ -28,7 +28,7 @@ refines it.
 ## Structure
 
 ```text
-core/reflection/
+baselith/core/reflection/
 ├── __init__.py
 ├── agent.py          # ReflectionAgent (the reflection loop)
 ├── evaluators.py     # DefaultEvaluator (LLM-as-judge quality assessor)
@@ -37,10 +37,10 @@ core/reflection/
 ```
 
 The reflection types (`EvaluationResult`, `QualityLevel`, and the `Evaluator`
-protocol — aliased as `SelfEvaluator`) are defined in `core/evaluation/` and
-re-exported through `core.reflection.protocols`, which also defines `Refiner`.
+protocol — aliased as `SelfEvaluator`) are defined in `baselith/core/evaluation/` and
+re-exported through `baselith.core.reflection.protocols`, which also defines `Refiner`.
 `BaseLLMEvaluator` is **not** re-exported there: import it from
-`core.evaluation.base` (or the `core.evaluation` package root).
+`baselith.core.evaluation.base` (or the `baselith.core.evaluation` package root).
 
 ---
 
@@ -50,7 +50,7 @@ The `ReflectionAgent` orchestrates the reflection loop. Its constructor **requir
 `evaluator` and a `refiner` — wire in the bundled defaults:
 
 ```python
-from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
+from baselith.core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
 agent = ReflectionAgent(
     evaluator=DefaultEvaluator(),
@@ -74,7 +74,7 @@ if evaluation.score < agent.quality_threshold:
 ```
 
 When `max_iterations` / `quality_threshold` are omitted they default to
-`ReflectionConfig` (`core/config/reflection.py`, env prefix `REFLECTION_`).
+`ReflectionConfig` (`baselith/core/config/reflection.py`, env prefix `REFLECTION_`).
 
 ---
 
@@ -85,7 +85,7 @@ subclass). It scores a response across relevance, accuracy, completeness, clarit
 helpfulness, then returns an `EvaluationResult`:
 
 ```python
-from core.reflection import DefaultEvaluator
+from baselith.core.reflection import DefaultEvaluator
 
 evaluator = DefaultEvaluator()                 # llm_service auto-resolved
 result = await evaluator.evaluate(response, query, context=None)
@@ -105,7 +105,7 @@ subclass `BaseLLMEvaluator`, implement the abstract
 (it must yield `score`, `feedback`, `should_refine` and optional `aspects`):
 
 ```python
-from core.evaluation.base import BaseLLMEvaluator
+from baselith.core.evaluation.base import BaseLLMEvaluator
 
 
 class ToneEvaluator(BaseLLMEvaluator):
@@ -135,7 +135,7 @@ class ToneEvaluator(BaseLLMEvaluator):
 `Refiner` protocol for custom strategies.
 
 ```python
-from core.reflection import DefaultRefiner
+from baselith.core.reflection import DefaultRefiner
 
 refiner = DefaultRefiner()                     # llm_service auto-resolved
 improved = await refiner.refine(
@@ -201,7 +201,7 @@ flowchart LR
 The full loop is already implemented by `ReflectionAgent.reflect()`:
 
 ```python
-from core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
+from baselith.core.reflection import ReflectionAgent, DefaultEvaluator, DefaultRefiner
 
 async def reflect_loop(response: str, query: str, max_iterations: int = 3):
     agent = ReflectionAgent(

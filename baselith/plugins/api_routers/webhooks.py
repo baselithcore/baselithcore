@@ -1,0 +1,221 @@
+"""
+Webhook Management Router.
+
+CRUD for webhook subscriptions plus delivery inspection and replay. Access is
+gated by capability scopes (``webhooks:read`` / ``webhooks:write``) enforced on
+the authenticated identity, on top of the ``require_user`` auth dependency.
+
+Mounted only when ``WEBHOOKS_ENABLED`` is set, so it adds no surface by default.
+"""
+
+from __future__ import annotations
+
+import secrets as _secrets
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field, StringConstraints, field_validator
+
+from baselith.core.api.pagination import PageParams, page_params, paginated
+from baselith.core.auth.manager import AuthManager
+from baselith.core.auth.types import AuthUser
+from baselith.core.context import get_current_tenant_id
+from baselith.core.middleware import require_user
+from baselith.core.observability.logging import get_logger
+from baselith.core.security.ssrf import SsrfError
+from baselith.core.webhooks.service import get_webhook_service
+from baselith.core.webhooks.signing import reserved_header_names
+from baselith.plugins.api_routers.schemas import (
+    WebhookDeleted,
+    WebhookDeliveryPage,
+    WebhookEndpointPage,
+    WebhookEndpointView,
+    WebhookReplayed,
+    problem_responses,
+)
+
+logger = get_logger(__name__)
+
+router = APIRouter(
+    prefix="/webhooks", tags=["webhooks"], dependencies=[Depends(require_user)]
+)
+
+
+def _enforce(request: Request, scope: str) -> AuthUser:
+    """Resolve the authenticated identity and enforce a capability scope."""
+    user: AuthUser | None = getattr(request.state, "user", None)
+    AuthManager.enforce_scopes(user, scope)
+    assert user is not None  # enforce_scopes raised otherwise
+    return user
+
+
+#: Payload bounds. A subscription is stored and its headers are replayed on
+#: every delivery, so an unbounded payload is a per-row storage and per-event
+#: egress amplifier.
+_EventType = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+_HeaderName = Annotated[str, StringConstraints(min_length=1, max_length=256)]
+_HeaderValue = Annotated[str, StringConstraints(max_length=4096)]
+
+
+class CreateWebhookRequest(BaseModel):
+    """Payload to register a webhook endpoint."""
+
+    url: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description="HTTPS endpoint that will receive events",
+    )
+    event_types: list[_EventType] = Field(
+        default_factory=lambda: ["*"],
+        max_length=100,
+        description="Event types to subscribe to; ['*'] for all",
+    )
+    description: str | None = Field(default=None, max_length=2000)
+    headers: dict[_HeaderName, _HeaderValue] = Field(
+        default_factory=dict, max_length=20
+    )
+
+    @field_validator("headers")
+    @classmethod
+    def _no_reserved_headers(cls, v: dict[str, str]) -> dict[str, str]:
+        """Reject names the dispatcher owns (signature, Host, framing).
+
+        The service re-checks this, but a 422 here is the honest status for a
+        payload error — the service's ``ValueError`` is mapped to 409 below.
+        """
+        reserved = reserved_header_names(v)
+        if reserved:
+            raise ValueError(
+                "reserved header name(s) set by the dispatcher: " + ", ".join(reserved)
+            )
+        return v
+
+
+class CreateWebhookResponse(BaseModel):
+    """Registration result. The signing ``secret`` is returned only once."""
+
+    endpoint: WebhookEndpointView
+    secret: str
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    responses=problem_responses(400, 401, 403, 409, 422),
+)
+async def create_webhook(
+    request: Request, payload: CreateWebhookRequest
+) -> CreateWebhookResponse:
+    """Register a webhook endpoint (requires ``webhooks:write``)."""
+    _enforce(request, "webhooks:write")
+    tenant_id = get_current_tenant_id()
+    secret = f"whsec_{_secrets.token_urlsafe(32)}"
+    service = get_webhook_service()
+    try:
+        endpoint = await service.register_endpoint(
+            payload.url,
+            secret,
+            tenant_id=tenant_id,
+            event_types=set(payload.event_types),
+            description=payload.description,
+            headers=payload.headers,
+        )
+    except SsrfError as e:
+        # The guard's message names what the host resolved to ("resolves to a
+        # blocked address (10.0.0.5)", "could not resolve host"). Echoing it
+        # hands any webhooks:write holder a DNS/IP oracle for the internal
+        # network; the reason stays in the operator log only.
+        logger.warning(
+            "webhook_registration_rejected_ssrf",
+            extra={"tenant_id": tenant_id, "reason": str(e)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook URL is not an allowed destination.",
+        ) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    return CreateWebhookResponse(
+        endpoint=WebhookEndpointView.model_validate(endpoint.redacted()),
+        secret=secret,
+    )
+
+
+@router.get(
+    "",
+    response_model=WebhookEndpointPage,
+    responses=problem_responses(400, 401, 403, 422),
+)
+async def list_webhooks(
+    request: Request, page: PageParams = Depends(page_params)
+) -> dict[str, Any]:
+    """List webhook endpoints for the tenant, cursor-paginated (``webhooks:read``)."""
+    _enforce(request, "webhooks:read")
+    service = get_webhook_service()
+    endpoints = await service.list_endpoints(get_current_tenant_id())
+    return paginated(endpoints, page, key="endpoints", serialize=lambda e: e.redacted())
+
+
+@router.delete(
+    "/{endpoint_id}",
+    response_model=WebhookDeleted,
+    responses=problem_responses(401, 403, 404),
+)
+async def delete_webhook(request: Request, endpoint_id: str) -> dict[str, Any]:
+    """Delete a webhook endpoint (requires ``webhooks:write``)."""
+    _enforce(request, "webhooks:write")
+    service = get_webhook_service()
+    deleted = await service.delete_endpoint(
+        endpoint_id, tenant_id=get_current_tenant_id()
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Endpoint not found"
+        )
+    return {"status": "deleted", "endpoint_id": endpoint_id}
+
+
+@router.get(
+    "/deliveries",
+    response_model=WebhookDeliveryPage,
+    responses=problem_responses(400, 401, 403, 422),
+)
+async def list_deliveries(
+    request: Request, page: PageParams = Depends(page_params)
+) -> dict[str, Any]:
+    """List delivery records for the tenant, cursor-paginated (``webhooks:read``).
+
+    Returns ``deliveries`` plus an opaque ``next_cursor`` (and ``has_more``) to
+    fetch the following page; pass it back as the ``cursor`` query parameter.
+    """
+    _enforce(request, "webhooks:read")
+    service = get_webhook_service()
+    # The store retains a bounded window; paginate over it with an opaque cursor.
+    records = await service.store.list_deliveries(get_current_tenant_id(), limit=1000)
+    # Paginate the records themselves and serialise only the page: dumping
+    # the whole retained window (up to 1000 records) per request did
+    # O(window) work to return O(limit) items.
+    return paginated(
+        records, page, key="deliveries", serialize=lambda d: d.model_dump()
+    )
+
+
+@router.post(
+    "/deliveries/{delivery_id}/replay",
+    response_model=WebhookReplayed,
+    responses=problem_responses(401, 403, 404),
+)
+async def replay_delivery(request: Request, delivery_id: str) -> dict[str, Any]:
+    """Re-attempt a failed delivery (requires ``webhooks:write``)."""
+    _enforce(request, "webhooks:write")
+    service = get_webhook_service()
+    result = await service.replay_delivery(
+        delivery_id, tenant_id=get_current_tenant_id()
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery or its endpoint not found",
+        )
+    return {"status": result.status.value, "delivery": result.model_dump()}

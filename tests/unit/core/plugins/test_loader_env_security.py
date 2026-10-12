@@ -5,7 +5,7 @@ passes, and must ignore symlinked ``.env`` files — otherwise an untrusted
 plugin directory could inject environment variables into the process even
 when the plugin itself is refused.
 
-Since the loader converged on the namespace **allowlist** (``core.plugins._env``),
+Since the loader converged on the namespace **allowlist** (``baselith.core.plugins._env``),
 it must additionally refuse to export any key outside the plugin's own
 ``<DIRNAME>_`` namespace, whether or not that key appears on the protected-key
 denylist. The denylist can only cover controls someone remembered to list; the
@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins._env import LEGACY_DENYLIST_ONLY_FLAG
-from core.plugins.loader import PluginLoader
-from core.plugins.registry import PluginRegistry
+from baselith.core.plugins._env import LEGACY_DENYLIST_ONLY_FLAG
+from baselith.core.plugins.loader import PluginLoader
+from baselith.core.plugins.registry import PluginRegistry
 
 # An in-namespace marker for a plugin directory named ``<slug>``: allowed to
 # flow from that plugin's .env into the process environment.

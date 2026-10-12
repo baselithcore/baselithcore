@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.feature_flags.manager import (
+from baselith.core.feature_flags.manager import (
     EnvFeatureFlagProvider,
     FeatureFlag,
     FeatureFlagManager,

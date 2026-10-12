@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.plugins.permissions import (
+from baselith.core.plugins.permissions import (
     PermissionMode,
     PluginPermissions,
     parse_permissions,

@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.config.services import LLMConfig
-from core.services.llm import (
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm import (
     ANY,
     AUTO,
     NONE,
@@ -65,7 +65,7 @@ class TestNeutralTypes:
         assert LLMResult(tool_calls=[ToolCall(id="1", name="t")]).has_tool_calls
 
     def test_tool_spec_from_mcp(self):
-        from core.mcp.types import MCPTool
+        from baselith.core.mcp.types import MCPTool
 
         mcp = MCPTool(
             name="search",
@@ -77,7 +77,7 @@ class TestNeutralTypes:
         assert spec.parameters == mcp.input_schema
 
     def test_tool_spec_from_mcp_empty_schema_defaults(self):
-        from core.mcp.types import MCPTool
+        from baselith.core.mcp.types import MCPTool
 
         spec = tool_spec_from_mcp(MCPTool(name="x", description="d", input_schema={}))
         assert spec.parameters == {"type": "object"}
@@ -110,7 +110,9 @@ def _anthropic_response(blocks, in_tok=10, out_tok=5, stop_reason="end_turn"):
 @pytest.mark.asyncio
 class TestAnthropicNative:
     async def _provider(self, response):
-        from core.services.llm.providers.anthropic_provider import AnthropicProvider
+        from baselith.core.services.llm.providers.anthropic_provider import (
+            AnthropicProvider,
+        )
 
         provider = AnthropicProvider(api_key="sk-ant-test")
         mock_client = MagicMock()
@@ -217,7 +219,7 @@ def _openai_tool_call(cid, name, args_json):
 @pytest.mark.asyncio
 class TestOpenAINative:
     async def _provider(self, response):
-        from core.services.llm.providers.openai_provider import OpenAIProvider
+        from baselith.core.services.llm.providers.openai_provider import OpenAIProvider
 
         provider = OpenAIProvider(api_key="sk-test")
         mock_client = MagicMock()
@@ -285,7 +287,7 @@ class TestOpenAINative:
 @pytest.mark.asyncio
 class TestOllamaNative:
     async def _provider(self, response):
-        from core.services.llm.providers.ollama_provider import OllamaProvider
+        from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
         mock_client = MagicMock()

@@ -12,7 +12,7 @@
 # the *owner* of a table that lacks FORCE ROW LEVEL SECURITY (migration 008
 # deliberately leaves FORCE off). A deployment that keeps using the owning
 # role therefore has RLS switched on in three places and no isolation at all —
-# which `core.db.rls_posture` now refuses to boot past in production.
+# which `baselith.core.db.rls_posture` now refuses to boot past in production.
 #
 # Runs at hook-weight 1, i.e. AFTER the migration Job (weight 0): the GRANTs
 # below cover the tables that exist, and ALTER DEFAULT PRIVILEGES covers every

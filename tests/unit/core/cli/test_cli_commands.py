@@ -10,11 +10,11 @@ import pytest
 class TestRunCommand:
     """Tests for the run command."""
 
-    @patch("core.cli.commands.run.print_error")
+    @patch("baselith.core.cli.commands.run.print_error")
     def test_run_server_missing_uvicorn(self, mock_err):
         """Test run_server when uvicorn is not installed."""
         # Clean way to mock import error for a specific module
-        import core.cli.commands.run as run_module
+        import baselith.core.cli.commands.run as run_module
 
         # We mock the internal 'import uvicorn' by raising ImportError when it's called
         with patch(
@@ -39,14 +39,14 @@ class TestRunCommand:
             assert result == 1
             mock_err.assert_called_once()
 
-    @patch("core.cli.commands.run.print_error")
+    @patch("baselith.core.cli.commands.run.print_error")
     def test_run_server_missing_backend(self, mock_err, tmp_path, monkeypatch):
         """Test run_server when backend.py doesn't exist."""
-        from core.cli.commands.run import run_server
+        from baselith.core.cli.commands.run import run_server
 
         monkeypatch.chdir(tmp_path)
 
-        with patch("core.cli.commands.run.Path") as mock_path:
+        with patch("baselith.core.cli.commands.run.Path") as mock_path:
             mock_path.cwd.return_value = tmp_path
             mock_backend = MagicMock()
             mock_backend.exists.return_value = False
@@ -59,7 +59,7 @@ class TestRunCommand:
                 mock_err.assert_called_once()
                 assert "backend.py not found" in mock_err.call_args[0][0]
 
-    @patch("core.cli.commands.run.console")
+    @patch("baselith.core.cli.commands.run.console")
     def test_run_server_success(self, mock_console, tmp_path, monkeypatch):
         """Test run_server successful execution."""
         # Create mock backend.py
@@ -71,7 +71,7 @@ class TestRunCommand:
         mock_uvicorn = MagicMock()
 
         with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
-            from core.cli.commands import run as run_module
+            from baselith.core.cli.commands import run as run_module
 
             run_module.run_server(
                 host="localhost", port=9000, reload=False, preflight=False
@@ -79,7 +79,7 @@ class TestRunCommand:
             mock_uvicorn.run.assert_called_once()
             mock_console.print.assert_called()
 
-    @patch("core.cli.commands.run.console")
+    @patch("baselith.core.cli.commands.run.console")
     def test_run_server_keyboard_interrupt(self, mock_console, tmp_path, monkeypatch):
         """Test run_server handles KeyboardInterrupt gracefully."""
         backend_file = tmp_path / "backend.py"
@@ -91,7 +91,7 @@ class TestRunCommand:
         mock_uvicorn.run.side_effect = KeyboardInterrupt()
 
         with patch.dict("sys.modules", {"uvicorn": mock_uvicorn}):
-            from core.cli.commands import run as run_module
+            from baselith.core.cli.commands import run as run_module
 
             result = run_module.run_server(preflight=False)
             assert result == 0  # Graceful exit
@@ -103,7 +103,7 @@ class TestDoctorCommand:
 
     def test_check_port_open(self):
         """Test check_port with open port."""
-        from core.cli.commands.doctor import check_port
+        from baselith.core.cli.commands.doctor import check_port
 
         with patch("socket.socket") as mock_socket:
             instance = MagicMock()
@@ -117,7 +117,7 @@ class TestDoctorCommand:
 
     def test_check_port_closed(self):
         """Test check_port with closed port."""
-        from core.cli.commands.doctor import check_port
+        from baselith.core.cli.commands.doctor import check_port
 
         with patch("socket.socket") as mock_socket:
             instance = MagicMock()
@@ -128,37 +128,37 @@ class TestDoctorCommand:
             result = check_port("localhost", 9999)
             assert result is False
 
-    @patch("core.config.get_storage_config")
+    @patch("baselith.core.config.get_storage_config")
     def test_check_redis_connected(self, mock_storage_config):
         """Test check_redis when Redis is available."""
-        from core.cli.commands.doctor import check_redis
+        from baselith.core.cli.commands.doctor import check_redis
 
         mock_storage_config.return_value = MagicMock(
             cache_redis_url="redis://localhost:6379"
         )
 
-        with patch("core.cli.commands.doctor.check_port", return_value=True):
+        with patch("baselith.core.cli.commands.doctor.check_port", return_value=True):
             result = check_redis()
             assert result.passed is True
             assert "Connected" in result.message
 
-    @patch("core.config.get_storage_config")
+    @patch("baselith.core.config.get_storage_config")
     def test_check_redis_disconnected(self, mock_storage_config):
         """Test check_redis when Redis is not available."""
-        from core.cli.commands.doctor import check_redis
+        from baselith.core.cli.commands.doctor import check_redis
 
         mock_storage_config.return_value = MagicMock(
             cache_redis_url="redis://localhost:6379"
         )
 
-        with patch("core.cli.commands.doctor.check_port", return_value=False):
+        with patch("baselith.core.cli.commands.doctor.check_port", return_value=False):
             result = check_redis()
             assert result.passed is False
             assert "Cannot connect" in result.message
 
     def test_check_env_file_exists(self, tmp_path, monkeypatch):
         """Test check_env_file when .env exists."""
-        from core.cli.commands.doctor import check_env_file
+        from baselith.core.cli.commands.doctor import check_env_file
 
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".env").write_text("APP_ENV=development\n")
@@ -167,11 +167,14 @@ class TestDoctorCommand:
     def test_check_env_file_missing(self, tmp_path, monkeypatch):
         """No .env *and* no configuration in the environment is still a FAIL.
 
-        The markers have to be cleared explicitly: `core.config` loads the
+        The markers have to be cleared explicitly: `baselith.core.config` loads the
         repository .env into os.environ at import, so a developer's own
         SECRET_KEY would make this pass for the wrong reason.
         """
-        from core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
+        from baselith.core.cli.commands.doctor import (
+            _ENV_CONFIG_MARKERS,
+            check_env_file,
+        )
 
         monkeypatch.chdir(tmp_path)
         for name in _ENV_CONFIG_MARKERS:
@@ -185,7 +188,10 @@ class TestDoctorCommand:
         self, tmp_path, monkeypatch
     ):
         """A container has no .env by design — envFrom is the supported route."""
-        from core.cli.commands.doctor import _ENV_CONFIG_MARKERS, check_env_file
+        from baselith.core.cli.commands.doctor import (
+            _ENV_CONFIG_MARKERS,
+            check_env_file,
+        )
 
         monkeypatch.chdir(tmp_path)
         for name in _ENV_CONFIG_MARKERS:
@@ -198,7 +204,7 @@ class TestDoctorCommand:
 
     def test_check_plugins_found(self, tmp_path, monkeypatch):
         """Test check_plugins when plugins exist."""
-        from core.cli.commands.doctor import check_plugins
+        from baselith.core.cli.commands.doctor import check_plugins
 
         # Create mock plugins directory with plugins
         plugins_dir = tmp_path / "plugins"
@@ -213,24 +219,24 @@ class TestDoctorCommand:
         result = check_plugins()
         assert result.passed is True
 
-    @patch("core.config.get_llm_config")
+    @patch("baselith.core.config.get_llm_config")
     def test_check_llm_provider_ollama_available(self, mock_llm_config):
         """Test check_llm_provider when Ollama is available."""
-        from core.cli.commands.doctor import check_llm_provider
+        from baselith.core.cli.commands.doctor import check_llm_provider
 
         mock_llm_config.return_value = MagicMock(
             provider="ollama", api_base="http://localhost:11434"
         )
 
-        with patch("core.cli.commands.doctor.check_port", return_value=True):
+        with patch("baselith.core.cli.commands.doctor.check_port", return_value=True):
             result = check_llm_provider()
             assert result.passed is True
             assert "Ollama connected" in result.message
 
-    @patch("core.config.get_llm_config")
+    @patch("baselith.core.config.get_llm_config")
     def test_check_llm_provider_openai_configured(self, mock_llm_config):
         """Test check_llm_provider when OpenAI API key is set."""
-        from core.cli.commands.doctor import check_llm_provider
+        from baselith.core.cli.commands.doctor import check_llm_provider
 
         mock_llm_config.return_value = MagicMock(
             provider="openai", api_key="sk-test-key"
@@ -240,10 +246,10 @@ class TestDoctorCommand:
         assert result.passed is True
         assert "OPENAI" in result.message
 
-    @patch("core.cli.commands.doctor.console")
+    @patch("baselith.core.cli.commands.doctor.console")
     def test_run_doctor_all_pass(self, mock_console):
         """Test run_doctor when all checks pass."""
-        from core.cli.commands.doctor import CheckResult, run_doctor
+        from baselith.core.cli.commands.doctor import CheckResult, run_doctor
 
         mock_results = [
             CheckResult("Environment", True, "OK"),
@@ -254,7 +260,9 @@ class TestDoctorCommand:
             CheckResult("Plugins", True, "OK"),
         ]
 
-        with patch("core.cli.commands.doctor.run_checks", return_value=mock_results):
+        with patch(
+            "baselith.core.cli.commands.doctor.run_checks", return_value=mock_results
+        ):
             assert run_doctor() == 0
         mock_console.print.assert_called()
 
@@ -264,7 +272,7 @@ class TestCLIMain:
 
     def test_cli_help(self, capsys):
         """Test CLI shows help when no command given."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas"]):
             result = main()
@@ -272,7 +280,7 @@ class TestCLIMain:
 
     def test_cli_version(self, capsys):
         """Test CLI version command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "--version"]):
             with pytest.raises(SystemExit) as exc_info:
@@ -281,74 +289,88 @@ class TestCLIMain:
 
     def test_cli_run_command_dispatch(self):
         """Test CLI dispatches to run command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "run", "--port", "9000"]):
-            with patch("core.cli.__main__.cmd_run", return_value=0) as mock_run:
+            with patch(
+                "baselith.core.cli.__main__.cmd_run", return_value=0
+            ) as mock_run:
                 main()
                 mock_run.assert_called_once()
 
     def test_cli_doctor_command_dispatch(self):
         """Test CLI dispatches to doctor command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "doctor"]):
-            with patch("core.cli.__main__.cmd_doctor", return_value=0) as mock_doctor:
+            with patch(
+                "baselith.core.cli.__main__.cmd_doctor", return_value=0
+            ) as mock_doctor:
                 main()
                 mock_doctor.assert_called_once()
 
     def test_cli_init_with_rag_template(self):
         """Test CLI init with rag-system template."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch(
             "sys.argv", ["mas", "init", "test-project", "--template", "rag-system"]
         ):
-            with patch("core.cli.__main__.cmd_init", return_value=0) as mock_init:
+            with patch(
+                "baselith.core.cli.__main__.cmd_init", return_value=0
+            ) as mock_init:
                 main()
                 mock_init.assert_called_once()
 
     def test_cli_shell_command_dispatch(self):
         """Test CLI dispatches to shell command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "shell"]):
-            with patch("core.cli.__main__.cmd_shell", return_value=0) as mock_shell:
+            with patch(
+                "baselith.core.cli.__main__.cmd_shell", return_value=0
+            ) as mock_shell:
                 main()
                 mock_shell.assert_called_once()
 
     def test_cli_db_command_dispatch(self):
         """Test CLI dispatches to db command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "db", "status"]):
-            with patch("core.cli.__main__.cmd_db", return_value=0) as mock_db:
+            with patch("baselith.core.cli.__main__.cmd_db", return_value=0) as mock_db:
                 main()
                 mock_db.assert_called_once()
 
     def test_cli_cache_command_dispatch(self):
         """Test CLI dispatches to cache command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "cache", "stats"]):
-            with patch("core.cli.__main__.cmd_cache", return_value=0) as mock_cache:
+            with patch(
+                "baselith.core.cli.__main__.cmd_cache", return_value=0
+            ) as mock_cache:
                 main()
                 mock_cache.assert_called_once()
 
     def test_cli_queue_command_dispatch(self):
         """Test CLI dispatches to queue command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "queue", "status"]):
-            with patch("core.cli.__main__.cmd_queue", return_value=0) as mock_queue:
+            with patch(
+                "baselith.core.cli.__main__.cmd_queue", return_value=0
+            ) as mock_queue:
                 main()
                 mock_queue.assert_called_once()
 
     def test_cli_docs_command_dispatch(self):
         """Test CLI dispatches to docs command."""
-        from core.cli.__main__ import main
+        from baselith.core.cli.__main__ import main
 
         with patch("sys.argv", ["mas", "docs", "generate"]):
-            with patch("core.cli.__main__.cmd_docs", return_value=0) as mock_docs:
+            with patch(
+                "baselith.core.cli.__main__.cmd_docs", return_value=0
+            ) as mock_docs:
                 main()
                 mock_docs.assert_called_once()

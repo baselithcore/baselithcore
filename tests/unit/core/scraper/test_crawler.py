@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.config.scraper import ScraperConfig
-from core.scraper.crawler import CrawlEngine
-from core.scraper.models import CrawlResult, ExtractedData, ScrapedPage
+from baselith.core.config.scraper import ScraperConfig
+from baselith.core.scraper.crawler import CrawlEngine
+from baselith.core.scraper.models import CrawlResult, ExtractedData, ScrapedPage
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def mock_extracted_data():
 
 @pytest.fixture
 def mock_scraper_cls():
-    with patch("core.scraper.crawler.Scraper") as mock_cls:
+    with patch("baselith.core.scraper.crawler.Scraper") as mock_cls:
         # Mock context manager
         mock_instance = AsyncMock()
         mock_cls.return_value = mock_instance
@@ -135,20 +135,22 @@ async def test_robots_txt_blocking(mock_config):
     mock_config.follow_robots_txt = True
 
     # The robots fetch now goes through the shared pooled client
-    # (plugins.web_scraper._http_pool.get_robots_client) instead of building a
+    # (baselith.plugins.web_scraper._http_pool.get_robots_client) instead of building a
     # new httpx.AsyncClient per call.
     mock_client = _StreamingClient([b"User-agent: *\nDisallow: /private"])
 
     with (
         patch(
-            "core.scraper.crawler.get_robots_client",
+            "baselith.core.scraper.crawler.get_robots_client",
             new=AsyncMock(return_value=mock_client),
         ),
         patch(
-            "core.scraper.crawler.parse_robots_txt",
+            "baselith.core.scraper.crawler.parse_robots_txt",
             return_value={"disallow": ["/private"]},
         ),
-        patch("core.scraper.crawler.is_url_allowed_by_robots", return_value=False),
+        patch(
+            "baselith.core.scraper.crawler.is_url_allowed_by_robots", return_value=False
+        ),
     ):
         crawler = CrawlEngine(config=mock_config)
 
@@ -166,8 +168,9 @@ class _StreamingResponse:
         self.status_code = status_code
         self._chunks = chunks
         self.bytes_served = 0
+        self.headers: dict[str, str] = {}
 
-    async def aiter_bytes(self):
+    async def aiter_raw(self):
         for chunk in self._chunks:
             self.bytes_served += len(chunk)
             yield chunk
@@ -198,7 +201,8 @@ async def test_robots_fetch_is_pinned_to_the_verified_ip(mock_config):
     re-resolved by the client (DNS rebinding)."""
     client = _StreamingClient([b"User-agent: *\nDisallow: /x"])
     with patch(
-        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+        "baselith.core.scraper.crawler.get_robots_client",
+        new=AsyncMock(return_value=client),
     ):
         rules = await CrawlEngine(config=mock_config)._fetch_robots(
             "http://example.com/start"
@@ -206,7 +210,10 @@ async def test_robots_fetch_is_pinned_to_the_verified_ip(mock_config):
 
     method, url, kwargs = client.calls[0]
     assert url == "http://93.184.216.34/robots.txt"
-    assert kwargs["headers"] == {"Host": "example.com"}
+    assert kwargs["headers"] == {
+        "Host": "example.com",
+        "Accept-Encoding": "gzip, deflate",
+    }
     assert kwargs["extensions"] == {"sni_hostname": "example.com"}
     assert rules["disallow"] == ["/x"]
 
@@ -216,7 +223,8 @@ async def test_robots_fetch_refuses_internal_targets(mock_config, mock_dns_resol
     mock_dns_resolution.return_value = [(2, 1, 6, "", ("10.0.0.5", 0))]
     client = _StreamingClient([b""])
     with patch(
-        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+        "baselith.core.scraper.crawler.get_robots_client",
+        new=AsyncMock(return_value=client),
     ):
         rules = await CrawlEngine(config=mock_config)._fetch_robots(
             "http://intranet.example/"
@@ -227,12 +235,13 @@ async def test_robots_fetch_refuses_internal_targets(mock_config, mock_dns_resol
 
 @pytest.mark.asyncio
 async def test_robots_body_is_capped(mock_config):
-    from plugins.web_scraper.crawler import ROBOTS_MAX_BYTES
+    from baselith.plugins.web_scraper.crawler import ROBOTS_MAX_BYTES
 
     chunk = b"#" * 65536
     client = _StreamingClient([chunk] * 1000)  # ~64 MB offered
     with patch(
-        "core.scraper.crawler.get_robots_client", new=AsyncMock(return_value=client)
+        "baselith.core.scraper.crawler.get_robots_client",
+        new=AsyncMock(return_value=client),
     ):
         await CrawlEngine(config=mock_config)._fetch_robots("http://example.com/")
     assert client.response.bytes_served <= ROBOTS_MAX_BYTES + len(chunk)
@@ -260,7 +269,7 @@ async def test_repeated_links_are_enqueued_once(mock_config, mock_scraper_cls):
         )
 
     mock_scraper_cls.return_value.scrape.side_effect = scrape
-    from plugins.web_scraper import crawler as crawler_module
+    from baselith.plugins.web_scraper import crawler as crawler_module
 
     crawler = CrawlEngine(config=mock_config, max_pages=10, max_depth=3)
     with patch.object(

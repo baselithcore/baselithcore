@@ -13,14 +13,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.utils import runtime_env
+from baselith.core.utils import runtime_env
 
 
 @pytest.fixture(autouse=True)
 def _restore_span_sinks():
     """create_app() lets plugins register process-global span sinks; restore
     the registry so this test cannot poison later observability tests."""
-    from core.observability import span_sink
+    from baselith.core.observability import span_sink
 
     before = list(span_sink._span_sinks)
     yield
@@ -37,7 +37,7 @@ def _security_stub(auth_required: bool) -> SimpleNamespace:
 
 
 def _create_app(monkeypatch, *, auth_required: bool):
-    from core.api import factory
+    from baselith.core.api import factory
 
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.delenv("ENVIRONMENT", raising=False)

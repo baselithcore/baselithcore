@@ -14,8 +14,8 @@ environments keep working.
 
 import pytest
 
-from core.config.multimodal import FineTuningConfig, VisionConfig, VoiceConfig
-from core.config.vectorstore import VectorStoreConfig
+from baselith.core.config.multimodal import FineTuningConfig, VisionConfig, VoiceConfig
+from baselith.core.config.vectorstore import VectorStoreConfig
 
 PREFIXED = [
     ("VISION_ANTHROPIC_API_KEY", VisionConfig, "anthropic_api_key"),

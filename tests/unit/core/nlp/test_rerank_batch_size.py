@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from core.nlp.lazy import LazyReranker
-from core.nlp.rerank import (
+from baselith.core.nlp.lazy import LazyReranker
+from baselith.core.nlp.rerank import (
     CPU_BATCH_SIZE,
     CUDA_BATCH_SIZE,
     batch_size_for,

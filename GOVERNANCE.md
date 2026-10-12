@@ -9,11 +9,11 @@ an aspirational structure.
 BaselithCore is a modular orchestration engine for production-grade agentic AI.
 Its scope boundary is architectural, not editorial — the **Sacred Core rule**:
 
-> `core/` contains only domain-agnostic logic (orchestration, infrastructure,
+> `baselith/core/` contains only domain-agnostic logic (orchestration, infrastructure,
 > utilities). Domain-specific logic, external integrations, and business
 > features live under `plugins/`.
 
-A proposal that would put domain logic in `core/` is out of scope regardless of
+A proposal that would put domain logic in `baselith/core/` is out of scope regardless of
 its merit, and the boundary is enforced mechanically by
 `scripts/check_architecture_boundaries.py`. The answer to "will you accept
 this?" is usually "yes, as a plugin".
@@ -49,7 +49,7 @@ to change. A change is substantial when it:
 
 - removes or renames anything in the `stable` tier (see
   [API stability tiers](mkdocs-site/docs/advanced/api-stability.md));
-- adds a package to `core/`, or promotes a package's stability tier;
+- adds a package to `baselith/core/`, or promotes a package's stability tier;
 - adds, removes, or materially changes a CI quality gate;
 - changes the plugin manifest contract or the plugin ABI;
 - adds a runtime dependency to the base install.
@@ -73,7 +73,7 @@ unanswered proposal is a failure of the process, not an answer.
 Releases are automated. Conventional Commits drive semantic-release, which
 computes the version, writes the changelog, tags, and publishes to PyPI with
 build attestations. No release is cut by hand, and the version in
-`core/_version.py` is written by the pipeline.
+`baselith/core/_version.py` is written by the pipeline.
 
 What a version number promises is defined by the
 [versioning and deprecation policy](mkdocs-site/docs/advanced/versioning-and-deprecation.md),

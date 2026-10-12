@@ -11,8 +11,8 @@ from uuid import UUID
 
 import pytest
 
-from core.context import reset_tenant_context, set_tenant_context
-from core.privacy import (
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.privacy import (
     DataProvider,
     PostgresDataProvider,
     RetentionProvider,
@@ -58,7 +58,7 @@ def _patch(monkeypatch, cursors: list[_Cur]):
         used.append(cur)
         return _Ctx(cur)
 
-    monkeypatch.setattr("core.privacy.postgres.get_async_cursor", _make)
+    monkeypatch.setattr("baselith.core.privacy.postgres.get_async_cursor", _make)
     return used
 
 

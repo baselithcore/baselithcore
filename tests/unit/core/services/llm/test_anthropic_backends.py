@@ -14,13 +14,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.exceptions import LLMProviderError
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_default_backend_builds_api_client_with_key(mock_anthropic):
     mock_anthropic.AsyncAnthropic.return_value = MagicMock()
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     provider = AnthropicProvider(api_key="sk-ant-test")
     provider._ensure_client()
@@ -29,10 +31,12 @@ def test_default_backend_builds_api_client_with_key(mock_anthropic):
     assert mock_anthropic.AsyncAnthropic.call_args.kwargs["api_key"] == "sk-ant-test"
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_bedrock_backend_builds_bedrock_client_without_api_key(mock_anthropic):
     mock_anthropic.AsyncAnthropicBedrock.return_value = MagicMock()
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     provider = AnthropicProvider(
         api_key=None, backend="bedrock", aws_region="eu-west-1"
@@ -47,10 +51,12 @@ def test_bedrock_backend_builds_bedrock_client_without_api_key(mock_anthropic):
     mock_anthropic.AsyncAnthropic.assert_not_called()
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_vertex_backend_builds_vertex_client(mock_anthropic):
     mock_anthropic.AsyncAnthropicVertex.return_value = MagicMock()
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     provider = AnthropicProvider(
         api_key=None,
@@ -65,26 +71,30 @@ def test_vertex_backend_builds_vertex_client(mock_anthropic):
     assert kwargs["region"] == "europe-west4"
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_api_backend_still_requires_key(mock_anthropic):
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     with pytest.raises(LLMProviderError, match="API key"):
         AnthropicProvider(api_key=None)
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_unknown_backend_rejected(mock_anthropic):
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     with pytest.raises(LLMProviderError, match="backend"):
         AnthropicProvider(api_key=None, backend="azure")
 
 
-@patch("core.services.llm.providers.anthropic_provider.anthropic")
+@patch("baselith.core.services.llm.providers.anthropic_provider.anthropic")
 def test_factory_forwards_backend_config(mock_anthropic):
     mock_anthropic.AsyncAnthropicBedrock.return_value = MagicMock()
-    from core.services.llm.provider_factory import create_provider
+    from baselith.core.services.llm.provider_factory import create_provider
 
     config = SimpleNamespace(
         provider="anthropic",

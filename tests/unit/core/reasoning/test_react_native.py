@@ -1,16 +1,16 @@
-"""Tests for the native tool-calling ReAct loop (core.reasoning.react_native)."""
+"""Tests for the native tool-calling ReAct loop (baselith.core.reasoning.react_native)."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from core.reasoning.react import ReActAgent, StepType, ToolDefinition
-from core.reasoning.react_native import (
+from baselith.core.reasoning.react import ReActAgent, StepType, ToolDefinition
+from baselith.core.reasoning.react_native import (
     build_tool_specs,
     infer_tool_parameters,
     resolve_native_mode,
 )
-from core.services.llm.tool_calling import LLMResult, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, ToolCall
 
 
 class ScriptedNativeLLM:
@@ -444,7 +444,7 @@ class TestParallelToolCalls:
     async def test_gates_run_before_any_tool_executes(self):
         """A fail-closed refusal (approval pending, budget exhausted) must abort
         the turn before a later tool in it has run."""
-        from core.orchestration.autonomy import ApprovalPendingError
+        from baselith.core.orchestration.autonomy import ApprovalPendingError
 
         executed: list[str] = []
 

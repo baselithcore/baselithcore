@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.observability import audit as audit_module
-from core.observability.audit import AuditEventType
-from core.skill_evolution.gating import SkillGate
-from core.skill_evolution.types import FitnessVector, Pattern, PatternKind
-from core.skill_evolution.writer import ManagedSkillWriter
+from baselith.core.observability import audit as audit_module
+from baselith.core.observability.audit import AuditEventType
+from baselith.core.skill_evolution.gating import SkillGate
+from baselith.core.skill_evolution.types import FitnessVector, Pattern, PatternKind
+from baselith.core.skill_evolution.writer import ManagedSkillWriter
 
 pytestmark = [pytest.mark.unit]
 
@@ -35,7 +35,7 @@ def writer(tmp_path):
 
 
 async def _write_skill(writer: ManagedSkillWriter, name: str = "test-skill"):
-    from core.skill_evolution.types import SkillProposal
+    from baselith.core.skill_evolution.types import SkillProposal
 
     proposal = SkillProposal(
         name=name, description="a test skill", body="Do the thing."
@@ -113,8 +113,8 @@ class TestRejectionCooldown:
         )
 
     async def test_rejected_patterns_skipped_until_cooldown(self, writer):
-        from core.skill_evolution.proposer import SkillProposer
-        from core.skill_evolution.store import InMemoryPatternStore
+        from baselith.core.skill_evolution.proposer import SkillProposer
+        from baselith.core.skill_evolution.store import InMemoryPatternStore
 
         store = InMemoryPatternStore()
         pattern = await store.upsert(self._pattern("fp-1"))
@@ -140,7 +140,7 @@ class TestRejectionCooldown:
 
 class TestHumanGate:
     async def test_self_modify_category_requires_approval_supervised(self):
-        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+        from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
 
         policy = AutonomyPolicy(level=AutonomyLevel.SUPERVISED)
         assert policy.requires_approval("self_modify") is True
@@ -149,11 +149,11 @@ class TestHumanGate:
         assert autonomous.requires_approval("self_modify") is False
 
     async def test_evolve_denied_without_approval_channel(self, writer, tmp_path):
-        from core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
-        from core.skill_evolution.gating import SkillGate
-        from core.skill_evolution.proposer import SkillProposer
-        from core.skill_evolution.service import SkillEvolutionService
-        from core.skill_evolution.store import InMemoryPatternStore
+        from baselith.core.orchestration.autonomy import AutonomyLevel, AutonomyPolicy
+        from baselith.core.skill_evolution.gating import SkillGate
+        from baselith.core.skill_evolution.proposer import SkillProposer
+        from baselith.core.skill_evolution.service import SkillEvolutionService
+        from baselith.core.skill_evolution.store import InMemoryPatternStore
 
         store = InMemoryPatternStore()
         await store.upsert(

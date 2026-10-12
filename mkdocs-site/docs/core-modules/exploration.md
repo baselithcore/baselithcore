@@ -3,7 +3,7 @@ title: Exploration
 description: Autonomous information exploration and hypothesis generation
 ---
 
-**Module**: `core/exploration/`
+**Module**: `baselith/core/exploration/`
 
 The Exploration module actively seeks new information across pluggable knowledge
 sources, identifies knowledge gaps, and generates testable hypotheses. It is
@@ -19,10 +19,10 @@ scores confidence.
 
 ## Public API
 
-`core.exploration` exports two pillars:
+`baselith.core.exploration` exports two pillars:
 
 ```python
-from core.exploration import (
+from baselith.core.exploration import (
     ProactiveExplorer, ExplorationResult,   # information gathering
     HypothesisGenerator, Hypothesis,        # hypothesis generation
 )
@@ -40,7 +40,7 @@ topic into multiple queries, aggregates results, and returns an
 `ExplorationResult`.
 
 ```python
-from core.exploration import ProactiveExplorer
+from baselith.core.exploration import ProactiveExplorer
 
 explorer = ProactiveExplorer(sources=[my_source])  # optional LLM for query expansion
 
@@ -72,7 +72,7 @@ of `Hypothesis` objects (LLM-backed when a service is available, otherwise a
 simple heuristic fallback).
 
 ```python
-from core.exploration import HypothesisGenerator
+from baselith.core.exploration import HypothesisGenerator
 
 generator = HypothesisGenerator()  # optional llm_service
 

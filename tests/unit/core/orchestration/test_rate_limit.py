@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.orchestration.rate_limit import (
+from baselith.core.orchestration.rate_limit import (
     ToolRateLimiter,
     ToolRateLimitExceededError,
     get_default_tool_rate_limiter,
@@ -49,7 +49,7 @@ class TestToolRateLimiter:
 
 class TestDefaultLimiter:
     def test_disabled_by_default(self, monkeypatch):
-        from core.config import orchestration as orch_config
+        from baselith.core.config import orchestration as orch_config
 
         monkeypatch.delenv("ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED", raising=False)
         orch_config._orchestration_config = None
@@ -61,7 +61,7 @@ class TestDefaultLimiter:
             reset_default_tool_rate_limiter()
 
     def test_enabled_via_config(self, monkeypatch):
-        from core.config import orchestration as orch_config
+        from baselith.core.config import orchestration as orch_config
 
         monkeypatch.setenv("ORCHESTRATOR_TOOL_RATE_LIMIT_ENABLED", "true")
         monkeypatch.setenv("ORCHESTRATOR_TOOL_RATE_LIMIT_MAX_CALLS", "2")

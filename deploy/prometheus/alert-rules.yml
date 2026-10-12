@@ -36,3 +36,30 @@ groups:
         annotations:
           summary: "High Memory usage on {{ $labels.instance }}"
           description: "Process memory usage is above 85% for the last 5 minutes."
+
+  # Online evaluation (EVAL_ENABLED + EVAL_ONLINE_ENABLED). The monitor decides
+  # (floor, trailing reference, hysteresis: EVAL_ONLINE_*); these rules page on
+  # its verdict. With CACHE_BACKEND=redis every worker mirrors the fleet state,
+  # hence `max by`. Webhook subscribers to evaluation.degraded / .recovered get
+  # the same transitions without Prometheus.
+  - name: baselith-core-quality
+    rules:
+      - alert: AnswerQualityDegraded
+        expr: max by (intent, source) (mas_eval_online_degraded) == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: evaluation
+        annotations:
+          summary: "Answer quality degraded for intent {{ $labels.intent }} ({{ $labels.source }})"
+          description: "The windowed mean score of the sampled answers fell below EVAL_ONLINE_QUALITY_FLOOR or below its trailing reference. Check mas_eval_online_flags_total for the intent and GET /v1/evaluation/online/summary."
+
+      - alert: OnlineEvalMonitorFailing
+        expr: sum(rate(mas_eval_online_failures_total{stage=~"fleet|monitor"}[10m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: evaluation
+        annotations:
+          summary: "The online quality monitor is failing"
+          description: "Scores are not reaching the quality monitor (stage=fleet: the shared Redis windows), so a degradation would go unannounced."

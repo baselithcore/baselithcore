@@ -1,8 +1,8 @@
-"""Tests for core.scraper.extractors."""
+"""Tests for baselith.core.scraper.extractors."""
 
 import pytest
 
-from core.scraper.extractors import (
+from baselith.core.scraper.extractors import (
     CssSelectorExtractor,
     ExtractionSchema,
     ImageExtractor,
@@ -11,8 +11,8 @@ from core.scraper.extractors import (
     SchemaOrgExtractor,
     TextExtractor,
 )
-from core.scraper.extractors.base import BaseExtractor
-from core.scraper.models import ScrapedPage
+from baselith.core.scraper.extractors.base import BaseExtractor
+from baselith.core.scraper.models import ScrapedPage
 
 
 @pytest.fixture

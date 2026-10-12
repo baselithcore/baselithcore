@@ -1,0 +1,20 @@
+name: example-plugin
+version: 0.2.0
+description: Example plugin demonstrating the plugin system
+author: White-Label Team
+tags:
+- example
+- template
+python_dependencies: []
+plugin_dependencies: {}
+# Declared capabilities. This plugin reaches nothing and reads nothing, and
+# says so explicitly: an empty block is a statement, a missing block only means
+# the manifest predates the mechanism. See mkdocs-site/docs/plugins/packaging.md.
+permissions:
+  network:
+    egress: []
+  tools: []
+  secrets: []
+  filesystem: []
+integrity_sha256: e4d754c1a2967d5ae95b8fee0fafa0bdd1c668340de80f13a5725008f541ec59
+hash_surface_version: 5

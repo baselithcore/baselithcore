@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 
-from core.api._plugin_runtime import PluginRuntimeHooks
-from core.plugins import PluginState
+from baselith.core.api._plugin_runtime import PluginRuntimeHooks
+from baselith.core.plugins import PluginState
 
 
 class _Lifecycle:

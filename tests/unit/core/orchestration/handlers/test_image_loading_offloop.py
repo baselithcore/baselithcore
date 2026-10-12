@@ -10,8 +10,10 @@ from __future__ import annotations
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
-from core.orchestration.handlers.multimodal_reasoning import MultiModalReasoningHandler
-from core.services.vision.models import ImageContent
+from baselith.core.orchestration.handlers.multimodal_reasoning import (
+    MultiModalReasoningHandler,
+)
+from baselith.core.services.vision.models import ImageContent
 
 
 def _tracking_from_file(loaded: list[int]):
@@ -29,7 +31,7 @@ async def test_multimodal_extract_images_loads_files_off_loop(monkeypatch):
     )
     loaded: list[int] = []
     monkeypatch.setattr(
-        "core.orchestration.handlers.multimodal_reasoning.ImageContent.from_file",
+        "baselith.core.orchestration.handlers.multimodal_reasoning.ImageContent.from_file",
         _tracking_from_file(loaded),
     )
 
@@ -51,7 +53,7 @@ async def test_multimodal_extract_images_tolerates_failures(monkeypatch):
         raise OSError("unreadable")
 
     monkeypatch.setattr(
-        "core.orchestration.handlers.multimodal_reasoning.ImageContent.from_file",
+        "baselith.core.orchestration.handlers.multimodal_reasoning.ImageContent.from_file",
         _boom,
     )
 
@@ -60,7 +62,7 @@ async def test_multimodal_extract_images_tolerates_failures(monkeypatch):
 
 
 async def test_vision_handler_loads_files_off_loop(monkeypatch):
-    from core.orchestration.handlers.vision import VisionHandler
+    from baselith.core.orchestration.handlers.vision import VisionHandler
 
     handler = VisionHandler()
     handler.vision_service = MagicMock()
@@ -71,7 +73,7 @@ async def test_vision_handler_loads_files_off_loop(monkeypatch):
     )
     loaded: list[int] = []
     monkeypatch.setattr(
-        "core.orchestration.handlers.vision.ImageContent.from_file",
+        "baselith.core.orchestration.handlers.vision.ImageContent.from_file",
         _tracking_from_file(loaded),
     )
 

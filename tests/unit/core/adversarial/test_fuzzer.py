@@ -1,5 +1,5 @@
-from core.adversarial.fuzzer import PromptFuzzer
-from core.adversarial.types import AttackCategory
+from baselith.core.adversarial.fuzzer import PromptFuzzer
+from baselith.core.adversarial.types import AttackCategory
 
 
 def test_fuzzer_initialization():

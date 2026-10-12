@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
-from core.privacy.consent import ConsentRecord, ConsentService
-from core.privacy.provider import DataProviderRegistry, DictDataProvider
-from core.privacy.service import DataSubjectService
-from core.privacy.types import ObjectionOutcome
+from baselith.core.privacy.consent import ConsentRecord, ConsentService
+from baselith.core.privacy.provider import DataProviderRegistry, DictDataProvider
+from baselith.core.privacy.service import DataSubjectService
+from baselith.core.privacy.types import ObjectionOutcome
 
 
 class _ExportOnlyProvider:
@@ -115,7 +115,7 @@ class TestObjection:
         # Patch the module logger instead of capturing stdout: the global
         # structlog sink is process-wide mutable state, so a stdout assert
         # is order-dependent under random test ordering.
-        with patch("core.privacy.service.logger") as log:
+        with patch("baselith.core.privacy.service.logger") as log:
             record = await svc.record_objection(
                 "s1",
                 processing="newsletter",

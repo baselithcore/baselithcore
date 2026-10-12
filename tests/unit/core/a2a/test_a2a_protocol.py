@@ -1,4 +1,4 @@
-from core.a2a.protocol import (
+from baselith.core.a2a.protocol import (
     A2AMessage,
     A2AMethod,
     A2ARequest,

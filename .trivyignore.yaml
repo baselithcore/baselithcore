@@ -44,8 +44,8 @@ vulnerabilities:
   #   * Blast radius on core: uv.lock records two transformers resolutions
   #     because `huggingface` and `mineru` are declared conflicting extras in
   #     [tool.uv].conflicts. The `huggingface` branch — the one core imports
-  #     from (core/nlp/__init__.py,
-  #     core/services/llm/providers/huggingface_provider.py) — resolves
+  #     from (baselith/core/nlp/__init__.py,
+  #     baselith/core/services/llm/providers/huggingface_provider.py) — resolves
   #     transformers 5.14.1 and is unaffected by any of them — it is already
   #     above every fixed version named below.
   #
@@ -72,7 +72,7 @@ vulnerabilities:
       CVE-2026-4372: mineru[pipeline] caps transformers<5.0.0. Mitigating
       control on the core path — huggingface_trust_remote_code defaults to
       False and emits a security warning when enabled
-      (core/config/services.py) — and the core huggingface branch resolves
+      (baselith/core/config/services.py) — and the core huggingface branch resolves
       transformers 5.14.1, which carries the fix.
     expired_at: 2026-10-29
   - id: CVE-2026-9856
@@ -83,7 +83,7 @@ vulnerabilities:
       name escapes the target directory and writes arbitrary files. Fixed in
       5.10.0, which the mineru cap (<5.0.0) puts out of reach — same structural
       block as CVE-2026-4372 and CVE-2026-5241 above. Two things bound it
-      further. Reachability: nothing in core/, plugins/, sdk/ or scripts/ calls
+      further. Reachability: nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ calls
       save_pretrained at all, so the vulnerable entry point is not exercised by
       this project — only by mineru's own pipeline, over documents already on
       local disk. Blast radius: in uv.lock every dependency edge of the 4.57.6
@@ -131,7 +131,7 @@ vulnerabilities:
       (2026-09-09) shipped without them. It only falls outside the advisory's
       "<= 1.14.0" range, so bumping to it would silence the scanner without
       fixing anything — the lock stays at 1.14.0 and the risk stays declared.
-      Reachability: nothing in core/, plugins/, sdk/ or scripts/ imports
+      Reachability: nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ imports
       accelerate. It is reached only indirectly, by transformers'
       from_pretrained(..., device_map=...) in the local HuggingFace provider,
       which needs BOTH the `huggingface` extra installed AND
@@ -144,9 +144,13 @@ vulnerabilities:
       trust boundary the codebase already draws around model loading with
       LLM_HUGGINGFACE_TRUST_REMOTE_CODE (default false), which grants a
       strictly stronger capability (RCE) than this arbitrary-file-read.
+      Re-argued 2026-10-11: still no patched version. The advisory range is
+      still "<= 1.14.0" with no fix, both upstream PRs remain closed unmerged,
+      and 1.15.0 is still the latest release, without them. Reachability and
+      blast radius are unchanged.
       Re-argue at expiry: check the advisory for a first patched version and
       re-lock to it the day one exists.
-    expired_at: 2026-10-09
+    expired_at: 2026-11-10
 
   # ----------------------------------------------------------------
   # pip's own vendored tree — visible only since pip 26 ships an SBOM
@@ -163,7 +167,7 @@ vulnerabilities:
   #
   # Why pip is in the image at all, and cannot simply be dropped: the runtime
   # pip is what `baselith plugin deps install` runs, via `sys.executable -m
-  # pip` (core/marketplace/installer.py). The Dockerfile upgrades it to
+  # pip` (baselith/core/marketplace/installer.py). The Dockerfile upgrades it to
   # >=26.2.0 because 25.0.1 carries five advisories on exactly that code path
   # (CVE-2025-8869, CVE-2026-3219, CVE-2026-6357, CVE-2026-8643,
   # CVE-2026-13346 — symlink and archive handling during wheel installation,
@@ -185,7 +189,7 @@ vulnerabilities:
       vendor.txt to msgpack==1.2.1, so the next release closes this without
       any change here. Blast radius: the single consumer is
       pip/_vendor/cachecontrol/serialize.py, which deserialises pip's OWN HTTP
-      cache. Nothing in core/, plugins/, sdk/ or scripts/ imports msgpack, and
+      cache. Nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ imports msgpack, and
       the image installs no other copy. Reaching the vulnerable path means
       writing crafted msgpack into pip's cache directory first, which is
       already write access as the running user; production runs as appuser on
@@ -203,7 +207,7 @@ vulnerabilities:
       reported clean. Blast radius: the vendored copy is used only by pip's
       own downloads, i.e. `baselith plugin deps install`, and the proxy
       override matters only where an operator has configured an HTTPS proxy
-      for that pip. Nothing in core/, plugins/, sdk/ or scripts/ imports pip's
+      for that pip. Nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ imports pip's
       vendored copy. Same shape and same expiry as GHSA-6v7p-g79w-8964: no
       `paths`, because SBOM-derived components carry no PkgPath. Re-evaluate
       at expiry: if a pip release vendors urllib3 >=2.8.0, drop all three

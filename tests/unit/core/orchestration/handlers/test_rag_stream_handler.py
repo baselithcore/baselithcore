@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.handlers.rag_stream import StandardRagStreamHandler
+from baselith.core.orchestration.handlers.rag_stream import StandardRagStreamHandler
 
 
 class _FakeEmbedder:
@@ -89,7 +89,7 @@ async def test_yields_not_found_message_without_documents():
 
 
 def test_orchestrator_registers_stream_handler_for_default_intent():
-    from core.orchestration.orchestrator import Orchestrator
+    from baselith.core.orchestration.orchestrator import Orchestrator
 
     orch = Orchestrator()
     assert orch.has_stream_handler("qa_docs") is True

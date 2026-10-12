@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.services.llm.stream_events import (
+from baselith.core.services.llm.stream_events import (
     StreamEnd,
     TextDelta,
     ToolCallDelta,
     ToolCallStarted,
     generate_stream_events,
 )
-from core.services.llm.tool_calling import LLMResult, LLMToolSpec, ToolCall
+from baselith.core.services.llm.tool_calling import LLMResult, LLMToolSpec, ToolCall
 
 TOOLS = [
     LLMToolSpec(name="search", description="Search", parameters={"type": "object"})
@@ -134,7 +134,9 @@ class FakeSDKStream:
 
 
 async def test_anthropic_provider_maps_sdk_events(monkeypatch):
-    from core.services.llm.providers.anthropic_provider import AnthropicProvider
+    from baselith.core.services.llm.providers.anthropic_provider import (
+        AnthropicProvider,
+    )
 
     # Fully constructed (no network: the fake client below replaces the SDK's
     # before any call is made).
@@ -205,7 +207,7 @@ async def test_streamed_max_tokens_marks_the_result_truncated():
 
 
 async def test_streamed_refusal_follows_the_same_policy():
-    from core.services.llm.errors import LLMRefusalError
+    from baselith.core.services.llm.errors import LLMRefusalError
 
     provider = NativeStreamProvider(
         [
@@ -238,14 +240,14 @@ async def test_a_streamed_refusal_is_accounted_for_before_it_raises():
     """A refusal was generated and billed — the spend must not vanish."""
     from unittest.mock import patch
 
-    from core.services.llm.errors import LLMRefusalError
+    from baselith.core.services.llm.errors import LLMRefusalError
 
     provider = NativeStreamProvider(
         [StreamEnd(LLMResult(stop_reason="refusal", tokens_used=120))]
     )
     charged: list[tuple] = []
     with patch(
-        "core.orchestration.budget_context.charge_llm_cost",
+        "baselith.core.orchestration.budget_context.charge_llm_cost",
         side_effect=lambda *a, **kw: charged.append(a),
     ):
         with pytest.raises(LLMRefusalError):
@@ -269,7 +271,7 @@ async def test_truncation_is_logged_once_not_twice():
     """The policy runs in exactly one place on the streamed path."""
     from unittest.mock import patch
 
-    from core.services.llm import stop_reasons
+    from baselith.core.services.llm import stop_reasons
 
     provider = NativeStreamProvider(
         [StreamEnd(LLMResult(text="half", stop_reason="max_tokens"))]

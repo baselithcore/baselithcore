@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from core.auth.oauth import InvalidClientError, InvalidGrantError, InvalidScopeError
+from baselith.core.auth.oauth import (
+    InvalidClientError,
+    InvalidGrantError,
+    InvalidScopeError,
+)
 
 
 def test_invalid_grant_serializes_to_rfc_shape() -> None:

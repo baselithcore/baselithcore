@@ -6,16 +6,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import core.config.security as security_config_module
-import core.middleware.security as security_manager_module
-from core.middleware.rate_limiter import RateLimiter
+import baselith.core.config.security as security_config_module
+import baselith.core.middleware.security as security_manager_module
+from baselith.core.middleware.rate_limiter import RateLimiter
 
 SCRAPE = ("prometheus", "scrape-only-password-0123456789")
 ADMIN = ("admin", "admin-password-0123456789abcdef")
 
 
 def _build_app() -> FastAPI:
-    from plugins.api_routers import metrics as metrics_module
+    from baselith.plugins.api_routers import metrics as metrics_module
 
     app = FastAPI()
     app.include_router(metrics_module.router)
@@ -57,7 +57,7 @@ def two_credentials(monkeypatch, fresh_security_config):
 
 
 def _app_with_admin() -> FastAPI:
-    from plugins.api_routers import admin as admin_module
+    from baselith.plugins.api_routers import admin as admin_module
 
     app = _build_app()
     app.include_router(admin_module.router)
@@ -105,7 +105,7 @@ def test_metrics_uses_multiprocess_registry(
 # --- OpenMetrics negotiation -------------------------------------------------
 #
 # The HTTP and GenAI histograms attach a ``trace_id`` exemplar to every sampled
-# observation (``core.observability.metric_context``). Exemplars only exist in
+# observation (``baselith.core.observability.metric_context``). Exemplars only exist in
 # the OpenMetrics exposition format; the Prometheus text format has no syntax
 # for them, so serving text/plain unconditionally threw away the entire feature
 # — the data was recorded and then dropped on the way out.
@@ -122,7 +122,7 @@ def exemplar_registry(monkeypatch):
     """Point the router at a registry holding one exemplar-bearing bucket."""
     from prometheus_client import CollectorRegistry, Histogram
 
-    from plugins.api_routers import metrics as metrics_module
+    from baselith.plugins.api_routers import metrics as metrics_module
 
     registry = CollectorRegistry()
     histogram = Histogram(

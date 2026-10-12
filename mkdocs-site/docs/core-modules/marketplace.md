@@ -3,7 +3,7 @@ title: Marketplace
 description: Plugin discovery, installation, validation, and publishing
 ---
 
-The `core/marketplace` module is the discovery and management engine for
+The `baselith/core/marketplace` module is the discovery and management engine for
 framework extensions. It powers the `baselith plugin marketplace` CLI:
 searching and listing the remote registry, installing plugins from Git over
 HTTPS, validating downloaded directories, and publishing a local plugin to the
@@ -28,7 +28,7 @@ graph TB
 ### Module structure
 
 ```text
-core/marketplace/
+baselith/core/marketplace/
 ├── __init__.py       # Public exports
 ├── models.py         # MarketplacePlugin, PluginCategory, PluginStatus, RegistryData, PluginReview
 ├── registry.py       # PluginRegistry — discovery + caching
@@ -38,19 +38,19 @@ core/marketplace/
 └── auth.py           # CredentialsManager + AuthService (CLI credentials)
 ```
 
-!!! note "Configuration lives in `core/config`"
+!!! note "Configuration lives in `baselith/core/config`"
     The marketplace has no `client.py`/`config.py` of its own. All URLs and
-    cache TTLs come from `PluginConfig` (`core/config/plugins.py`), accessed
+    cache TTLs come from `PluginConfig` (`baselith/core/config/plugins.py`), accessed
     via `get_plugin_config()`.
 
 ---
 
 ## Public API
 
-Exported from `core.marketplace`:
+Exported from `baselith.core.marketplace`:
 
 ```python
-from core.marketplace import (
+from baselith.core.marketplace import (
     PluginRegistry,
     MarketplacePlugin,
     PluginCategory,
@@ -64,14 +64,14 @@ from core.marketplace import (
 )
 ```
 
-`PluginPublisher` lives in `core.marketplace.publisher`; `CredentialsManager`
-and `AuthService` live in `core.marketplace.auth`.
+`PluginPublisher` lives in `baselith.core.marketplace.publisher`; `CredentialsManager`
+and `AuthService` live in `baselith.core.marketplace.auth`.
 
 ---
 
 ## Data models
 
-`core/marketplace/models.py` defines the Pydantic models exchanged with the
+`baselith/core/marketplace/models.py` defines the Pydantic models exchanged with the
 registry.
 
 ### `MarketplacePlugin`
@@ -110,11 +110,11 @@ Metadata for a single plugin in the registry.
 
 ## PluginRegistry
 
-`core/marketplace/registry.py` — the discovery client. Fetches and caches the
+`baselith/core/marketplace/registry.py` — the discovery client. Fetches and caches the
 remote registry, then provides listing and search.
 
 ```python
-from core.marketplace import PluginRegistry, PluginCategory
+from baselith.core.marketplace import PluginRegistry, PluginCategory
 
 registry = PluginRegistry()
 
@@ -143,10 +143,10 @@ results = await registry.search(query="scraper", force=False)
 
 ## PluginInstaller
 
-`core/marketplace/installer.py` — installs and removes plugins on disk.
+`baselith/core/marketplace/installer.py` — installs and removes plugins on disk.
 
 ```python
-from core.marketplace import PluginInstaller
+from baselith.core.marketplace import PluginInstaller
 
 installer = PluginInstaller()
 result = await installer.install(plugin, branch="main")
@@ -196,14 +196,14 @@ same path-containment guard).
 
 ## PluginValidator
 
-`core/marketplace/validator.py` — validates a plugin directory's structure and
+`baselith/core/marketplace/validator.py` — validates a plugin directory's structure and
 manifest before install/publish.
 
 ```python
 from pathlib import Path
-from core.marketplace import PluginValidator
+from baselith.core.marketplace import PluginValidator
 
-result = PluginValidator().validate(Path("plugins/example-plugin"))
+result = PluginValidator().validate(Path("baselith/plugins/example-plugin"))
 if not result.is_valid:
     for issue in result.errors:
         print(issue.level, issue.message)
@@ -227,15 +227,15 @@ When a valid manifest is present, its fields are extracted into a
 
 ## PluginPublisher
 
-`core/marketplace/publisher.py` — packages a local plugin and submits it to the
+`baselith/core/marketplace/publisher.py` — packages a local plugin and submits it to the
 official marketplace hub.
 
 ```python
-from core.marketplace.publisher import PluginPublisher
+from baselith.core.marketplace.publisher import PluginPublisher
 
 publisher = PluginPublisher()
 result = await publisher.publish(
-    plugin_path="plugins/example-plugin",
+    plugin_path="baselith/plugins/example-plugin",
     auth_token="<jwt>",        # or admin_key="<legacy key>"
 )
 ```
@@ -244,7 +244,7 @@ Publish flow:
 
 1. **Validate** the directory with `PluginValidator`; abort on errors.
 2. **Compute the integrity hash** over the shipped, executable surface
-   (`core.plugins.integrity.compute_plugin_hash`) and inject it into the
+   (`baselith.core.plugins.integrity.compute_plugin_hash`) and inject it into the
    manifest that ships in the archive. Since 0.27 that surface includes the
    compiled front-end bundle `ui/dist/**` and any `static/**` assets the
    console serves, so build the UI *before* publishing — see
@@ -267,7 +267,7 @@ Publish flow:
 
 ## Authentication
 
-`core/marketplace/auth.py` manages CLI credentials and remote identity
+`baselith/core/marketplace/auth.py` manages CLI credentials and remote identity
 verification.
 
 ### `CredentialsManager`
@@ -276,7 +276,7 @@ Stores credentials in `~/.baselith/credentials.json` with restrictive
 permissions (directory `0700`, file `0600`).
 
 ```python
-from core.marketplace.auth import CredentialsManager
+from baselith.core.marketplace.auth import CredentialsManager
 
 mgr = CredentialsManager()
 await mgr.save_token(jwt, user_data={"email": "me@example.com"})
@@ -308,7 +308,7 @@ Higher-level helper over `CredentialsManager`:
 ## Configuration
 
 Marketplace URLs and cache behaviour come from `PluginConfig`
-(`core/config/plugins.py`, env prefix `PLUGIN_`):
+(`baselith/core/config/plugins.py`, env prefix `PLUGIN_`):
 
 | Setting | Env var(s) | Default |
 | ------- | ---------- | ------- |
@@ -323,7 +323,7 @@ publish endpoint always targets `OFFICIAL_MARKETPLACE_URL`.
 
 `PLUGIN_PLUGINS_PATH` is also the directory the runtime loads plugins from, so
 a plugin installed there is picked up on the next start. Installs resolve it
-through `core.config.plugins.plugin_install_root()`, which **never writes into
+through `baselith.core.config.plugins.plugin_install_root()`, which **never writes into
 the installed package**: an explicit `PLUGIN_PLUGINS_PATH` is used as given (a
 relative value against the working directory, created if missing); unset, the
 target is `./plugins` under the working directory, created on first install.
@@ -340,9 +340,12 @@ See [Plugins › PluginLoader](plugins.md#pluginloader).
     `BASELITH_MARKETPLACE_ALLOW_HTTP=true` opts in on trusted networks only.
     **SSRF**: the registry host must not resolve to a loopback/private/
     link-local/cloud-metadata address (e.g. `https://169.254.169.254/…`),
-    which would pivot the server into the internal network. Internal
-    registries (on-prem/air-gapped) opt in via
-    `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
+    which would pivot the server into the internal network. The check is
+    the framework's shared guard, `assert_url_safe` from
+    [`baselith.core.security.ssrf`](security.md#ssrf-protection) (it used to
+    go through the now-deprecated `baselith.core.webhooks.ssrf` shim; the
+    behaviour is unchanged). Internal registries (on-prem/air-gapped) opt in
+    via `BASELITH_MARKETPLACE_ALLOW_INTERNAL=true`.
 
 !!! tip "Publish credentials"
     `baselith plugin marketplace publish` resolves its admin key in this

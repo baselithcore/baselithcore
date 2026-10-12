@@ -7,14 +7,18 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.agent import Agent, Crew, Task
-from core.orchestration.budget_context import (
+from baselith.core.agent import Agent, Crew, Task
+from baselith.core.orchestration.budget_context import (
     activate_budget,
     deactivate_budget,
     get_active_budget,
 )
-from core.orchestration.limits import BudgetExceededError, LoopBudget, LoopLimits
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.services.llm.tool_calling import LLMResult
 
 pytestmark = [pytest.mark.unit]
 

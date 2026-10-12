@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[4]
 
 SCRIPT = """
 import sys
-import core.services.inference as inf
-from core.services.inference import EmbeddingService, RerankService, SyncInference
+import baselith.core.services.inference as inf
+from baselith.core.services.inference import EmbeddingService, RerankService, SyncInference
 heavy = [m for m in ("torch", "sentence_transformers", "FlagEmbedding", "transformers") if m in sys.modules]
 print("HEAVY:" + ",".join(heavy))
 """
@@ -42,7 +42,7 @@ def test_detector_sees_torch_when_it_is_imported() -> None:
     detector, not the wheel.
     """
     probe = SCRIPT.replace(
-        "import core.services.inference as inf",
+        "import baselith.core.services.inference as inf",
         "import types\nsys.modules['torch'] = types.ModuleType('torch')",
     )
     assert _heavy_modules(probe).startswith("HEAVY:torch")
@@ -55,8 +55,8 @@ def test_no_torch_after_importing_the_inference_services() -> None:
 NO_QDRANT = """
 import sys
 sys.modules["qdrant_client"] = None  # a base install: no [qdrant] extra
-from core.services.inference import shutdown_sync_inference, EmbeddingService
-from core.services.inference import RerankService, SyncInference, InferenceError
+from baselith.core.services.inference import shutdown_sync_inference, EmbeddingService
+from baselith.core.services.inference import RerankService, SyncInference, InferenceError
 shutdown_sync_inference()
 print("QDRANT:" + str("qdrant_client" in sys.modules and sys.modules["qdrant_client"] is not None))
 """
@@ -70,7 +70,7 @@ def test_inference_imports_and_shuts_down_without_qdrant_client() -> None:
 
 def test_package_import_does_not_load_qdrant_client() -> None:
     probe = (
-        "import sys\nimport core.services.inference\n"
+        "import sys\nimport baselith.core.services.inference\n"
         "print('QDRANT:' + str('qdrant_client' in sys.modules))"
     )
     assert _heavy_modules(probe) == "QDRANT:False"
@@ -79,8 +79,8 @@ def test_package_import_does_not_load_qdrant_client() -> None:
 def test_qdrant_runtime_explains_the_missing_extra() -> None:
     probe = (
         "import sys\nsys.modules['qdrant_client'] = None\n"
-        "from core.config.inference import QdrantServerConfig\n"
-        "from core.services.inference import QdrantRuntime, InferenceConfigError\n"
+        "from baselith.core.config.inference import QdrantServerConfig\n"
+        "from baselith.core.services.inference import QdrantRuntime, InferenceConfigError\n"
         "try:\n"
         "    QdrantRuntime.open(QdrantServerConfig(url='http://qdrant:6333'))\n"
         "except InferenceConfigError as exc:\n"
@@ -90,7 +90,7 @@ def test_qdrant_runtime_explains_the_missing_extra() -> None:
 
 
 def test_lazy_exports_and_all_stay_in_step() -> None:
-    import core.services.inference as inf
+    import baselith.core.services.inference as inf
 
     assert sorted(inf._EXPORTS) == sorted(inf.__all__)
     for name in inf.__all__:

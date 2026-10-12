@@ -3,14 +3,14 @@ title: Plugin System
 description: Registry, lifecycle, loader, and plugin metrics
 ---
 
-The `core/plugins` module manages the complete lifecycle of plugins within the system, providing a robust framework for extension and modularity.
+The `baselith/core/plugins` module manages the complete lifecycle of plugins within the system, providing a robust framework for extension and modularity.
 
 ---
 
 ## Module Structure
 
 !!! info "Exports resolve on first access"
-    `__init__.py` maps each exported name to the submodule that defines it and resolves it on first read ([PEP 562](https://peps.python.org/pep-0562/), via `core._lazy.lazy_exports`). Import sites are unchanged — `from core.plugins import SkillResult` and `core.plugins.loader` both still work — but importing one name no longer costs the whole package: reaching `SkillResult` used to load 955 modules and now loads 226.
+    `__init__.py` maps each exported name to the submodule that defines it and resolves it on first read ([PEP 562](https://peps.python.org/pep-0562/), via `baselith.core._lazy.lazy_exports`). Import sites are unchanged — `from baselith.core.plugins import SkillResult` and `baselith.core.plugins.loader` both still work — but importing one name no longer costs the whole package: reaching `SkillResult` used to load 955 modules and now loads 226.
 
 Adding an export means adding it to **both** `_EXPORTS` and the literal
 `__all__`. A test enforces that the two describe the same surface, and the
@@ -18,7 +18,7 @@ public API surface gate reads only the literal. See
 [import-time laziness](../advanced/lazy-loading.md#import-time-laziness).
 
 ```text
-core/plugins/
+baselith/core/plugins/
 ├── __init__.py           # Public exports
 ├── interface.py          # Base Plugin class + manifest loading/validation
 ├── manifest_model.py     # PluginManifestModel — the strict manifest schema
@@ -69,7 +69,7 @@ author: "Your Name"
 ```
 
 ```python title="plugins/my-plugin/plugin.py"
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 class MyPlugin(Plugin):
     """Example Plugin implementation."""
@@ -110,7 +110,7 @@ for the full model.
 ### Runtime data directory
 
 Plugin code is replaced as a unit when the plugin is updated, so a plugin never
-writes state into its own directory. `core.plugins.data_dir("<name>")` returns
+writes state into its own directory. `baselith.core.plugins.data_dir("<name>")` returns
 `$BASELITH_PLUGIN_DATA_DIR/<name>` (default `data/plugins/<name>` under the
 working directory) and creates it on first use; pass `create=False` to only
 compute the path. The name must be a single segment of letters, digits, `_` or
@@ -165,7 +165,7 @@ Mixins allow plugins to expose specific capabilities, such as Agents, APIs, or G
 Use this mixin for plugins that provide agents.
 
 ```python
-from core.plugins import AgentPlugin, PluginMetadata
+from baselith.core.plugins import AgentPlugin, PluginMetadata
 
 class MyPlugin(AgentPlugin):
     def create_agent(self, **kwargs) -> MyAgent:
@@ -189,7 +189,7 @@ class MyPlugin(AgentPlugin):
 Use this mixin to expose REST API endpoints via FastAPI.
 
 ```python
-from core.plugins import Plugin, RouterPlugin
+from baselith.core.plugins import Plugin, RouterPlugin
 from fastapi import APIRouter
 
 class MyPlugin(Plugin, RouterPlugin):
@@ -231,7 +231,7 @@ Use this mixin to extend the system's Knowledge Graph schema.
 **dicts** (each with a `name` plus its properties):
 
 ```python
-from core.plugins import GraphPlugin
+from baselith.core.plugins import GraphPlugin
 
 class MyPlugin(GraphPlugin):
     def register_entity_types(self) -> list[dict]:
@@ -259,7 +259,7 @@ must instead override the `setup_app_middleware` **classmethod**, which the
 factory invokes at app construction time:
 
 ```python
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 class MyPlugin(Plugin):
     @classmethod
@@ -268,7 +268,7 @@ class MyPlugin(Plugin):
         app.add_middleware(MyASGIMiddleware)
 ```
 
-Discovery (`core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
+Discovery (`baselith/core/plugins/app_setup.py`, `apply_plugin_app_middleware`) is
 synchronous and **best-effort**. It walks the same plugin set the async loader
 discovers — the `PLUGIN_PLUGINS_PATH` root (with verified overlay entries
 swapped in) plus the plugins installed packages advertise in the
@@ -312,25 +312,25 @@ restart — its middleware is then added at app construction.
 To keep plugins consistent, the core exposes domain-agnostic building blocks
 plugins should reuse instead of reimplementing:
 
-- **`core.registries.BaseRegistry[T]`** — thread-safe, name-keyed
+- **`baselith.core.registries.BaseRegistry[T]`** — thread-safe, name-keyed
   `register` / `get` / `require` / `list` / `remove` registry. Keys come from an
   explicit `name=`, a `key=` callable, or the item's `.name` attribute.
-- **`core.exceptions`** — shared hierarchy rooted at `BaselithError`:
+- **`baselith.core.exceptions`** — shared hierarchy rooted at `BaselithError`:
   `PluginError` (+ `PluginInitError`, `PluginConfigError`, `PluginIntegrityError`,
   `PluginDependencyError`) and `RegistryError` (+ `DuplicateRegistrationError`,
   `ItemNotFoundError`). Subclass the closest family rather than raising bare
   `Exception`.
-- **`core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
+- **`baselith.core.plugins.result.SkillResult`** (`ok`/`fail`/`partial`) — the canonical
   tool/skill return envelope.
-- **`core.connectors`** — the contract for integrations with external systems:
+- **`baselith.core.connectors`** — the contract for integrations with external systems:
   SSRF-guarded, retrying, circuit-broken HTTP, one error hierarchy, per-tenant
   credential resolution, audited agent/MCP tools and DORA vendor declaration.
   Contribute connectors through `get_connectors()`; see
   [Connectors](connectors.md).
 
 ```python
-from core.registries import BaseRegistry
-from core.exceptions import DuplicateRegistrationError
+from baselith.core.registries import BaseRegistry
+from baselith.core.exceptions import DuplicateRegistrationError
 
 handlers: BaseRegistry[Handler] = BaseRegistry()
 handlers.register(my_handler)            # keyed by my_handler.name
@@ -346,7 +346,7 @@ directly (the app factory wires the shared instance into the orchestrator and AP
 gateway at boot):
 
 ```python
-from core.plugins import PluginRegistry
+from baselith.core.plugins import PluginRegistry
 
 registry = PluginRegistry()
 
@@ -368,7 +368,7 @@ The registry also aggregates contributions across all plugins via
 `get_all_agents()`, `get_all_routers()`, `get_all_intent_patterns()`,
 `get_all_entity_types()`, `get_all_flow_handlers()`, and `get_all_static_paths()`.
 Connectors returned by `get_connectors()` go to the connector registry
-(`core.connectors.get_connector_registry()`) with the plugin as owner, and are
+(`baselith.core.connectors.get_connector_registry()`) with the plugin as owner, and are
 withdrawn when the plugin unloads.
 
 ### Thread Safety
@@ -386,10 +386,10 @@ loaded plugins are registered into — `PluginLoader(plugins_dir, registry,
 lifecycle_manager=None)`; the optional `lifecycle_manager` receives state
 transitions.
 
-The application runtime (`core/api/lifespan.py`) builds its loader and its
+The application runtime (`baselith/core/api/lifespan.py`) builds its loader and its
 `ResourceAnalyzer` on `PLUGIN_PLUGINS_PATH` (`PluginConfig.plugins_path`),
 the same root [marketplace](marketplace.md#configuration) installs write to.
-One resolver, `core.config.plugins.resolve_plugins_root`, turns the setting
+One resolver, `baselith.core.config.plugins.resolve_plugins_root`, turns the setting
 into a directory for every reader — the loader, the middleware pre-discovery
 above, the plugin-update service and `baselith plugin-updater`:
 
@@ -412,14 +412,14 @@ So that a project's own `./plugins` does not hide the plugins the framework
 ships, every scanner (the loader, the middleware pre-discovery, the
 `ResourceAnalyzer` and `baselith doctor`) also scans the installed
 distribution's bundled `plugins` package as a second, lower-precedence root
-(`core.plugins.discovery.with_bundled_plugins`): a same-named directory under
+(`baselith.core.plugins.discovery.with_bundled_plugins`): a same-named directory under
 the configured root wins, with a warning. The bundled root is added only when
 it lives in `site-packages` and is not the configured root itself — a source
 checkout keeps scanning just its own tree.
 
 Scanning a bundled plugin is not running it: plugins shipped inside the
 installed wheel are **opt-in** (see [Configuration](#configuration)).
-`core.plugins.discovery.is_bundled_install_dir(path)` is the test — true only
+`baselith.core.plugins.discovery.is_bundled_install_dir(path)` is the test — true only
 for a directory under the distribution's `plugins` package in `site-packages`,
 whether it is reached as the second root or as the configured root itself (a
 `pip install` started from a directory with no `./plugins`). A source checkout,
@@ -428,7 +428,7 @@ an editable install, the user's own root, an overlay entry and a
 
 ```python
 from pathlib import Path
-from core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins import PluginLoader, PluginRegistry
 
 registry = PluginRegistry()
 loader = PluginLoader(Path("plugins"), registry)
@@ -446,11 +446,11 @@ plugin = await loader.load_plugin(Path("plugins/weather-agent"))
 `load_all_plugins(configs=None)` takes an optional map of plugin name → config
 dict and returns **how many** plugins loaded, not the instances — those are in
 the registry. One plugin that fails to instantiate is logged and skipped; it
-never aborts the rest of the boot (`core/plugins/bulk_load.py`).
+never aborts the rest of the boot (`baselith/core/plugins/bulk_load.py`).
 
 ### Discovery sources
 
-`discover_plugins()` merges two sources (`core/plugins/discovery.py`):
+`discover_plugins()` merges two sources (`baselith/core/plugins/discovery.py`):
 
 1. the **directory scan** under the loader's plugins root, and
 2. every installed distribution advertising the **`baselith.plugins` entry-point
@@ -461,12 +461,12 @@ installed package is ignored and a warning names both paths. Broken distribution
 metadata, an entry point that no longer imports, and a package without a manifest
 are each logged and skipped — discovery can never stop the process from starting.
 
-A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory). `core.plugins._overlay_guard.overlay_refusal_code` returns the refusal as a structured `OverlayRefusal` (`version_invalid`, `incompatible_core`, `not_newer`, `bundled_unreadable`); `overlay_refusal` keeps the historical string form, in which an unreadable bundled version still reads `not_newer: ...`.
+A verified overlay entry replaces the bundled directory only when its version is strictly greater and its core bounds accept the running core; see [Plugin Updates › Overlay directory](plugin-updates.md#overlay-directory). `baselith.core.plugins._overlay_guard.overlay_refusal_code` returns the refusal as a structured `OverlayRefusal` (`version_invalid`, `incompatible_core`, `not_newer`, `bundled_unreadable`); `overlay_refusal` keeps the historical string form, in which an unreadable bundled version still reads `not_newer: ...`.
 
 `BASELITH_DISABLE_PLUGIN_ENTRY_POINTS=true` (default `false`) turns the
 entry-point source (the second one above) off entirely.
 
-`core/api/lifespan.py` hands the merged list to `ResourceAnalyzer.discover_plugins(
+`baselith/core/api/lifespan.py` hands the merged list to `ResourceAnalyzer.discover_plugins(
 extra_dirs=...)`, so entry-point plugins contribute routes, UI tabs and flow
 handlers exactly like directory ones — the two paths cannot disagree about which
 plugins exist. See
@@ -475,16 +475,16 @@ plugins exist. See
 ### Overlay directory (verified updates)
 
 When `BASELITH_PLUGIN_OVERLAY_DIR` points at an existing directory,
-`core/plugins/overlay.py` registers each accepted entry `<overlay>/<name>` as
+`baselith/core/plugins/overlay.py` registers each accepted entry `<overlay>/<name>` as
 the package `plugins.<name>` before any plugin module is imported
-(`plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
+(`baselith/plugins/__init__.py` calls `register_overlay_packages()`). Every entry must
 carry a signature that verifies against the trust store regardless of
 `BASELITH_REQUIRE_PLUGIN_SIGNATURES` — against the keys whose `plugins` scope
 covers that entry's name (`load_trust_roots(name)`), so a key scoped to other
 plugins cannot vouch for it — and must pass the newer-than-bundled and
 core-bounds rule above. The entry itself may be a symlink into
 `<overlay>/.store/` (a link pointing elsewhere is refused), but a tree with a
-symlink anywhere below it is refused (`core/plugins/_links.py`), since the hash
+symlink anywhere below it is refused (`baselith/core/plugins/_links.py`), since the hash
 walk does not follow links. A rejected entry is logged and the bundled plugin
 loads instead. An accepted entry's package is registered from the **resolved**
 store directory, not from the link: an update swaps the link atomically while
@@ -503,7 +503,7 @@ restart, never a hot reload. See
 
 ### Which class gets instantiated
 
-`resolve_plugin_class()` (`core/plugins/plugin_class.py`) honours the manifest's
+`resolve_plugin_class()` (`baselith/core/plugins/plugin_class.py`) honours the manifest's
 `entry_point` — `module:Class`, `:Class` or a bare `Class`, with the module half
 resolved inside the plugin's own package. Without one it falls back to scanning the
 executed module for a concrete `Plugin` subclass, and **more than one candidate is
@@ -514,7 +514,7 @@ accepted wherever it was defined.
 
 ### The manifest schema is strict
 
-`PluginManifestModel` (`core/plugins/manifest_model.py`) is `extra="forbid"` and
+`PluginManifestModel` (`baselith/core/plugins/manifest_model.py`) is `extra="forbid"` and
 defines the whole contract. `validate_manifest_data()` checks the key set *before*
 Pydantic so it can name every offending key at once with a `difflib` suggestion:
 
@@ -540,7 +540,7 @@ Three keys that were previously read and silently dropped are now carried on
 `PluginMetadata`: `entry_point`, `id` (as `.plugin_id`) and `repository`.
 
 `PluginMetadata` also carries the two keys the Docker installer reads,
-`frontend` and `health_endpoint` (`core/plugins/_metadata.py`), so
+`frontend` and `health_endpoint` (`baselith/core/plugins/_metadata.py`), so
 `to_dict()` — what `/plugins` and the marketplace see — reports the same
 installation contract the manifest declared instead of dropping it at parse
 time. `frontend` is the build block (`path`, `package_manager`,
@@ -561,7 +561,7 @@ one-click install.
 `name` keys the plugin's routes, `configs/plugins.yaml` entry, env prefix,
 stored data and grants, so it is never renamed for looks; `display_name` is
 what consoles show and what the Backstage exporter uses as the Component and
-API titles (`plugin_title()` in `core/plugins/exporters/component_entity.py`).
+API titles (`plugin_title()` in `baselith/core/plugins/exporters/component_entity.py`).
 Absent, the title is derived from `name` (`my_plugin` → "My Plugin"), and the
 catalog entity name stays the registry name either way.
 
@@ -581,7 +581,7 @@ author who just hit the error finds the remedy in it —
 `'control' (vendor data? declare it as 'x-control')`.
 
 ```python
-from core.plugins import VENDOR_EXTENSION_PREFIX, is_extension_key
+from baselith.core.plugins import VENDOR_EXTENSION_PREFIX, is_extension_key
 
 VENDOR_EXTENSION_PREFIX          # "x-"
 is_extension_key("x-control")    # True
@@ -605,13 +605,13 @@ Two design points are what keep this a namespace rather than a hole:
 Extensions are inside the V5 digest by construction — the surface hashes the whole
 canonicalised manifest minus the three self-referential keys — so editing one
 breaks the signature exactly like editing `permissions` does. Nothing in
-`core/plugins/integrity.py` changed to achieve that. See
+`baselith/core/plugins/integrity.py` changed to achieve that. See
 [Packaging › Vendor extensions](../plugins/packaging.md#vendor-extensions).
 
 ### Plugin Signing & Integrity
 
 Before executing any plugin module, the loader verifies it against the
-`integrity_sha256` declared in its manifest (`core/plugins/integrity.py`,
+`integrity_sha256` declared in its manifest (`baselith/core/plugins/integrity.py`,
 `verify_plugin_integrity`). The hashed surface is everything the plugin
 ships that also executes: `*.py`/`*.pyi` sources, the build/packaging files
 `pip install` trusts (`pyproject.toml`, `setup.cfg`, `MANIFEST.in`,
@@ -645,14 +645,14 @@ posture. Outside production, unsigned plugins load (dev/hot-reload
 convenience).
 
 !!! warning "`APP_ENV=prod` counts as production now"
-    `core/plugins/integrity.py` used to match the literal string `production`
+    `baselith/core/plugins/integrity.py` used to match the literal string `production`
     on its own, so `APP_ENV=prod` disabled the fail-closed default entirely. It
-    now shares `core.utils.runtime_env` with the rest of the framework:
+    now shares `baselith.core.utils.runtime_env` with the rest of the framework:
     `production`, `prod`, `prd` and `live` all harden, and an environment name
     the framework cannot classify hardens too. See [Configuration › Runtime
     environment](config.md#runtime-environment) for the full alias table. The
     module stays stdlib-only — no pydantic import — which is why the helper
-    lives under `core/utils/` rather than in `core/config/`.
+    lives under `baselith/core/utils/` rather than in `baselith/core/config/`.
 
 **The surface is versioned.** `HashSurface` names each generation of the hashed
 set — `V1_SOURCE` (pre-0.17), `V2_BUILD` (0.17–0.26), `V3_SHIPPED` (0.27+),
@@ -684,7 +684,7 @@ under (`read_declared_surface()`). It is **advisory**: it sits outside the diges
 construction, and verification always tries the current surface first and falls back
 through the superseded ones, so tampering with the number buys nothing.
 
-`core.plugins.signing.sign_message` / `verify_message` are the underlying Ed25519
+`baselith.core.plugins.signing.sign_message` / `verify_message` are the underlying Ed25519
 primitives; `sign_plugin_hash` / `verify_plugin_signature` sign the lowercase
 integrity hash through them, and signed plugin releases use them for their
 per-file manifest.
@@ -707,7 +707,7 @@ per-file manifest.
 
 After a plugin is instantiated and before `initialize()` is called, the loader
 runs two admission gates — `compat_gate(plugin, available_versions)` and
-`config_gate(plugin, config)` in `core/plugins/load_gates.py`, thin wrappers
+`config_gate(plugin, config)` in `baselith/core/plugins/load_gates.py`, thin wrappers
 that run the checks below and apply the enforcement flags. Both **fail closed**:
 a plugin whose declarations are not satisfied is skipped, because the manifest is
 the author's own statement of what is safe to run. The matching environment
@@ -715,10 +715,10 @@ variables survive only as explicit *downgrade* flags, for booting a deployment
 while a manifest is corrected.
 
 **Version compatibility** (`check_plugin_compatibility`,
-`core/plugins/version.py`) checks the plugin's
+`baselith/core/plugins/version.py`) checks the plugin's
 declared `min_core_version` / `max_core_version` against the public core release
-the running tree corresponds to (`CORE_VERSION` in `core/_core_version.py`). That
-is the same number as `core._version.__version__` in the core project; a downstream
+the running tree corresponds to (`CORE_VERSION` in `baselith/core/_core_version.py`). That
+is the same number as `baselith.core._version.__version__` in the core project; a downstream
 distribution versions its own `_version.py` independently, and its plugins still
 declare bounds against the public release, so one manifest means the same thing
 on every distribution. The gate also checks each entry in `plugin_dependencies` (a map of
@@ -729,7 +729,7 @@ expressible as one; the comparison result is coerced to an explicit `int` rather
 than relying on `packaging.version.Version`'s untyped `__gt__`/`__lt__`.
 
 **Config schema validation** (`validate_plugin_config`,
-`core/plugins/config_validation.py`) validates the
+`baselith/core/plugins/config_validation.py`) validates the
 user-supplied config against the JSON Schema returned by the plugin's
 `get_config_schema()` (Draft 7). A plugin that declares no schema is a no-op.
 Validation runs in both the single-plugin path and `load_all_plugins`, giving
@@ -743,11 +743,11 @@ authors precise, early feedback instead of an opaque failure during init.
 !!! warning "Disabling a plugin now disables its dependents"
     `plugin_dependencies` are part of the compat gate, so a dependency that is absent
     from the load set is a refusal, not a warning. Turning `browser_agent` off in
-    `configs/plugins.yaml` therefore skips `baselithbot` as well. Either disable the
+    `configs/plugins.yaml` therefore skips every plugin that depends on it as well. Either disable the
     dependents too, or set `BASELITH_ENFORCE_PLUGIN_COMPAT=false` for the duration.
 
 `BASELITH_ENFORCE_PLUGIN_CONFIG` has a **single** reading, owned by
-`core.plugins.config_validation.is_config_enforcement_enabled()` and fail-closed:
+`baselith.core.plugins.config_validation.is_config_enforcement_enabled()` and fail-closed:
 enforcement is on unless the variable is explicitly `false`/`0`/`no`/`off`.
 `load_gates.is_config_gate_enforced()` is an alias of it, kept for existing
 callers. The two used to disagree on an unset environment — the gate fail-closed,
@@ -767,7 +767,7 @@ plugin_dependencies:
 #### Libraries the core stopped installing
 
 `defusedxml`, `email-validator`, `markdown-it-py`, `networkx` and
-`sse-starlette` used to be core dependencies although nothing in `core/` or the
+`sse-starlette` used to be core dependencies although nothing in `baselith/core/` or the
 official plugins imported them; they now live in the `plugin-compat` extra. A
 plugin that imported one without declaring it fails to load with
 `ModuleNotFoundError`, and the loader's error line names the remedy:
@@ -806,7 +806,7 @@ sequenceDiagram
 **Failed activations back off.** "First use" is often an HTTP request to the
 plugin's prefix, which `PluginActivationMiddleware` serves before any
 authentication. A lazy activation that fails (returns `False` or raises) is
-remembered for **60 s** (`core/plugins/_activation_backoff.py`): during that
+remembered for **60 s** (`baselith/core/plugins/_activation_backoff.py`): during that
 window the runtime activator raises `PluginActivationBackoffError` (a
 `RuntimeError`) instead of re-hashing and re-importing the plugin under the
 global activation lock, and the middleware answers `503` with a `Retry-After`
@@ -819,12 +819,12 @@ success clears it.
 
 The loader uses AST-based static analysis to extract plugin metadata without executing
 code, which is crucial for startup performance. The `ResourceAnalyzer` class lives in
-`core.plugins.resource_analyzer` (it is **not** re-exported from the `core.plugins`
+`baselith.core.plugins.resource_analyzer` (it is **not** re-exported from the `baselith.core.plugins`
 package). A convenience function aggregates resource requirements across plugins:
 
 ```python
 from pathlib import Path
-from core.plugins.resource_analyzer import (
+from baselith.core.plugins.resource_analyzer import (
     ResourceAnalyzer,
     analyze_plugin_resources,
 )
@@ -880,7 +880,7 @@ class MyPlugin(Plugin):
 
 With row-level security on (`DB_RLS_ENABLED=true`), `initialize()` runs
 inside [`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope)
-(`core/plugins/init_scope.py`): activation is boot work, not a tenant's
+(`baselith/core/plugins/init_scope.py`): activation is boot work, not a tenant's
 request, so a database call made from it would otherwise be refused with
 `TenantContextError`. A background task started from `initialize()` inherits
 that identity. With RLS off no tenant is bound, as before.
@@ -894,7 +894,7 @@ restarting the server — ideal for development and for the plugin management AP
 wired with the loader, registry, and lifecycle manager:
 
 ```python
-from core.plugins import HotReloadController
+from baselith.core.plugins import HotReloadController
 
 controller = HotReloadController(
     loader=loader,
@@ -926,7 +926,7 @@ directory that happened to match.
 ### Lifecycle events
 
 Each successful (or failed) call also publishes a best-effort notification on
-the core event bus (`core.plugins.lifecycle_events`), so anything watching
+the core event bus (`baselith.core.plugins.lifecycle_events`), so anything watching
 plugin state — a control-plane dashboard, an operator tool — learns about a
 change without polling the registry:
 
@@ -945,7 +945,7 @@ is fire-and-forget: it never raises, and a telemetry failure never affects the
 outcome of the lifecycle operation itself.
 
 ```python
-from core.events.bus import get_event_bus
+from baselith.core.events.bus import get_event_bus
 
 async def on_plugin_activated(data: dict) -> None:
     print(f"{data['plugin']} is now {data['state']}")
@@ -979,7 +979,7 @@ more — a stale upstream, an expired credential, a drained queue — so it can 
 the optional async hook:
 
 ```python
-from core.plugins import Plugin, PluginHealth
+from baselith.core.plugins import Plugin, PluginHealth
 
 class WeatherPlugin(Plugin):
     async def health(self) -> PluginHealth:
@@ -1009,7 +1009,7 @@ The synchronous `health_check()` is unchanged and still callable from any thread
 A plugin that starts its own `asyncio` task used to outlive its own reload: the new
 generation initialized while the old one's loop kept touching shared state. Spawn
 through the registry instead, and the task is owned by the plugin
-(`core/plugins/nursery.py`):
+(`baselith/core/plugins/nursery.py`):
 
 ```python
 task = registry.spawn_task("weather-agent", self._poll_forever())
@@ -1043,7 +1043,7 @@ Monitor plugin lifecycle performance with the `PluginMetricsCollector`. Use the 
 singleton via `get_metrics_collector()`:
 
 ```python
-from core.plugins import get_metrics_collector
+from baselith.core.plugins import get_metrics_collector
 
 collector = get_metrics_collector()
 
@@ -1089,7 +1089,7 @@ legacy-plugin:
   enabled: false     # Disabled
 ```
 
-One reader and one rule (`core.plugins.config_file.read_plugin_configs` /
+One reader and one rule (`baselith.core.plugins.config_file.read_plugin_configs` /
 `plugin_enabled`) decide which plugins run, for discovery, startup
 auto-activation and `baselith plugin sync` alike:
 
@@ -1159,7 +1159,7 @@ Variables defined in the plugin's `.env` file are automatically:
    [environment drift check](config.md#environment-drift) never reports a
    plugin key as a misspelled core setting — even one a letter away from it.
    A plugin that writes a variable into `os.environ` from its own code should
-   call `core.config.register_owned_env(name)` the same way.
+   call `baselith.core.config.register_owned_env(name)` the same way.
 
 #### Two gates: namespace allowlist, then protected-key denylist
 
@@ -1167,7 +1167,7 @@ The `.env` file is read **only after** the plugin passes its integrity check
 (`integrity_sha256`), and symlinked or out-of-directory `.env` files are ignored
 — an untrusted plugin directory cannot inject environment variables into the
 process. What a `.env` may then set is decided by a single shared policy
-(`core.plugins._env`), used identically by the plugin loader and by the public
+(`baselith.core.plugins._env`), used identically by the plugin loader and by the public
 `load_plugin_dotenv()` helper:
 
 1. **Denylist first** (`is_protected_env_key`) — framework-global controls are
@@ -1222,9 +1222,15 @@ Some keys are named by a third party, not by the plugin — `SLACK_SIGNING_SECRE
     Setting `BASELITH_PLUGIN_ENV_LEGACY_DENYLIST=true` restores the old
     denylist-only behaviour (out-of-namespace keys are exported to `os.environ`
     again) for a deployment whose plugins cannot be updated yet. It widens the
-    allowlist only — protected keys stay refused. It is deprecated on
-    introduction and scheduled for removal; the refusal warnings in the log name
-    every key that has to move first.
+    allowlist only — protected keys stay refused.
+    **Timeline:** deprecated on introduction (0.x), **removed in 2.0** — from
+    2.0 the variable is ignored and out-of-namespace keys stay out of
+    `os.environ` unconditionally. Through 1.x it keeps working, and setting it
+    logs a deprecation warning naming the removal version once per process,
+    whether or not any plugin relies on it. The per-plugin refusal warnings in
+    the log name every key that has to move first: rename it into the
+    plugin's `<DIRNAME>_` namespace, or declare it in the manifest's
+    `environment_variables` list.
 
 The denylist (`is_protected_env_key`) covers:
 
@@ -1351,7 +1357,7 @@ and `POST /api/plugins/updates/check` — see
 
 ## SkillResult — canonical tool/skill envelope
 
-`core/plugins/result.py` defines the standard return type for any
+`baselith/core/plugins/result.py` defines the standard return type for any
 plugin-exposed tool, MCP tool, or orchestration handler. Returning a
 raw string from a tool is forbidden — every call resolves to a typed
 envelope with success / data / error fields plus an LLM-safe
@@ -1366,13 +1372,13 @@ envelope with success / data / error fields plus an LLM-safe
 | `fail(message, error_code, ...)` | Build a failed result |
 | `partial(data, message, ...)` | Build a degraded-success result (flagged in metadata) |
 
-The factories also live on the `core.plugins` package surface:
-`from core.plugins import SkillResult, ok, fail, partial`.
+The factories also live on the `baselith.core.plugins` package surface:
+`from baselith.core.plugins import SkillResult, ok, fail, partial`.
 
 ### Example
 
 ```python
-from core.plugins import ok, fail
+from baselith.core.plugins import ok, fail
 
 async def fetch_user(user_id: str):
     record = await db.users.get(user_id)
@@ -1393,12 +1399,12 @@ code consumes the full `data` directly.
 
 ## Declarative SKILL.md catalog
 
-`core/plugins/declarative.py` discovers Markdown files named
+`baselith/core/plugins/declarative.py` discovers Markdown files named
 `SKILL.md` under a set of trusted root directories and exposes them as
 a progressive-disclosure catalog: the agent sees a lightweight index at
 startup and only loads the heavy body when it activates a specific
 skill. Plugins ship skills under `plugins/<name>/skills/**/SKILL.md`;
-`core/plugins/skills_service.py` (`SkillService`) aggregates every
+`baselith/core/plugins/skills_service.py` (`SkillService`) aggregates every
 plugin's root and the orchestrator exposes the catalog plus an
 `activate_skill` tool to the loop — see
 [Declarative Skills](skills.md) for the end-to-end flow, approval gate,
@@ -1414,8 +1420,8 @@ and integrity/signing requirements.
 | `SkillLoadError` | Frontmatter or content failed validation |
 | `SkillSandboxError` | Path escapes the configured roots |
 | `SkillService` | Registry-backed catalog + gated activation (`SkillResult` envelope); `render_catalog(query=)` BM25-pre-filters large catalogs |
-| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers — defined in `core/plugins/skill_scripts.py`, re-exported from `core.plugins` (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
-| `split_frontmatter` | Shared SKILL.md frontmatter parser (also reused by `baselithbot`) |
+| `run_skill_script` / `make_run_skill_script_tool` / `SkillScriptResult` | Sandboxed execution of a skill's bundled `.py` helpers — defined in `baselith/core/plugins/skill_scripts.py`, re-exported from `baselith.core.plugins` (see [Declarative Skills](skills.md#bundled-files-scripts-references-assets)) |
+| `split_frontmatter` | Shared SKILL.md frontmatter parser (reusable by plugin-local skill systems) |
 
 The loader resolves and pins every root, so a malicious symlink or
 prompt-injection attempt cannot escape into the filesystem.
@@ -1451,7 +1457,7 @@ tools: [run_sql, take_backup]
 
 ```python
 from pathlib import Path
-from core.plugins.declarative import DeclarativeSkillLoader
+from baselith.core.plugins.declarative import DeclarativeSkillLoader
 
 loader = DeclarativeSkillLoader([Path(".agent/skills")])
 catalog = loader.discover()      # list[SkillCard], no bodies

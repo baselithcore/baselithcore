@@ -1,4 +1,4 @@
-from plugins.document_sources.docling_reader import normalize_timeline
+from baselith.plugins.document_sources.docling_reader import normalize_timeline
 
 
 def test_normalize_timeline_pairs_event_with_following_month_year() -> None:

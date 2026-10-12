@@ -8,17 +8,17 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.config.webhooks import WebhookConfig
-from core.webhooks.dispatcher import WebhookDispatcher
-from core.webhooks.service import WebhookService
-from core.webhooks.signing import (
+from baselith.core.config.webhooks import WebhookConfig
+from baselith.core.security.ssrf import SsrfError, SsrfPolicy, assert_url_safe
+from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.service import WebhookService
+from baselith.core.webhooks.signing import (
     SIGNATURE_HEADER,
     build_signature_header,
     verify_signature,
 )
-from core.webhooks.ssrf import WebhookSSRFError, validate_webhook_url
-from core.webhooks.store import InMemoryWebhookStore
-from core.webhooks.types import (
+from baselith.core.webhooks.store import InMemoryWebhookStore
+from baselith.core.webhooks.types import (
     DeliveryStatus,
     WebhookEndpoint,
     WebhookEvent,
@@ -97,7 +97,7 @@ class TestSigning:
     def test_default_tolerance_comes_from_config(self, monkeypatch):
         # Regression: WEBHOOK_SIGNATURE_TOLERANCE_SECONDS was declared but the
         # verifier hard-coded 300, so the setting changed nothing.
-        import core.config.webhooks as webhook_config
+        import baselith.core.config.webhooks as webhook_config
 
         body = b"x"
         hdr = build_signature_header("secret", body, timestamp=1000)
@@ -122,21 +122,21 @@ class TestSSRF:
         ["http://127.0.0.1/h", "http://169.254.169.254/latest", "http://0.0.0.0/"],
     )
     def test_blocks_internal(self, url):
-        with pytest.raises(WebhookSSRFError):
-            validate_webhook_url(url)
+        with pytest.raises(SsrfError):
+            assert_url_safe(url)
 
     def test_blocks_bad_scheme(self):
-        with pytest.raises(WebhookSSRFError):
-            validate_webhook_url("ftp://example.com/x")
+        with pytest.raises(SsrfError):
+            assert_url_safe("ftp://example.com/x")
 
     def test_allow_internal_bypasses(self):
-        validate_webhook_url("http://127.0.0.1/h", allow_internal=True)
+        assert_url_safe("http://127.0.0.1/h", SsrfPolicy(allow_internal=True))
 
 
 # === SSRF pinning (anti DNS-rebinding) ===
 class TestSSRFPinning:
     def test_pins_url_to_resolved_public_ip(self, monkeypatch):
-        from core.webhooks import ssrf
+        from baselith.core.security import ssrf
 
         monkeypatch.setattr(
             socket, "getaddrinfo", _fake_getaddrinfo({"example.com": ["93.184.216.34"]})
@@ -148,7 +148,7 @@ class TestSSRFPinning:
         assert host == "example.com"
 
     def test_pins_preserves_port_and_ipv6_brackets(self, monkeypatch):
-        from core.webhooks import ssrf
+        from baselith.core.security import ssrf
 
         monkeypatch.setattr(
             socket,
@@ -160,7 +160,7 @@ class TestSSRFPinning:
         assert host == "example.com"
 
     def test_rebind_to_internal_fails_closed(self, monkeypatch):
-        from core.webhooks import ssrf
+        from baselith.core.security import ssrf
 
         # A public-looking name whose resolution returns an internal address
         # (the DNS-rebinding attack) must be rejected.
@@ -169,11 +169,11 @@ class TestSSRFPinning:
             "getaddrinfo",
             _fake_getaddrinfo({"evil.example.com": ["169.254.169.254"]}),
         )
-        with pytest.raises(WebhookSSRFError):
+        with pytest.raises(SsrfError):
             ssrf.resolve_pinned_target("https://evil.example.com/steal")
 
     def test_any_blocked_address_taints_result(self, monkeypatch):
-        from core.webhooks import ssrf
+        from baselith.core.security import ssrf
 
         # If ANY resolved address is internal, the whole result is rejected.
         monkeypatch.setattr(
@@ -181,7 +181,7 @@ class TestSSRFPinning:
             "getaddrinfo",
             _fake_getaddrinfo({"example.com": ["93.184.216.34", "127.0.0.1"]}),
         )
-        with pytest.raises(WebhookSSRFError):
+        with pytest.raises(SsrfError):
             ssrf.resolve_pinned_target("https://example.com/x")
 
     @pytest.mark.asyncio
@@ -375,7 +375,7 @@ class TestService:
             return httpx.Response(200)
 
         svc = self._service(handler, _config(WEBHOOK_ALLOW_INTERNAL=False))
-        with pytest.raises(WebhookSSRFError):
+        with pytest.raises(SsrfError):
             await svc.register_endpoint("http://169.254.169.254/", "s")
         await svc.aclose()
 

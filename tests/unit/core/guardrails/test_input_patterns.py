@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.guardrails.input_guard import InputGuard
+from baselith.core.guardrails.input_guard import InputGuard
 
 
 @pytest.fixture

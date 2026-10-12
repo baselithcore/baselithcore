@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from core.orchestration.parallel import ParallelToolExecutor, ToolCall
+from baselith.core.orchestration.parallel import ParallelToolExecutor, ToolCall
 
 
 class TestParallelToolExecutor:

@@ -6,7 +6,7 @@ import warnings
 
 import pytest
 
-from core.stability import (
+from baselith.core.stability import (
     DEFAULT_STABILITY,
     PACKAGE_STABILITY,
     STABILITY_ATTRIBUTE,
@@ -24,21 +24,23 @@ class TestStabilityResolution:
     """Which promise governs a given dotted name."""
 
     def test_a_package_resolves_to_its_declared_tier(self) -> None:
-        assert stability_of("core.agent") is Stability.STABLE
-        assert stability_of("core.swarm") is Stability.EXPERIMENTAL
-        assert stability_of("core.agents") is Stability.DEPRECATED
+        assert stability_of("baselith.core.agent") is Stability.STABLE
+        assert stability_of("baselith.core.swarm") is Stability.EXPERIMENTAL
+        assert stability_of("baselith.core.scraper") is Stability.DEPRECATED
 
     def test_a_submodule_inherits_its_package(self) -> None:
-        assert stability_of("core.memory.hybrid_search") is Stability.BETA
+        assert stability_of("baselith.core.memory.hybrid_search") is Stability.BETA
 
     def test_the_most_specific_prefix_wins(self) -> None:
         """A subpackage can be classified apart from its parent."""
-        table = dict(PACKAGE_STABILITY) | {"core.swarm.auction": Stability.BETA}
+        table = dict(PACKAGE_STABILITY) | {
+            "baselith.core.swarm.auction": Stability.BETA
+        }
         original = stability_of.__globals__["PACKAGE_STABILITY"]
         stability_of.__globals__["PACKAGE_STABILITY"] = table
         try:
-            assert stability_of("core.swarm.auction.bid") is Stability.BETA
-            assert stability_of("core.swarm.other") is Stability.EXPERIMENTAL
+            assert stability_of("baselith.core.swarm.auction.bid") is Stability.BETA
+            assert stability_of("baselith.core.swarm.other") is Stability.EXPERIMENTAL
         finally:
             stability_of.__globals__["PACKAGE_STABILITY"] = original
 
@@ -46,7 +48,7 @@ class TestStabilityResolution:
         assert stability_of("baselith") is Stability.STABLE
 
     def test_an_unclassified_name_gets_the_weakest_promise(self) -> None:
-        assert stability_of("core.does_not_exist") is DEFAULT_STABILITY
+        assert stability_of("baselith.core.does_not_exist") is DEFAULT_STABILITY
         assert stability_of("") is DEFAULT_STABILITY
 
 
@@ -82,14 +84,14 @@ class TestSymbolMarkers:
     def test_symbol_tier_falls_back_to_the_module(self) -> None:
         def thing() -> None: ...
 
-        thing.__module__ = "core.swarm.auction"
+        thing.__module__ = "baselith.core.swarm.auction"
         assert symbol_stability(thing) is Stability.EXPERIMENTAL
 
     def test_symbol_marker_overrides_its_package(self) -> None:
         @stable
         def thing() -> None: ...
 
-        thing.__module__ = "core.swarm"
+        thing.__module__ = "baselith.core.swarm"
         assert symbol_stability(thing) is Stability.STABLE
 
 
@@ -174,7 +176,8 @@ class TestTableShape:
 
     def test_every_key_is_a_dotted_package_name(self) -> None:
         assert all(
-            name == "baselith" or name.startswith("core.") for name in PACKAGE_STABILITY
+            name == "baselith" or name.startswith("baselith.core.")
+            for name in PACKAGE_STABILITY
         )
 
     def test_the_stable_tier_stays_small_enough_to_mean_something(self) -> None:

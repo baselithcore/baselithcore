@@ -1,5 +1,5 @@
 """
-Additional unit tests for core.plugins.loader module.
+Additional unit tests for baselith.core.plugins.loader module.
 
 Tests edge cases, error handling, and plugin discovery mechanisms.
 """
@@ -15,14 +15,14 @@ class TestPluginLoaderEdgeCases:
     @pytest.fixture
     def registry(self):
         """Create a mock registry."""
-        from core.plugins import PluginRegistry
+        from baselith.core.plugins import PluginRegistry
 
         return PluginRegistry()
 
     @pytest.mark.asyncio
     async def test_load_plugin_with_invalid_metadata(self, registry, tmp_path):
         """Loader handles plugin with invalid metadata gracefully."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create a plugin directory with invalid plugin.py
         plugin_dir = tmp_path / "bad-plugin"
@@ -44,7 +44,7 @@ class BadPlugin:
     @pytest.mark.asyncio
     async def test_load_plugin_initialization_failure(self, registry, tmp_path):
         """Loader handles plugin initialization failures."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create a plugin that fails during initialization
         plugin_dir = tmp_path / "failing-plugin"
@@ -59,7 +59,7 @@ class BadPlugin:
 
         plugin_file = plugin_dir / "plugin.py"
         plugin_file.write_text("""
-from core.plugins import Plugin, PluginMetadata
+from baselith.core.plugins import Plugin, PluginMetadata
 
 class FailingPlugin(Plugin):
     
@@ -79,7 +79,7 @@ class FailingPlugin(Plugin):
 
     def test_discover_plugins_empty_directory(self, registry, tmp_path):
         """Loader handles empty plugin directory."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create empty directory
         empty_dir = tmp_path / "empty"
@@ -92,7 +92,7 @@ class FailingPlugin(Plugin):
 
     def test_discover_plugins_with_non_plugin_dirs(self, registry, tmp_path):
         """Loader ignores directories without plugin files."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create directories without plugin.py or __init__.py
         (tmp_path / "not-a-plugin").mkdir()
@@ -113,7 +113,7 @@ class FailingPlugin(Plugin):
     @pytest.mark.asyncio
     async def test_load_all_plugins_partial_failure(self, registry, tmp_path):
         """Loader continues loading plugins even if some fail."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create one valid and one invalid plugin
         valid_dir = tmp_path / "valid-plugin"
@@ -126,7 +126,7 @@ class FailingPlugin(Plugin):
         }""")
 
         (valid_dir / "plugin.py").write_text("""
-from core.plugins import Plugin, PluginMetadata
+from baselith.core.plugins import Plugin, PluginMetadata
 
 class ValidPlugin(Plugin):
     
@@ -150,7 +150,7 @@ class ValidPlugin(Plugin):
     @pytest.mark.asyncio
     async def test_load_all_plugins_lazy_activation_mode(self, registry, tmp_path):
         """Loader can register plugins without eagerly initializing them."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         plugin_dir = tmp_path / "lazy-plugin"
         plugin_dir.mkdir()
@@ -160,7 +160,7 @@ class ValidPlugin(Plugin):
             "description": "Lazy plugin"
         }""")
         (plugin_dir / "plugin.py").write_text("""
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 class LazyPlugin(Plugin):
     async def initialize(self, config=None):
@@ -181,7 +181,7 @@ class LazyPlugin(Plugin):
     @pytest.mark.asyncio
     async def test_load_all_plugins_resolves_config_aliases(self, registry, tmp_path):
         """Config keys using the directory name should load metadata-name plugins."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         plugin_dir = tmp_path / "reasoning_agent"
         plugin_dir.mkdir()
@@ -196,7 +196,7 @@ class LazyPlugin(Plugin):
         )
         (plugin_dir / "plugin.py").write_text(
             """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class ReasoningPlugin(Plugin):
@@ -219,7 +219,7 @@ class ReasoningPlugin(Plugin):
     @pytest.mark.asyncio
     async def test_load_plugin_with_missing_file(self, registry, tmp_path):
         """Loader handles missing plugin file."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create directory without plugin.py
         plugin_dir = tmp_path / "no-file-plugin"
@@ -233,7 +233,7 @@ class ReasoningPlugin(Plugin):
     @pytest.mark.asyncio
     async def test_load_plugin_with_syntax_error(self, registry, tmp_path):
         """Loader handles plugin with syntax errors."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         plugin_dir = tmp_path / "syntax-error-plugin"
         plugin_dir.mkdir()
@@ -253,7 +253,7 @@ class BrokenPlugin
 
     def test_discover_handles_permission_errors(self, registry, tmp_path):
         """Loader handles permission errors during discovery."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         # Create a directory that exists but mock permission error
         loader = PluginLoader(tmp_path, registry)
@@ -266,7 +266,7 @@ class BrokenPlugin
     @pytest.mark.asyncio
     async def test_load_plugin_registers_successfully(self, registry, tmp_path):
         """Successfully loaded plugin is registered."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         plugin_dir = tmp_path / "success-plugin"
         plugin_dir.mkdir()
@@ -280,7 +280,7 @@ class BrokenPlugin
 
         plugin_file = plugin_dir / "plugin.py"
         plugin_file.write_text("""
-from core.plugins import Plugin, PluginMetadata
+from baselith.core.plugins import Plugin, PluginMetadata
 
 class SuccessPlugin(Plugin):
     
@@ -300,7 +300,7 @@ class SuccessPlugin(Plugin):
 
     def test_resolve_plugin_dir_uses_manifest_name(self, registry, tmp_path):
         """Logical plugin names should resolve back to the plugin directory."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         plugin_dir = tmp_path / "reasoning_agent"
         plugin_dir.mkdir()
@@ -315,7 +315,7 @@ class SuccessPlugin(Plugin):
         )
         (plugin_dir / "plugin.py").write_text(
             """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class ReasoningPlugin(Plugin):
@@ -332,7 +332,7 @@ class TestPluginLoaderConfiguration:
 
     def test_loader_accepts_custom_registry(self, tmp_path):
         """Loader works with custom registry instance."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         custom_registry = PluginRegistry()
         loader = PluginLoader(tmp_path, custom_registry)
@@ -341,7 +341,7 @@ class TestPluginLoaderConfiguration:
 
     def test_loader_with_nonexistent_path(self):
         """Loader handles non-existent plugin directory."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         registry = PluginRegistry()
         non_existent = Path("/definitely/does/not/exist")
@@ -353,7 +353,7 @@ class TestPluginLoaderConfiguration:
 
     def test_loader_with_file_instead_of_directory(self, tmp_path):
         """Loader handles file path instead of directory."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         registry = PluginRegistry()
 
@@ -373,13 +373,13 @@ class TestManifestEnvDeclarations:
 
     Regression: a manifest declaring the documented rich form
     (``[{name: FOO, description: ..., required: true}]``) reached
-    ``core.plugins._env.apply_plugin_env``, where ``k.upper()`` ran against a
+    ``baselith.core.plugins._env.apply_plugin_env``, where ``k.upper()`` ran against a
     dict and aborted the load with ``AttributeError: 'dict' object has no
     attribute 'upper'`` — the plugin never loaded.
     """
 
     def test_plain_string_list_is_preserved(self):
-        from core.plugins.interface import PluginMetadata
+        from baselith.core.plugins.interface import PluginMetadata
 
         meta = PluginMetadata(
             name="p", version="1.0.0", environment_variables=["FOO_TOKEN", "FOO_URL"]
@@ -387,7 +387,7 @@ class TestManifestEnvDeclarations:
         assert meta.environment_variables == ["FOO_TOKEN", "FOO_URL"]
 
     def test_rich_mapping_form_is_reduced_to_names(self):
-        from core.plugins.interface import PluginMetadata
+        from baselith.core.plugins.interface import PluginMetadata
 
         meta = PluginMetadata(
             name="p",
@@ -405,7 +405,7 @@ class TestManifestEnvDeclarations:
         }
 
     def test_malformed_entries_are_dropped_not_fatal(self):
-        from core.plugins.interface import PluginMetadata
+        from baselith.core.plugins.interface import PluginMetadata
 
         meta = PluginMetadata(
             name="p",
@@ -417,9 +417,9 @@ class TestManifestEnvDeclarations:
 
 async def test_load_plugin_emits_plugin_load_audit_event(tmp_path, monkeypatch):
     """A plugin that finishes initialize() is recorded as `plugin.load`."""
-    from core.observability import audit as audit_module
-    from core.plugins.loader import PluginLoader
-    from core.plugins.registry import PluginRegistry
+    from baselith.core.observability import audit as audit_module
+    from baselith.core.plugins.loader import PluginLoader
+    from baselith.core.plugins.registry import PluginRegistry
 
     events: list[tuple] = []
     monkeypatch.setattr(
@@ -434,7 +434,7 @@ async def test_load_plugin_emits_plugin_load_audit_event(tmp_path, monkeypatch):
         "name: audited-plugin\nversion: 1.2.3\ndescription: audited\n", encoding="utf-8"
     )
     (plugin_dir / "plugin.py").write_text(
-        "from typing import Any\n\nfrom core.plugins.interface import Plugin\n\n\n"
+        "from typing import Any\n\nfrom baselith.core.plugins.interface import Plugin\n\n\n"
         "class AuditedPlugin(Plugin):\n"
         "    async def initialize(self, config: dict[str, Any]) -> None:\n"
         "        await super().initialize(config)\n",

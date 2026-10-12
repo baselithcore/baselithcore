@@ -14,13 +14,13 @@ from dataclasses import replace
 
 import pytest
 
-from core.services.llm import (
+from baselith.core.services.llm import (
     UsageReport,
     register_usage_sink,
     report_external_usage,
     unregister_usage_sink,
 )
-from core.services.llm.usage import Usage
+from baselith.core.services.llm.usage import Usage
 
 
 def _bare(reports: list[UsageReport]) -> list[UsageReport]:
@@ -43,11 +43,13 @@ def _no_tenant_ledger(monkeypatch):
     async def _record(usd, **_kwargs):
         return None
 
-    monkeypatch.setattr("core.quotas.cost_enforcement.record_tenant_llm_cost", _record)
+    monkeypatch.setattr(
+        "baselith.core.quotas.cost_enforcement.record_tenant_llm_cost", _record
+    )
 
 
 async def test_booked_turn_reaches_sinks_with_every_bucket(reports) -> None:
-    from core.services.llm._accounting import record_usage_cost
+    from baselith.core.services.llm._accounting import record_usage_cost
 
     usage = Usage(
         input_tokens=100, output_tokens=40, cache_read_tokens=900, cache_write_tokens=5
@@ -58,7 +60,7 @@ async def test_booked_turn_reaches_sinks_with_every_bucket(reports) -> None:
 
 
 async def test_batch_job_carries_its_rate_and_entry_count(reports) -> None:
-    from core.services.llm._accounting import record_usage_cost
+    from baselith.core.services.llm._accounting import record_usage_cost
 
     usage = Usage(input_tokens=10, output_tokens=10)
     await record_usage_cost("gpt-4o-mini", usage, batch=True, requests=12)
@@ -73,7 +75,7 @@ async def test_unpriced_model_is_observed_even_when_rejected(
 ) -> None:
     # The reject policy means "don't meter the tenant ledger", not "the tokens
     # never happened": the sinks still see the turn and price it themselves.
-    from core.services.llm._accounting import record_usage_cost
+    from baselith.core.services.llm._accounting import record_usage_cost
 
     monkeypatch.setenv("BASELITH_UNKNOWN_MODEL_COST_POLICY", "reject")
     await record_usage_cost("no-such-model", Usage(input_tokens=3, output_tokens=4))
@@ -82,7 +84,7 @@ async def test_unpriced_model_is_observed_even_when_rejected(
 
 
 async def test_empty_usage_is_not_delivered(reports) -> None:
-    from core.services.llm._accounting import record_usage_cost
+    from baselith.core.services.llm._accounting import record_usage_cost
 
     await record_usage_cost("gpt-4o-mini", Usage())
 
@@ -122,8 +124,8 @@ def test_register_is_idempotent(reports) -> None:
 
 def test_a_failing_sink_is_logged_at_warning_and_counted(reports, monkeypatch) -> None:
     """A lost billing record must be visible in production logs, not DEBUG."""
-    from core.observability.metrics import USAGE_SINK_FAILURES_TOTAL
-    from core.services.llm import usage_sinks
+    from baselith.core.observability.metrics import USAGE_SINK_FAILURES_TOTAL
+    from baselith.core.services.llm import usage_sinks
 
     def broken(_report: UsageReport) -> None:
         raise RuntimeError("ledger down")
@@ -171,7 +173,7 @@ async def test_async_sink_is_awaited_off_the_caller(reports) -> None:
 
 
 async def test_report_carries_the_bound_tenant(reports) -> None:
-    from core.context import bind_principal_tenant, reset_tenant_context
+    from baselith.core.context import bind_principal_tenant, reset_tenant_context
 
     token = bind_principal_tenant("acme")
     try:
@@ -183,7 +185,7 @@ async def test_report_carries_the_bound_tenant(reports) -> None:
 
 
 def test_report_without_a_bound_tenant_has_none(reports, monkeypatch) -> None:
-    from core.services.llm import usage_sinks
+    from baselith.core.services.llm import usage_sinks
 
     monkeypatch.setattr(usage_sinks, "tenant_is_bound", lambda: False)
     report_external_usage("gpt-4o", prompt_tokens=1, completion_tokens=1)

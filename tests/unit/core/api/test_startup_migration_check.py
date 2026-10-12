@@ -15,8 +15,8 @@ import pytest
 import sqlalchemy
 from alembic.runtime import migration
 
-from core.api import _schema_check, startup_checks
-from core.db.migration_config import migration_heads
+from baselith.core.api import _schema_check, startup_checks
+from baselith.core.db.migration_config import migration_heads
 
 
 class _Ctx:
@@ -55,7 +55,9 @@ def production_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(startup_checks, "_probe_postgres", _reachable)
     monkeypatch.setattr(startup_checks, "_enforce_rls_posture", _no_posture)
-    monkeypatch.setattr("core.services.llm.preflight.run_llm_preflight", _no_preflight)
+    monkeypatch.setattr(
+        "baselith.core.services.llm.preflight.run_llm_preflight", _no_preflight
+    )
     monkeypatch.setattr(sqlalchemy, "create_engine", lambda _url: _Engine())
 
 

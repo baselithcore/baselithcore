@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-import core.services.bootstrap as bootstrap_module
-from core.services.bootstrap import ensure_startup_bootstrap
+import baselith.core.services.bootstrap as bootstrap_module
+from baselith.core.services.bootstrap import ensure_startup_bootstrap
 
 
 class _FakeLock:

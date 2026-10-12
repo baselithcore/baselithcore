@@ -10,7 +10,7 @@ from email.utils import format_datetime
 import httpx
 import pytest
 
-from core.connectors import (
+from baselith.core.connectors import (
     ConnectorAuthError,
     ConnectorConnectError,
     ConnectorEgressError,
@@ -21,9 +21,9 @@ from core.connectors import (
     ConnectorTransientError,
     ConnectorUnavailableError,
 )
-from core.connectors.errors import parse_retry_after
-from core.resilience import get_circuit_breaker
-from core.security.http import create_hardened_async_client
+from baselith.core.connectors.errors import parse_retry_after
+from baselith.core.resilience import get_circuit_breaker
+from baselith.core.security.http import create_hardened_async_client
 
 
 def _http(spec, rec, **kwargs) -> ConnectorHttp:
@@ -260,7 +260,7 @@ async def test_connect_failure_is_a_connect_error(spec, recorder):
 
 
 async def test_declared_oversize_response_is_refused_before_the_body(spec, recorder):
-    from core.connectors import ConnectorResponseTooLargeError
+    from baselith.core.connectors import ConnectorResponseTooLargeError
 
     body = b"x" * 64
     rec = recorder(
@@ -276,7 +276,7 @@ async def test_declared_oversize_response_is_refused_before_the_body(spec, recor
 
 
 async def test_streamed_oversize_response_is_cut_at_the_cap(spec, recorder):
-    from core.connectors import ConnectorResponseTooLargeError
+    from baselith.core.connectors import ConnectorResponseTooLargeError
 
     async def drip() -> AsyncIterator[bytes]:
         for _ in range(8):
@@ -307,6 +307,30 @@ async def test_compressed_body_survives_the_capped_read(spec, recorder):
     http = _http(spec, rec)
     resp = await http.request("GET", "https://api.acme.test/x")
     assert resp.json() == {"ok": True}
+    await http.aclose()
+
+
+async def test_a_gzip_bomb_is_cut_on_its_decoded_size(spec, recorder):
+    """httpx inflates a whole chunk before a counter on aiter_bytes sees it;
+    the connector must stop inflating at the cap instead."""
+    import gzip
+
+    from baselith.core.connectors import ConnectorResponseTooLargeError
+
+    bomb = gzip.compress(b"\0" * (16 * 1024 * 1024))
+
+    async def wire() -> AsyncIterator[bytes]:
+        yield bomb
+
+    rec = recorder(
+        httpx.Response(
+            200, stream=_AsyncStream(wire()), headers={"Content-Encoding": "gzip"}
+        )
+    )
+    http = _http(replace(spec, max_response_bytes=1024), rec)
+    with pytest.raises(ConnectorResponseTooLargeError):
+        await http.request("GET", "https://api.acme.test/bomb")
+    assert rec.requests[0].headers["Accept-Encoding"] == "gzip, deflate"
     await http.aclose()
 
 

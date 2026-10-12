@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.task_queue.monitor import (
+from baselith.core.task_queue.monitor import (
     QueueInfo,
     WorkerInfo,
     WorkerMonitor,
@@ -55,7 +55,7 @@ def test_queue_info_to_dict():
 
 
 def test_get_workers(monitor):
-    with patch("core.task_queue.monitor.Worker") as MockWorker:
+    with patch("baselith.core.task_queue.monitor.Worker") as MockWorker:
         mm_worker = MagicMock()
         mm_worker.name = "w1"
         mm_worker.get_state.return_value = "idle"
@@ -76,13 +76,13 @@ def test_get_workers(monitor):
 
 
 def test_get_worker_count(monitor):
-    with patch("core.task_queue.monitor.Worker") as MockWorker:
+    with patch("baselith.core.task_queue.monitor.Worker") as MockWorker:
         MockWorker.count.return_value = 5
         assert monitor.get_worker_count() == 5
 
 
 def test_get_queue_info(monitor):
-    with patch("core.task_queue.monitor.Queue") as MockQueue:
+    with patch("baselith.core.task_queue.monitor.Queue") as MockQueue:
         mq = MagicMock()
         mq.name = "default"
         mq.__len__.return_value = 10
@@ -99,14 +99,14 @@ def test_get_queue_info(monitor):
 
 
 def test_get_queue_info_error(monitor):
-    with patch("core.task_queue.monitor.Queue") as MockQueue:
+    with patch("baselith.core.task_queue.monitor.Queue") as MockQueue:
         MockQueue.side_effect = Exception("error")
         info = monitor.get_queue_info("default")
         assert info is None
 
 
 def test_get_all_queues(monitor):
-    with patch("core.config.get_task_queue_config") as mock_conf:
+    with patch("baselith.core.config.get_task_queue_config") as mock_conf:
         mock_conf.return_value.queues = ["q1", "q2"]
         with patch.object(monitor, "get_queue_info") as mock_get_info:
             mock_get_info.side_effect = [QueueInfo("q1", 1, 0, 0, 0, 0), None]
@@ -153,7 +153,7 @@ def test_get_health_status(monitor):
 
 
 def test_clean_failed_jobs(monitor):
-    with patch("core.task_queue.monitor.Queue") as MockQueue:
+    with patch("baselith.core.task_queue.monitor.Queue") as MockQueue:
         mq = MagicMock()
         registry = MagicMock()
         registry.get_job_ids.return_value = ["j1", "j2"]
@@ -169,7 +169,7 @@ def test_clean_failed_jobs(monitor):
 
 
 def test_retry_failed_job(monitor):
-    with patch("core.task_queue.monitor.Job") as MockJob:
+    with patch("baselith.core.task_queue.monitor.Job") as MockJob:
         job = MagicMock()
         MockJob.fetch.return_value = job
 
@@ -184,11 +184,11 @@ def test_retry_failed_job(monitor):
 def test_get_worker_monitor_singleton():
     # Patch where it is imported from in the module, or the source.
     # Since it is imported inside __init__, we should patch existing calls or the source.
-    with patch("core.task_queue.get_queue_redis_connection"):
+    with patch("baselith.core.task_queue.get_queue_redis_connection"):
         # Reset the singleton first if it's already set from previous tests?
         # The module level variable _worker_monitor might be set.
         # We need to access it and reset it.
-        import core.task_queue.monitor as monitor_module
+        import baselith.core.task_queue.monitor as monitor_module
 
         original_monitor = monitor_module._worker_monitor
         monitor_module._worker_monitor = None

@@ -1,4 +1,4 @@
-"""Unit tests for ``core.world_model.mandates``."""
+"""Unit tests for ``baselith.core.world_model.mandates``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import time
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from core.world_model.mandates import (
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     InMemoryReplayGuard,
@@ -345,7 +345,7 @@ class TestMalformedSignature:
     escaping the verification boundary as a 500."""
 
     def _signed(self, signature_hex: str):
-        from core.world_model.mandates import SignedMandate
+        from baselith.core.world_model.mandates import SignedMandate
 
         ts = _now()
         intent = IntentMandate(

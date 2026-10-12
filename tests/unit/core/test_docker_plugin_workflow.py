@@ -1,13 +1,13 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from core.cli.commands.doctor_checks import is_placeholder_secret
-from core.cli.commands.env_profiles import (
+from baselith.core.cli.commands.doctor_checks import is_placeholder_secret
+from baselith.core.cli.commands.env_profiles import (
     ensure_dev_env,
     ensure_docker_core_env,
     set_docker_core_image,
 )
-from core.cli.commands.plugin import add_docker
+from baselith.core.cli.commands.plugin import add_docker
 
 
 def test_setup_replaces_long_secret_key_placeholder(tmp_path, monkeypatch):

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from core.evaluation.regression_runner import ALLOWED_CASE_KEYS, load_cases
-from core.evaluation.trajectory import TrajectoryCase
+from baselith.core.evaluation.regression_runner import ALLOWED_CASE_KEYS, load_cases
+from baselith.core.evaluation.trajectory import TrajectoryCase
 
 
 def test_loader_allowlist_matches_evaluator_schema() -> None:

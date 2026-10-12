@@ -9,7 +9,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from core.connectors import ConnectorCapability, ConnectorSpec, CredentialField
+from baselith.core.connectors import ConnectorCapability, ConnectorSpec, CredentialField
 
 PUBLIC_IP = "93.184.216.34"
 

@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from core.services.vectorstore.orchestrator import SearchOrchestrator
+from baselith.core.services.vectorstore.orchestrator import SearchOrchestrator
 
 pytestmark = pytest.mark.unit
 

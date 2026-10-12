@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import time
 
-from core.orchestration.limits import LoopBudget, LoopLimits
-from core.orchestration.parallel import ParallelToolExecutor, ToolCall
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.orchestration.parallel import ParallelToolExecutor, ToolCall
 
 
 async def test_parallel_tool_timeout_clamped_to_budget_deadline():

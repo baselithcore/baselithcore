@@ -12,15 +12,17 @@ def write_file(path: Path, content: str) -> None:
 
 def test_allows_grandfathered_core_to_plugin_shim(tmp_path: Path) -> None:
     write_file(
-        tmp_path / "core/goals/__init__.py",
-        "from plugins.goals import GoalTracker\n",
+        tmp_path / "baselith/core/goals/__init__.py",
+        "from baselith.plugins.goals import GoalTracker\n",
     )
 
     violations = check_boundaries(
         tmp_path,
-        frozen_prefixes=("core/goals/",),
-        legacy_allowlist=frozenset({"core/goals/__init__.py"}),
-        core_to_plugin_allowlist={"core/goals/__init__.py": {"plugins.goals"}},
+        frozen_prefixes=("baselith/core/goals/",),
+        legacy_allowlist=frozenset({"baselith/core/goals/__init__.py"}),
+        core_to_plugin_allowlist={
+            "baselith/core/goals/__init__.py": {"baselith.plugins.goals"}
+        },
     )
 
     assert violations == []
@@ -28,39 +30,39 @@ def test_allows_grandfathered_core_to_plugin_shim(tmp_path: Path) -> None:
 
 def test_rejects_new_core_to_plugin_import(tmp_path: Path) -> None:
     write_file(
-        tmp_path / "core/services/example.py",
-        "from plugins.goals import GoalTracker\n",
+        tmp_path / "baselith/core/services/example.py",
+        "from baselith.plugins.goals import GoalTracker\n",
     )
 
     violations = check_boundaries(tmp_path)
 
     assert violations == [
-        "core/services/example.py: forbidden core->plugins import 'plugins.goals'"
+        "baselith/core/services/example.py: forbidden core->plugins import 'baselith.plugins.goals'"
     ]
 
 
 def test_rejects_new_file_inside_frozen_core_area(tmp_path: Path) -> None:
     write_file(
-        tmp_path / "core/routers/new_feature.py",
+        tmp_path / "baselith/core/routers/new_feature.py",
         "def handler() -> None:\n    return None\n",
     )
 
     violations = check_boundaries(
         tmp_path,
-        frozen_prefixes=("core/routers/",),
+        frozen_prefixes=("baselith/core/routers/",),
         legacy_allowlist=frozenset(),
         core_to_plugin_allowlist={},
     )
 
     assert violations == [
-        "core/routers/new_feature.py: new legacy/domain-specific module added under frozen core path"
+        "baselith/core/routers/new_feature.py: new legacy/domain-specific module added under frozen core path"
     ]
 
 
 def test_regular_core_module_passes(tmp_path: Path) -> None:
     write_file(
-        tmp_path / "core/services/example.py",
-        "from core.interfaces.services import LLMServiceProtocol\n",
+        tmp_path / "baselith/core/services/example.py",
+        "from baselith.core.interfaces.services import LLMServiceProtocol\n",
     )
 
     violations = check_boundaries(tmp_path)

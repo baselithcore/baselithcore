@@ -1,0 +1,341 @@
+"""
+RAG Workflow — Full RAG pipeline as both workflow steps and an Orchestrator-compatible FlowHandler.
+
+Refactored from the legacy AgentWorkflow/ChatAgent (LangGraph) to integrate
+directly with the Orchestrator via the ``FlowHandler`` protocol.
+
+Usage as FlowHandler:
+    handler = RagWorkflowHandler(chat_service)
+    orchestrator.register_handler("rag_full", handler)
+
+Usage as step collection (backward compatible):
+    workflow = RagWorkflow(chat_service)
+    workflow.validate_input(state)
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.chat.context import build_context_and_sources
+from baselith.core.chat.guardrails import evaluate_guardrails
+from baselith.core.chat.prompt import build_prompt
+from baselith.core.chat.reranking import rerank_hits
+from baselith.core.chat.workflow_planner import BacklogPlanner
+from baselith.core.chat.workflow_response import Clarifier, ResponseGenerator
+from baselith.core.chat.workflow_retrieval import RetrievalPipeline
+from baselith.core.chat.workflow_validation import InputValidator
+from baselith.core.observability import telemetry
+from baselith.core.observability.logging import get_logger
+from baselith.core.services.llm import get_llm_service
+from baselith.core.services.vectorstore import get_vectorstore_service
+
+if TYPE_CHECKING:
+    from baselith.core.chat.service import ChatService
+
+logger = get_logger(__name__)
+
+
+def _search_wrapper(query_vector: Any, **kwargs: Any) -> Any:
+    """Wrapper for vectorstore search to maintain compatibility."""
+    service = get_vectorstore_service()
+    return service.search(query_vector=query_vector, **kwargs)
+
+
+class RagWorkflow:
+    """Collection of atomic RAG pipeline steps operating on AgentState.
+
+    Each method mutates the shared ``AgentState`` and sets ``next_action``
+    so that callers can drive the pipeline step-by-step.
+    """
+
+    def __init__(self, service: ChatService) -> None:
+        self.service = service
+        self.validator = InputValidator(service)
+        self.retrieval = RetrievalPipeline(
+            service,
+            search_fn=_search_wrapper,
+            rerank_fn=rerank_hits,
+            build_context_fn=build_context_and_sources,
+        )
+        self.planner = BacklogPlanner(service)
+        self.clarifier = Clarifier(service)
+        self.responder = ResponseGenerator(
+            service,
+            build_prompt_fn=build_prompt,
+            generate_response_fn=get_llm_service().generate_response,
+        )
+
+    # -- Sync steps -----------------------------------------------------------
+
+    def validate_input(self, state: AgentState) -> None:
+        """
+        Validate user input and check for early exits.
+
+        Args:
+            state: Current agent state.
+        """
+        self.validator.validate_input(state)
+
+    def classify_intent(self, state: AgentState) -> None:
+        """
+        Classify query intent and apply safety guardrails.
+
+        Args:
+            state: Current agent state.
+        """
+        decision = evaluate_guardrails(state.user_query)
+        state.guardrail_decision = decision
+        log_message = f"guardrail:{decision.action}"
+        if decision.matched:
+            log_message = f"{log_message}:{decision.matched}"
+        if decision.action == "block":
+            state.answer = decision.response or "Richiesta non consentita."
+            telemetry.increment("guardrail.block")
+            telemetry.increment("answers.guardrail_block")
+            state.log(log_message)
+            state.done = True
+            state.next_action = ""
+            return
+        if decision.action == "fallback":
+            state.answer = (
+                decision.response
+                or "Posso rispondere solo a domande sui documenti indicizzati."
+            )
+            telemetry.increment("guardrail.fallback")
+            telemetry.increment("answers.guardrail_fallback")
+            state.log(log_message)
+            state.done = True
+            state.next_action = ""
+            return
+        telemetry.increment("guardrail.allow")
+        state.log(log_message)
+        state.next_action = "prepare_query"
+
+    def prepare_query(self, state: AgentState) -> None:
+        """
+        Prepare the query for retrieval.
+
+        Args:
+            state: Current agent state.
+        """
+        state.next_action = "load_history"
+
+    def plan_backlog(self, state: AgentState) -> None:
+        """
+        Plan the next steps for the agent based on context.
+
+        Args:
+            state: Current agent state.
+        """
+        self.planner.plan_backlog(state)
+
+    def request_clarification(self, state: AgentState) -> None:
+        """
+        Request clarification from the user.
+
+        Args:
+            state: Current agent state.
+        """
+        self.clarifier.request_clarification(
+            state, message_builder=self._compose_clarification_message
+        )
+
+    def finalize_answer(self, state: AgentState) -> None:
+        """
+        Finalize the generated answer and update telemetry.
+
+        Args:
+            state: Current agent state.
+        """
+        self.responder.finalize_answer(state)
+
+    # -- Async steps ----------------------------------------------------------
+
+    async def load_history(self, state: AgentState) -> None:
+        """
+        Load conversation history for context.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.load_history(state)
+
+    async def check_precheck_cache(self, state: AgentState) -> None:
+        """
+        Probe the opt-in pre-retrieval answer cache (skips retrieval on a hit).
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.check_precheck_cache(state)
+
+    async def retrieve_documents(self, state: AgentState) -> None:
+        """
+        Retrieve relevant documents from the vector store.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.retrieve_documents(state)
+
+    async def score_documents(self, state: AgentState) -> None:
+        """
+        Rerank and score retrieved documents.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.score_documents(state)
+
+    async def apply_feedback(self, state: AgentState) -> None:
+        """
+        Apply user feedback to influence document scoring.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.apply_feedback(state)
+
+    async def build_context(self, state: AgentState) -> None:
+        """
+        Consolidate retrieved information into a context block.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.build_context(state)
+
+    async def check_cache(self, state: AgentState) -> None:
+        """
+        Check if a similar response is available in cache.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.retrieval.check_cache(state)
+
+    async def generate_answer(self, state: AgentState) -> None:
+        """
+        Generate a response using the LLM.
+
+        Args:
+            state: Current agent state.
+        """
+        await self.responder.generate_answer(state)
+
+    # -- Internal helpers -----------------------------------------------------
+
+    def _compose_clarification_message(self, state: AgentState) -> str:
+        return self.clarifier._compose_clarification_message(state)
+
+
+# Backward compatible alias
+AgentWorkflow = RagWorkflow
+
+
+class RagWorkflowHandler:
+    """Orchestrator-compatible FlowHandler that runs the full RAG pipeline.
+
+    This wraps :class:`RagWorkflow` behind the ``FlowHandler`` protocol so
+    it can be registered as an intent handler in the Orchestrator:
+
+        orchestrator.register_handler("rag_full", RagWorkflowHandler(service))
+    """
+
+    def __init__(self, service: ChatService) -> None:
+        self._workflow = RagWorkflow(service)
+
+    async def handle(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
+        """Run the full RAG pipeline and return an Orchestrator result dict."""
+        from baselith.core.models.chat import ChatRequest
+
+        # Inject session_id (as conversation_id) and tenant_id from context
+        request = ChatRequest(
+            query=query,
+            conversation_id=context.get("session_id"),
+            tenant_id=context.get("tenant_id"),
+        )
+        state = AgentState(request=request)
+        wf = self._workflow
+
+        # 1. Validate + guardrails
+        wf.validate_input(state)
+        if state.done:
+            return self._to_result(state)
+        wf.classify_intent(state)
+        if state.done:
+            return self._to_result(state)
+
+        # 2. Retrieval pipeline. The pre-check probe is a no-op unless the
+        # opt-in pre-retrieval cache is wired; on a hit it ends the request
+        # before any vector search, rerank or context build is paid for.
+        await wf.load_history(state)
+        await wf.check_precheck_cache(state)
+        if state.done:
+            return self._to_result(state)
+
+        await wf.retrieve_documents(state)
+
+        if state.clarification_reason:
+            wf.request_clarification(state)
+            return self._to_result(state)
+
+        await wf.score_documents(state)
+        if state.next_action == "apply_feedback":
+            await wf.apply_feedback(state)
+        await wf.build_context(state)
+        await wf.check_cache(state)
+
+        if state.done:
+            return self._to_result(state)
+
+        # 3. Generation
+        wf.plan_backlog(state)
+        await wf.generate_answer(state)
+        wf.finalize_answer(state)
+
+        return self._to_result(state)
+
+    @staticmethod
+    def _to_result(state: AgentState) -> dict[str, Any]:
+        return {
+            "response": state.answer or "",
+            # doc_sources entries (chat.context._extract_doc_source) carry a
+            # locator (url / path), a title, the document id and its best
+            # score. The retrieved text goes to the groundedness rail under
+            # the private key the output guard strips: it never passed the
+            # PII filter, so it must not reach the caller.
+            "sources": [_source_entry(s) for s in (state.doc_sources or [])],
+            _GROUNDING_CONTEXT_KEY: state.context,
+            "metadata": {
+                "guardrail": (
+                    state.guardrail_decision.action
+                    if state.guardrail_decision
+                    else None
+                ),
+                "clarification": state.clarification_reason,
+            },
+        }
+
+
+#: guard_pipeline.GROUNDING_CONTEXT_KEY, spelled here so chat does not import
+#: the orchestration package; a test keeps the two equal.
+_GROUNDING_CONTEXT_KEY = "_grounding_context"
+
+
+def _source_entry(doc: dict[str, Any]) -> dict[str, Any]:
+    """One result source from a ``doc_sources`` entry."""
+    locator = doc.get("url") or doc.get("path") or doc.get("title")
+    entry: dict[str, Any] = {
+        "source": str(locator or doc.get("document_id") or ""),
+        "title": doc.get("title"),
+        "document_id": doc.get("document_id"),
+    }
+    if doc.get("score") is not None:
+        entry["score"] = doc["score"]
+    return entry
+
+
+__all__ = ["AgentWorkflow", "RagWorkflow", "RagWorkflowHandler"]

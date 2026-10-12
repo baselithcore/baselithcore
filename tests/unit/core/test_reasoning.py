@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.reasoning.cot import ChainOfThought
+from baselith.core.reasoning.cot import ChainOfThought
 
 
 class TestChainOfThought:
@@ -19,7 +19,9 @@ class TestChainOfThought:
         """Test reason without LLM service."""
         cot = ChainOfThought()
         # Mock get_llm_service to return None or raise import error effectively
-        with patch("core.services.llm.get_llm_service", side_effect=ImportError):
+        with patch(
+            "baselith.core.services.llm.get_llm_service", side_effect=ImportError
+        ):
             answer, steps = await cot.reason("test question")
 
         assert answer == "Unable to reason without LLM service"

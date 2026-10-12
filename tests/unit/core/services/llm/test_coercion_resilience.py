@@ -15,19 +15,19 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from core.resilience.circuit_breaker import (
+from baselith.core.resilience.circuit_breaker import (
     CircuitState,
     CircuitStats,
     get_circuit_breaker,
 )
-from core.services.llm import fallback_runtime
-from core.services.llm.exceptions import LLMProviderError
-from core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
-from core.services.llm.service import LLMService
-from core.services.llm.structured import _parse_fallback
-from core.services.llm.tool_calling import LLMResult, LLMToolSpec
+from baselith.core.services.llm import fallback_runtime
+from baselith.core.services.llm.exceptions import LLMProviderError
+from baselith.core.services.llm.messages import Message, ToolResultBlock, ToolUseBlock
+from baselith.core.services.llm.service import LLMService
+from baselith.core.services.llm.structured import _parse_fallback
+from baselith.core.services.llm.tool_calling import LLMResult, LLMToolSpec
 
-_SDK = "core.services.llm.providers.openai_provider.openai"
+_SDK = "baselith.core.services.llm.providers.openai_provider.openai"
 
 _POP_SPEC = LLMToolSpec(
     name="pop",
@@ -79,7 +79,7 @@ def _completion(text: str) -> MagicMock:
 
 
 def _service(*, chain: str = "", primary: str = "vllm") -> LLMService:
-    with patch("core.services.llm.service.get_llm_config") as mock_config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
         mock_config.return_value = Mock(
             provider="ollama",
             model="qwen",
@@ -95,7 +95,7 @@ def _service(*, chain: str = "", primary: str = "vllm") -> LLMService:
 
 def _vllm_service(client: AsyncMock) -> LLMService:
     """A real ``LLMService`` on a real parserless ``VLLMProvider``."""
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     service = _service()
     service.provider = VLLMProvider(api_base="http://gpu:8000", native_tools=False)
@@ -134,7 +134,7 @@ class TestCoercedTurnFailsOver:
 @pytest.mark.asyncio
 class TestVLLMJsonModeDisablesThinking:
     async def test_json_mode_turns_thinking_off(self, client):
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         client.chat.completions.create.return_value = _completion("{}")
         provider = VLLMProvider(api_base="http://gpu:8000")
@@ -148,7 +148,7 @@ class TestVLLMJsonModeDisablesThinking:
         }
 
     async def test_existing_extra_body_is_merged_not_replaced(self, client):
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         client.chat.completions.create.return_value = _completion("{}")
         provider = VLLMProvider(api_base="http://gpu:8000")
@@ -164,7 +164,7 @@ class TestVLLMJsonModeDisablesThinking:
         assert extra == {"top_k": 20, "chat_template_kwargs": {"custom": 1}}
 
     async def test_an_explicit_caller_choice_wins(self, client):
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         client.chat.completions.create.return_value = _completion("{}")
         provider = VLLMProvider(api_base="http://gpu:8000")
@@ -175,7 +175,7 @@ class TestVLLMJsonModeDisablesThinking:
         assert _sent(client)[0]["extra_body"] == extra
 
     async def test_plain_text_leaves_thinking_alone(self, client):
-        from core.services.llm.providers.vllm_provider import VLLMProvider
+        from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
         client.chat.completions.create.return_value = _completion("hi")
         provider = VLLMProvider(api_base="http://gpu:8000")

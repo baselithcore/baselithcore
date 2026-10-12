@@ -15,17 +15,17 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from core.config.webhooks import WebhookConfig
-from core.webhooks.dispatcher import WebhookDispatcher
-from core.webhooks.service import WebhookService
-from core.webhooks.signing import (
+from baselith.core.config.webhooks import WebhookConfig
+from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.service import WebhookService
+from baselith.core.webhooks.signing import (
     RESERVED_DELIVERY_HEADERS,
     SIGNATURE_HEADER,
     reserved_header_names,
     verify_signature,
 )
-from core.webhooks.store import InMemoryWebhookStore
-from core.webhooks.types import DeliveryStatus, WebhookEndpoint, WebhookEvent
+from baselith.core.webhooks.store import InMemoryWebhookStore
+from baselith.core.webhooks.types import DeliveryStatus, WebhookEndpoint, WebhookEvent
 
 HOOK_URL = "https://hooks.test/receiver"
 

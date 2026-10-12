@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.chat.workflow_response import ResponseGenerator
+from baselith.core.chat.workflow_response import ResponseGenerator
 
 
 class _State:
@@ -154,7 +154,7 @@ async def test_answer_model_is_resolved_per_call(monkeypatch):
     )
     for model in ("model-a", "model-b"):
         monkeypatch.setattr(
-            "core.chat.workflow_response.get_llm_config",
+            "baselith.core.chat.workflow_response.get_llm_config",
             lambda model=model: SimpleNamespace(model=model),
         )
         await generator.generate_answer(_State())

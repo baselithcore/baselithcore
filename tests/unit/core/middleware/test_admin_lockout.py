@@ -1,8 +1,8 @@
 """Tests for admin Basic-auth lockout (AdminLockoutMixin on SecurityManager).
 
 Extracted from ``test_security_auth.py`` to keep both modules under the
-500-line cap. The lockout logic lives in ``core.middleware._admin_lockout``, so
-the production-env guard is patched there (not on ``core.middleware.security``).
+500-line cap. The lockout logic lives in ``baselith.core.middleware._admin_lockout``, so
+the production-env guard is patched there (not on ``baselith.core.middleware.security``).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.security import SecurityManager
+from baselith.core.middleware.security import SecurityManager
 
 
 class TestAdminLockoutKeying:
@@ -19,7 +19,7 @@ class TestAdminLockoutKeying:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = None  # force in-memory fallback
             manager = SecurityManager(mock_security_config)
@@ -55,10 +55,11 @@ class TestAdminLockoutKeying:
 
         with (
             patch(
-                "core.middleware._admin_lockout._is_production_env", return_value=True
+                "baselith.core.middleware._admin_lockout._is_production_env",
+                return_value=True,
             ),
             patch(
-                "core.middleware._admin_lockout._redis_backend_declared",
+                "baselith.core.middleware._admin_lockout._redis_backend_declared",
                 return_value=True,
             ),
         ):
@@ -79,10 +80,11 @@ class TestAdminLockoutKeying:
 
         with (
             patch(
-                "core.middleware._admin_lockout._is_production_env", return_value=True
+                "baselith.core.middleware._admin_lockout._is_production_env",
+                return_value=True,
             ),
             patch(
-                "core.middleware._admin_lockout._redis_backend_declared",
+                "baselith.core.middleware._admin_lockout._redis_backend_declared",
                 return_value=False,
             ),
         ):
@@ -99,7 +101,8 @@ class TestAdminLockoutKeying:
         manager.rate_limiter._redis = failing_redis
 
         with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=False
+            "baselith.core.middleware._admin_lockout._is_production_env",
+            return_value=False,
         ):
             await manager.check_admin_lockout("203.0.113.7")  # must not raise
 
@@ -113,7 +116,8 @@ class TestAdminLockoutKeying:
 
         with (
             patch(
-                "core.middleware._admin_lockout._is_production_env", return_value=True
+                "baselith.core.middleware._admin_lockout._is_production_env",
+                return_value=True,
             ),
             patch.dict("os.environ", {"BASELITH_LOCKOUT_FAIL_OPEN": "true"}),
         ):
@@ -131,7 +135,7 @@ class TestNoSharedCounterAtAll:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = None
             manager = SecurityManager(mock_security_config)
@@ -146,10 +150,11 @@ class TestNoSharedCounterAtAll:
         manager.rate_limiter._redis = None
 
         with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=True
+            "baselith.core.middleware._admin_lockout._is_production_env",
+            return_value=True,
         ):
             with patch(
-                "core.middleware._admin_lockout._redis_backend_declared",
+                "baselith.core.middleware._admin_lockout._redis_backend_declared",
                 return_value=True,
             ):
                 with pytest.raises(HTTPException) as exc:
@@ -167,10 +172,11 @@ class TestNoSharedCounterAtAll:
         manager.rate_limiter._redis = None
 
         with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=True
+            "baselith.core.middleware._admin_lockout._is_production_env",
+            return_value=True,
         ):
             with patch(
-                "core.middleware._admin_lockout._redis_backend_declared",
+                "baselith.core.middleware._admin_lockout._redis_backend_declared",
                 return_value=False,
             ):
                 await manager.check_admin_lockout("10.0.0.2")
@@ -181,14 +187,15 @@ class TestNoSharedCounterAtAll:
         manager.rate_limiter._redis = None
 
         with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=True
+            "baselith.core.middleware._admin_lockout._is_production_env",
+            return_value=True,
         ):
             with patch(
-                "core.middleware._admin_lockout._redis_backend_declared",
+                "baselith.core.middleware._admin_lockout._redis_backend_declared",
                 return_value=True,
             ):
                 with patch(
-                    "core.middleware._admin_lockout._lockout_fail_open",
+                    "baselith.core.middleware._admin_lockout._lockout_fail_open",
                     return_value=True,
                 ):
                     await manager.check_admin_lockout("10.0.0.3")
@@ -199,7 +206,8 @@ class TestNoSharedCounterAtAll:
         manager.rate_limiter._redis = None
 
         with patch(
-            "core.middleware._admin_lockout._is_production_env", return_value=False
+            "baselith.core.middleware._admin_lockout._is_production_env",
+            return_value=False,
         ):
             await manager.check_admin_lockout("10.0.0.4")
 
@@ -212,7 +220,7 @@ class TestRecordFailureAtomic:
 
     def _manager(self, mock_security_config):
         with patch(
-            "core.middleware.rate_limiter.create_redis_client"
+            "baselith.core.middleware.rate_limiter.create_redis_client"
         ) as mock_redis_factory:
             mock_redis_factory.return_value = None
         return SecurityManager(mock_security_config)

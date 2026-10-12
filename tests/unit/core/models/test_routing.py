@@ -1,17 +1,17 @@
-"""Unit tests for ``core.models.routing`` and ``core.models.pricing``."""
+"""Unit tests for ``baselith.core.models.routing`` and ``baselith.core.models.pricing``."""
 
 from __future__ import annotations
 
 import pytest
 
-from core.models.pricing import (
+from baselith.core.models.pricing import (
     DEFAULT_PRICING,
     UNKNOWN_PRICE,
     ModelPrice,
     estimate_cost,
     get_price,
 )
-from core.models.routing import (
+from baselith.core.models.routing import (
     Complexity,
     ModelRouter,
     RoutingPolicy,

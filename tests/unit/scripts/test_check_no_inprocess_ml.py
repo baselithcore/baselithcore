@@ -44,37 +44,39 @@ def _allow(root: Path, *entries: tuple[str, str]) -> Path:
     ],
 )
 def test_each_forbidden_constructor_is_flagged(tmp_path: Path, call: str) -> None:
-    _write(tmp_path, "plugins/p/mod.py", f"x = {call}\n")
+    _write(tmp_path, "baselith/plugins/p/mod.py", f"x = {call}\n")
     problems = guard.check(tmp_path, tmp_path / "none.yaml")
-    assert len(problems) == 1 and "plugins/p/mod.py:1" in problems[0]
+    assert len(problems) == 1 and "baselith/plugins/p/mod.py:1" in problems[0]
 
 
 def test_mentions_imports_tests_and_build_dirs_are_ignored(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "plugins/p/a.py",
+        "baselith/plugins/p/a.py",
         '"""Uses SentenceTransformer( in prose."""\nfrom x import QdrantClient\n',
     )
-    _write(tmp_path, "plugins/p/tests/test_a.py", "QdrantClient(':memory:')\n")
-    _write(tmp_path, "plugins/p/ui/node_modules/m.py", "CrossEncoder('m')\n")
+    _write(tmp_path, "baselith/plugins/p/tests/test_a.py", "QdrantClient(':memory:')\n")
+    _write(tmp_path, "baselith/plugins/p/ui/node_modules/m.py", "CrossEncoder('m')\n")
     assert guard.check(tmp_path, tmp_path / "none.yaml") == []
 
 
 def test_allowlist_exempts_with_reason_and_goes_stale(tmp_path: Path) -> None:
-    _write(tmp_path, "plugins/v/vendor/e.py", "SentenceTransformer('m')\n")
-    allow = _allow(tmp_path, ("plugins/v/vendor", "vendored, not migrated"))
+    _write(tmp_path, "baselith/plugins/v/vendor/e.py", "SentenceTransformer('m')\n")
+    allow = _allow(tmp_path, ("baselith/plugins/v/vendor", "vendored, not migrated"))
     assert guard.check(tmp_path, allow) == []
 
-    _write(tmp_path, "plugins/v/vendor/e.py", "x = 1\n")  # migrated, entry now stale
+    _write(
+        tmp_path, "baselith/plugins/v/vendor/e.py", "x = 1\n"
+    )  # migrated, entry now stale
     assert "no longer contains a flagged call" in guard.check(tmp_path, allow)[0]
 
-    allow = _allow(tmp_path, ("plugins/gone", "x"))
+    allow = _allow(tmp_path, ("baselith/plugins/gone", "x"))
     assert "no longer exists" in guard.check(tmp_path, allow)[0]
 
 
 def test_allowlist_entry_without_reason_is_rejected(tmp_path: Path) -> None:
     allow = tmp_path / "allow.yaml"
-    allow.write_text("allow:\n  - path: plugins/x\n", encoding="utf-8")
+    allow.write_text("allow:\n  - path: baselith/plugins/x\n", encoding="utf-8")
     with pytest.raises(ValueError, match="reason"):
         guard.load_allowlist(allow)
 
@@ -95,15 +97,15 @@ def test_real_repo_is_green() -> None:
     ],
 )
 def test_aliased_and_qualified_forms_are_flagged(tmp_path: Path, body: str) -> None:
-    _write(tmp_path, "plugins/p/mod.py", body)
+    _write(tmp_path, "baselith/plugins/p/mod.py", body)
     problems = guard.check(tmp_path, tmp_path / "none.yaml")
-    assert len(problems) == 1 and "plugins/p/mod.py" in problems[0]
+    assert len(problems) == 1 and "baselith/plugins/p/mod.py" in problems[0]
 
 
 def test_unrelated_pipeline_calls_are_not_flagged(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "plugins/p/mod.py",
+        "baselith/plugins/p/mod.py",
         "pipe = redis.pipeline()\nfrom sklearn.pipeline import pipeline\np = pipeline()\n",
     )
     assert guard.check(tmp_path, tmp_path / "none.yaml") == []

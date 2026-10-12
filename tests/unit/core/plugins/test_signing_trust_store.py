@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.signing import (
+from baselith.core.plugins.signing import (
     TrustedKey,
     enforce_plugin_signature,
     generate_keypair_hex,
@@ -109,7 +109,7 @@ def test_malformed_store_yields_no_roots(
     path = tmp_path / "trust.json"
     path.write_text("{not json", encoding="utf-8")
     monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(path))
-    with caplog.at_level(logging.ERROR, logger="core.plugins.signing"):
+    with caplog.at_level(logging.ERROR, logger="baselith.core.plugins.signing"):
         assert load_trust_store() == []
     assert "trust store" in caplog.text.lower()
 
@@ -233,7 +233,7 @@ def test_enforcement_refuses_a_revoked_key_and_names_it(
     monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
     monkeypatch.setenv("BASELITH_REQUIRE_PLUGIN_SIGNATURES", "true")
     signature = sign_plugin_hash(HASH, private)
-    with caplog.at_level(logging.ERROR, logger="core.plugins.signing"):
+    with caplog.at_level(logging.ERROR, logger="baselith.core.plugins.signing"):
         assert enforce_plugin_signature("demo", HASH, signature) is False
     assert "leaked-2026" in caplog.text
     assert "revoked" in caplog.text.lower()
@@ -251,7 +251,7 @@ def test_enforcement_refuses_an_expired_key_and_names_it(
     monkeypatch.setenv("BASELITH_PLUGIN_TRUST_STORE", str(store))
     monkeypatch.setenv("BASELITH_REQUIRE_PLUGIN_SIGNATURES", "true")
     signature = sign_plugin_hash(HASH, private)
-    with caplog.at_level(logging.ERROR, logger="core.plugins.signing"):
+    with caplog.at_level(logging.ERROR, logger="baselith.core.plugins.signing"):
         assert enforce_plugin_signature("demo", HASH, signature) is False
     assert "lapsed" in caplog.text
     assert "expired" in caplog.text.lower()
@@ -272,7 +272,7 @@ def test_enforcement_refuses_when_nothing_is_configured(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv("BASELITH_REQUIRE_PLUGIN_SIGNATURES", "true")
-    with caplog.at_level(logging.ERROR, logger="core.plugins.signing"):
+    with caplog.at_level(logging.ERROR, logger="baselith.core.plugins.signing"):
         assert enforce_plugin_signature("demo", HASH, "ab" * 32) is False
     assert "trust root" in caplog.text.lower()
 

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.prompts.catalog import resolve_catalog_prompt
-from core.prompts.registry import get_prompt_registry
+from baselith.core.prompts.catalog import resolve_catalog_prompt
+from baselith.core.prompts.registry import get_prompt_registry
 
 
 def test_resolves_seeded_catalog_file_with_variables():
@@ -64,7 +64,7 @@ def test_deployment_override_wins_over_packaged_default(tmp_path):
 
 class TestCallSites:
     def test_react_text_loop_system_prompt(self):
-        from core.reasoning.react import ReActAgent, ToolDefinition
+        from baselith.core.reasoning.react import ReActAgent, ToolDefinition
 
         async def search(query: str) -> str:
             return query
@@ -86,8 +86,8 @@ class TestCallSites:
         assert "{{" not in prompt and "{tool_descriptions}" not in prompt
 
     def test_react_native_loop_system_prompt(self):
-        from core.reasoning.react import ReActAgent
-        from core.reasoning.react_native import _build_system_prompt
+        from baselith.core.reasoning.react import ReActAgent
+        from baselith.core.reasoning.react_native import _build_system_prompt
 
         agent = ReActAgent(max_iterations=5, system_prompt_extra="EXTRA-MARKER")
         prompt = _build_system_prompt(agent)
@@ -96,7 +96,9 @@ class TestCallSites:
         assert "{{" not in prompt and "{max_iterations}" not in prompt
 
     def test_intent_classification_prompt(self):
-        from core.orchestration.intent_classifier import build_classification_prompt
+        from baselith.core.orchestration.intent_classifier import (
+            build_classification_prompt,
+        )
 
         prompt = build_classification_prompt(
             intents_list="- qa_docs: questions over documents",
@@ -109,7 +111,7 @@ class TestCallSites:
         assert "{{" not in prompt
 
     def test_swarm_decomposition_prompt(self):
-        from core.orchestration.handlers.swarm_agents import (
+        from baselith.core.orchestration.handlers.swarm_agents import (
             build_decomposition_prompt,
         )
 
@@ -167,7 +169,7 @@ class TestVariantSelection:
         )
 
     def test_ambient_tenant_is_default_subject(self, monkeypatch):
-        from core.context import set_tenant_context
+        from baselith.core.context import set_tenant_context
 
         registry = get_prompt_registry()
         self._seed_two_versions(registry, "ab_probe_ambient")

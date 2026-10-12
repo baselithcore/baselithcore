@@ -3,12 +3,12 @@
 import pytest
 from pydantic import SecretStr
 
-from core.config.services import LLMConfig
-from core.services.llm.credentials import (
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.credentials import (
     resolve_llm_credential,
     set_llm_credential_resolver,
 )
-from core.services.llm.runtime import api_key_for, provider_configured
+from baselith.core.services.llm.runtime import api_key_for, provider_configured
 
 _ENV_VARS = (
     "LLM_API_KEY",
@@ -86,13 +86,13 @@ class TestEnvironmentPrecedence:
 
     def test_config_only_lookup_ignores_the_seam(self):
         """api_key_from_config must never see a stored credential."""
-        from core.services.llm.runtime import api_key_from_config
+        from baselith.core.services.llm.runtime import api_key_from_config
 
         set_llm_credential_resolver(lambda _p: "k-stored")
         assert api_key_from_config(_config(), "anthropic") is None
 
     def test_config_only_lookup_still_reads_the_environment(self, monkeypatch):
-        from core.services.llm.runtime import api_key_from_config
+        from baselith.core.services.llm.runtime import api_key_from_config
 
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-env")
         secret = api_key_from_config(_config(), "anthropic")

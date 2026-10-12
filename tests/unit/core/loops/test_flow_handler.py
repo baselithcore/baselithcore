@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.loops.flow_handler import LoopFlowHandler
-from core.orchestration.checkpoint import Checkpoint, CheckpointManager
-from core.orchestration.checkpoint_memory import InMemoryCheckpointStore
-from core.orchestration.limits import LoopBudget, LoopLimits
+from baselith.core.loops.flow_handler import LoopFlowHandler
+from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
+from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
+from baselith.core.orchestration.limits import LoopBudget, LoopLimits
 
 pytestmark = [pytest.mark.unit]
 

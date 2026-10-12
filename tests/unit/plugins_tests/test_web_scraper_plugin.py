@@ -1,7 +1,7 @@
-from core.scraper import CrawlEngine as CoreCrawlEngine
-from core.scraper import Scraper as CoreScraper
-from plugins.web_scraper import CrawlEngine, Scraper
-from plugins.web_scraper.plugin import WebScraperPlugin
+from baselith.core.scraper import CrawlEngine as CoreCrawlEngine
+from baselith.core.scraper import Scraper as CoreScraper
+from baselith.plugins.web_scraper import CrawlEngine, Scraper
+from baselith.plugins.web_scraper.plugin import WebScraperPlugin
 
 
 def test_core_scraper_alias_points_to_plugin_exports() -> None:
@@ -22,7 +22,7 @@ async def test_scraper_context_exit_keeps_the_shared_robots_client() -> None:
     the crawl ran with no robots rules at all)."""
     from unittest.mock import AsyncMock, patch
 
-    with patch("plugins.web_scraper._http_pool.close_robots_client") as robots:
+    with patch("baselith.plugins.web_scraper._http_pool.close_robots_client") as robots:
         async with Scraper() as scraper:
             scraper.close_fetchers = AsyncMock()  # type: ignore[method-assign]
         scraper.close_fetchers.assert_awaited_once()
@@ -33,7 +33,7 @@ async def test_plugin_shutdown_closes_the_shared_robots_client() -> None:
     from unittest.mock import AsyncMock, patch
 
     with patch(
-        "plugins.web_scraper._http_pool.close_robots_client", new=AsyncMock()
+        "baselith.plugins.web_scraper._http_pool.close_robots_client", new=AsyncMock()
     ) as robots:
         await WebScraperPlugin().shutdown()
     robots.assert_awaited_once()
@@ -44,7 +44,7 @@ async def test_extraction_runs_off_the_event_loop() -> None:
     import threading
     from unittest.mock import AsyncMock, patch
 
-    from plugins.web_scraper.models import ExtractedData, ScrapedPage
+    from baselith.plugins.web_scraper.models import ExtractedData, ScrapedPage
 
     loop_thread = threading.get_ident()
     threads: list[int] = []

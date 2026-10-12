@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from core.chat.agent_state import AgentState
-from core.evaluation.trajectory import ToolCall
+from baselith.core.chat.agent_state import AgentState
+from baselith.core.evaluation.trajectory import ToolCall
 
 
 def _state() -> AgentState:

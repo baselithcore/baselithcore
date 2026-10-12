@@ -1,4 +1,4 @@
-"""Tests for :func:`core.plugins.env.load_plugin_dotenv` scoping/hardening.
+"""Tests for :func:`baselith.core.plugins.env.load_plugin_dotenv` scoping/hardening.
 
 The public plugin ``.env`` loader must (a) refuse a symlinked ``.env`` (it must
 not point outside the plugin at host secrets), and (b) load ONLY keys in the
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins.env import load_plugin_dotenv
+from baselith.core.plugins.env import load_plugin_dotenv
 
 
 def _plugin(tmp_path: Path, name: str, env_body: str) -> Path:

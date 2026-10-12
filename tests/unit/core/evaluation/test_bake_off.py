@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.evaluation.bake_off import run_bake_off
-from core.evaluation.prompt_eval import EvalCase
+from baselith.core.evaluation.bake_off import run_bake_off
+from baselith.core.evaluation.prompt_eval import EvalCase
 
 pytestmark = [pytest.mark.unit]
 

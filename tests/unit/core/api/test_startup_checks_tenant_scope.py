@@ -11,10 +11,10 @@ from contextlib import asynccontextmanager, contextmanager
 
 import pytest
 
-from core import context as core_context
-from core.api import startup_checks
-from core.context import TenantContextError, get_current_tenant_id
-from core.db import connection as db_connection
+from baselith.core import context as core_context
+from baselith.core.api import startup_checks
+from baselith.core.context import TenantContextError, get_current_tenant_id
+from baselith.core.db import connection as db_connection
 
 UNBOUND = "<unbound>"
 
@@ -83,7 +83,7 @@ async def test_bound_request_tenant_is_untouched_by_the_probe(probe, monkeypatch
     """A tenant bound by the caller is restored after the check."""
     monkeypatch.setattr(db_connection, "DB_RLS_ENABLED", False)
 
-    from core.context import reset_tenant_context, set_tenant_context
+    from baselith.core.context import reset_tenant_context, set_tenant_context
 
     token = set_tenant_context("acme")
     try:
@@ -98,7 +98,7 @@ async def test_bound_request_tenant_is_untouched_by_the_probe(probe, monkeypatch
 async def test_connection_budget_runs_under_the_system_tenant(probe, monkeypatch):
     """The budget read used to run outside the scope: with DB_RLS_ENABLED its
     checkout raised TenantContextError, swallowed — the check never ran."""
-    from core.db import pool_budget
+    from baselith.core.db import pool_budget
 
     monkeypatch.setattr(db_connection, "DB_RLS_ENABLED", True)
     seen: list[str] = []
@@ -121,7 +121,7 @@ async def test_unreachable_database_is_bounded_and_skips_the_budget(monkeypatch)
     import asyncio
     from unittest.mock import MagicMock
 
-    from core.db import pool_budget
+    from baselith.core.db import pool_budget
 
     monkeypatch.setattr(startup_checks, "POSTGRES_ENABLED", True)
     monkeypatch.setattr(startup_checks, "CACHE_REDIS_URL", "")
@@ -149,7 +149,7 @@ async def test_unreachable_database_is_bounded_and_skips_the_budget(monkeypatch)
     async def _rls() -> None:
         await asyncio.sleep(60)
 
-    import core.db.rls_posture as rls_posture
+    import baselith.core.db.rls_posture as rls_posture
 
     monkeypatch.setattr(rls_posture, "enforce_rls_posture", _rls)
     mock_logger = MagicMock()
@@ -169,7 +169,7 @@ async def test_health_check_reuses_a_failed_boot_probe(probe, monkeypatch):
     """With the boot probe already failed, no pool wait: one cheap re-probe."""
     from unittest.mock import AsyncMock
 
-    from core.db import reachability
+    from baselith.core.db import reachability
 
     warm = AsyncMock(return_value=True)
     reprobe = AsyncMock(return_value=False)

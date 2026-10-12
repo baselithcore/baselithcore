@@ -14,14 +14,18 @@ from pathlib import Path
 
 import pytest
 
-from core.cli.commands.doctor_checks import is_placeholder_secret
-from core.cli.commands.env_profiles import (
+from baselith.core.cli.commands.doctor_checks import is_placeholder_secret
+from baselith.core.cli.commands.env_profiles import (
     DEV_DEFAULTS,
     ensure_dev_env,
     write_project_env,
 )
-from core.cli.commands.init import PROJECT_TEMPLATES, available_templates, run_init
-from core.cli.commands.init_setup import DATA_DIRS, GITIGNORE_ENTRIES
+from baselith.core.cli.commands.init import (
+    PROJECT_TEMPLATES,
+    available_templates,
+    run_init,
+)
+from baselith.core.cli.commands.init_setup import DATA_DIRS, GITIGNORE_ENTRIES
 
 pytestmark = [pytest.mark.unit]
 
@@ -103,8 +107,8 @@ def test_generated_env_passes_the_startup_security_checks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The values satisfy SecurityConfig and are classified as development."""
-    from core.config.environment import is_production_env
-    from core.config.security import SecurityConfig
+    from baselith.core.config.environment import is_production_env
+    from baselith.core.config.security import SecurityConfig
 
     values = _env_values(_scaffold(tmp_path, monkeypatch, "minimal") / ".env")
     for key, value in values.items():
@@ -174,7 +178,10 @@ class TestWriteProjectEnv:
 
 def test_server_starter_shares_the_minimal_server_files() -> None:
     """``baselith-core-template`` carries copies; they must not drift."""
-    from core.cli.commands.init_templates import BACKEND_MODULE, SERVICES_COMPOSE
+    from baselith.core.cli.commands.init_templates import (
+        BACKEND_MODULE,
+        SERVICES_COMPOSE,
+    )
 
     starter = (
         Path(__file__).resolve().parents[4] / "templates" / "baselith-core-template"

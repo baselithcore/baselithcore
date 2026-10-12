@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.config.quotas import QuotaConfig, set_tenant_cost_budget
-from core.quotas.manager import CostBudgetExceededError, QuotaManager
-from core.quotas.store import InMemoryQuotaStore
+from baselith.core.config.quotas import QuotaConfig, set_tenant_cost_budget
+from baselith.core.quotas.manager import CostBudgetExceededError, QuotaManager
+from baselith.core.quotas.store import InMemoryQuotaStore
 
 
 def _manager(**config_kwargs) -> QuotaManager:
@@ -100,7 +100,7 @@ async def test_identity_cost_budget_enforced_independently_of_tenant():
 
 @pytest.mark.asyncio
 async def test_identity_cost_override_beats_default():
-    from core.config.quotas import set_key_cost_budget
+    from baselith.core.config.quotas import set_key_cost_budget
 
     manager = _manager(QUOTA_IDENTITY_DAILY_COST_USD=100.0)
     set_key_cost_budget("small-key", daily=0.10)

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from core import context as core_context
-from core.orchestration.handlers.simulation_handler import SimulationHandler
-from core.swarm.types import AgentProfile, Capability
+from baselith.core import context as core_context
+from baselith.core.orchestration.handlers.simulation_handler import SimulationHandler
+from baselith.core.swarm.types import AgentProfile, Capability
 
 
 @contextmanager
@@ -63,7 +63,8 @@ def _wire(monkeypatch, seen_colonies: list, on_execute=None):
         return "report"
 
     monkeypatch.setattr(
-        "core.orchestration.handlers.swarm_handler.decompose_task", fake_decompose
+        "baselith.core.orchestration.handlers.swarm_handler.decompose_task",
+        fake_decompose,
     )
     monkeypatch.setattr(SimulationHandler, "_execute_subtasks", fake_execute)
     monkeypatch.setattr(SimulationHandler, "_synthesize_results", fake_synthesize)

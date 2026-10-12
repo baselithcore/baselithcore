@@ -1,5 +1,5 @@
 """
-Comprehensive tests for core.utils.tokens module.
+Comprehensive tests for baselith.core.utils.tokens module.
 
 Tests cover:
 - estimate_tokens() with various inputs
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import core.utils.tokens as tokens_module
+import baselith.core.utils.tokens as tokens_module
 
 _classify_text = tokens_module._classify_text
 _get_tiktoken_encoder = tokens_module._get_tiktoken_encoder
@@ -65,7 +65,7 @@ class TestEstimateTokens:
         tokens = estimate_tokens(text, model="gpt-4")
         assert tokens > 0
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_tiktoken_available_success(self, mock_get_encoder):
         """When tiktoken is available, use exact counting."""
         mock_encoder = MagicMock()
@@ -78,7 +78,7 @@ class TestEstimateTokens:
         assert tokens == 5
         mock_encoder.encode.assert_called_once_with(text)
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_tiktoken_available_but_encode_fails(self, mock_get_encoder):
         """If tiktoken.encode() fails, fall back to heuristic."""
         mock_encoder = MagicMock()
@@ -91,7 +91,7 @@ class TestEstimateTokens:
         # Should fall back to heuristic: ~34 chars / 4 = ~8 tokens
         assert 6 <= tokens <= 10
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_tiktoken_unavailable_fallback(self, mock_get_encoder):
         """When tiktoken is unavailable, use heuristic."""
         mock_get_encoder.return_value = None
@@ -274,7 +274,7 @@ class TestClassifyText:
 class TestEdgeCases:
     """Tests for edge cases and special scenarios."""
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_unicode_characters(self, mock_get_encoder):
         """Various unicode characters should be handled correctly."""
         # Force heuristic to test properly
@@ -283,7 +283,7 @@ class TestEdgeCases:
         tokens = estimate_tokens(unicode_text)
         assert tokens > 0
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_emoji_text(self, mock_get_encoder):
         """Text with emojis should be estimated."""
         # Force heuristic to test properly
@@ -292,7 +292,7 @@ class TestEdgeCases:
         tokens = estimate_tokens(emoji_text)
         assert tokens > 0
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_whitespace_only(self, mock_get_encoder):
         """Whitespace-only text should still return tokens."""
         # Force heuristic to test properly
@@ -301,7 +301,7 @@ class TestEdgeCases:
         tokens = estimate_tokens(whitespace)
         assert tokens >= 1
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_special_characters(self, mock_get_encoder):
         """Text with special characters should be handled."""
         # Force heuristic to test properly
@@ -311,7 +311,7 @@ class TestEdgeCases:
         # Should be classified as code due to high symbol density
         assert tokens > 0
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_newlines_and_formatting(self, mock_get_encoder):
         """Text with newlines and formatting should be counted."""
         # Force heuristic to test properly
@@ -320,7 +320,7 @@ class TestEdgeCases:
         tokens = estimate_tokens(formatted)
         assert tokens >= 5
 
-    @patch("core.utils.tokens._get_tiktoken_encoder")
+    @patch("baselith.core.utils.tokens._get_tiktoken_encoder")
     def test_very_long_single_word(self, mock_get_encoder):
         """Very long single word should be estimated."""
         # Force heuristic to test properly
@@ -349,7 +349,8 @@ class TestEstimateTokensAsync:
         expected = tokens_module.estimate_tokens(text)
 
         with patch(
-            "core.utils.tokens.asyncio.to_thread", wraps=tokens_module.asyncio.to_thread
+            "baselith.core.utils.tokens.asyncio.to_thread",
+            wraps=tokens_module.asyncio.to_thread,
         ) as spy:
             result = await tokens_module.estimate_tokens_async(text)
         spy.assert_awaited_once()

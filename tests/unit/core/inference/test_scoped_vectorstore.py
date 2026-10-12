@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 from qdrant_client.models import PointStruct, VectorParams
 
-from core.config.inference import QdrantServerConfig
-from core.services.inference import (
+from baselith.core.config.inference import QdrantServerConfig
+from baselith.core.services.inference import (
     InferenceConfigError,
     QdrantRuntime,
     TenantScopeError,
 )
-from core.services.inference.scope import scoped_name
+from baselith.core.services.inference.scope import scoped_name
 
 VEC = VectorParams(size=2, distance="Cosine")  # type: ignore[arg-type]
 

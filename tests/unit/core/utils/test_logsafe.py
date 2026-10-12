@@ -1,4 +1,4 @@
-"""Tests for :mod:`core.utils.logsafe`."""
+"""Tests for :mod:`baselith.core.utils.logsafe`."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import logging
 
 import pytest
 
-from core.utils.logsafe import DEFAULT_MAX_LENGTH, sanitize_log_value
+from baselith.core.utils.logsafe import DEFAULT_MAX_LENGTH, sanitize_log_value
 
 
 class TestSanitizeLogValue:
     """Escaping and truncation of untrusted values headed for a log line."""
 
     def test_plain_value_is_unchanged(self) -> None:
-        assert sanitize_log_value("baselithbot") == "baselithbot"
+        assert sanitize_log_value("examplebot") == "examplebot"
 
     @pytest.mark.parametrize(
         ("raw", "escaped"),
@@ -66,7 +66,7 @@ class TestSignatureLoggingIsInjectionSafe:
     def test_refusal_log_escapes_the_plugin_name(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from core.plugins.signing import enforce_plugin_signature
+        from baselith.core.plugins.signing import enforce_plugin_signature
 
         monkeypatch.setenv("BASELITH_REQUIRE_PLUGIN_SIGNATURES", "true")
         monkeypatch.setenv("BASELITH_PLUGIN_TRUST_ROOTS", "aa" * 32)

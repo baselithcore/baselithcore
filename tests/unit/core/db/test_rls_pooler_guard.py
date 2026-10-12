@@ -14,9 +14,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from core.config.storage import StorageConfig
-from core.db import connection as db_connection
-from core.db.rls_posture import RlsBypassError, enforce_rls_posture
+from baselith.core.config.storage import StorageConfig
+from baselith.core.db import connection as db_connection
+from baselith.core.db.rls_posture import RlsBypassError, enforce_rls_posture
 
 
 def _cfg(**overrides: object) -> StorageConfig:
@@ -60,7 +60,7 @@ def test_the_escape_hatch_is_gone() -> None:
 async def test_startup_posture_check_refuses_the_conflict_in_every_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import core.config as config_pkg
+    import baselith.core.config as config_pkg
 
     monkeypatch.setattr(config_pkg, "get_storage_config", lambda: _cfg())
     monkeypatch.setenv("APP_ENV", "development")

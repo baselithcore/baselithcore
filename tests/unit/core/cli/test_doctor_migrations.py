@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from core.cli.commands import doctor, doctor_checks, doctor_migrations
-from core.db import migration_config
-from core.db.migration_config import MigrationsNotFoundError
+from baselith.core.cli.commands import doctor, doctor_checks, doctor_migrations
+from baselith.core.db import migration_config
+from baselith.core.db.migration_config import MigrationsNotFoundError
 
 
 def test_passes_and_names_the_head_when_scripts_resolve(

@@ -4,11 +4,14 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from core.config.plugin_update_apply import UpdateApplyConfig
-from core.plugin_updates.apply.boot_report import BootReport, PluginBootState
-from core.plugin_updates.apply.health import evaluate_boot_reports, wait_healthy
-from core.plugin_updates.apply.models import Expectation
-from core.plugin_updates.apply.store import RunStore
+from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.plugin_updates.apply.boot_report import BootReport, PluginBootState
+from baselith.core.plugin_updates.apply.health import (
+    evaluate_boot_reports,
+    wait_healthy,
+)
+from baselith.core.plugin_updates.apply.models import Expectation
+from baselith.core.plugin_updates.apply.store import RunStore
 
 T0 = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 EXPECT = Expectation(
@@ -234,7 +237,7 @@ def test_same_pid_twice_does_not_fake_a_worker() -> None:
 
 
 def test_stale_report_beside_a_good_one_is_ignored(tmp_path: Path) -> None:
-    from core.plugin_updates.apply.boot_report import read_boot_reports
+    from baselith.core.plugin_updates.apply.boot_report import read_boot_reports
 
     store = _store(tmp_path)
     stale = _report(9, demo=_demo(version="0.1.0", directory="/app/plugins/demo"))

@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.evaluation.consensus import ConsensusEvaluator
-from core.evaluation.protocols import EvaluationResult, QualityLevel
+from baselith.core.evaluation.consensus import ConsensusEvaluator
+from baselith.core.evaluation.protocols import EvaluationResult, QualityLevel
 
 
 class _StubJudge:

@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from core.human.interaction import (
+from baselith.core.human.interaction import (
     DEFAULT_MAX_RECENT_REQUESTS,
     HumanIntervention,
     HumanRequest,
@@ -243,7 +243,7 @@ class TestDedicatedExecutor:
     every other ``to_thread`` caller in the framework (SSRF DNS resolution,
     audit-log appends, tokenization) and is only ``cpu_count + 4`` wide, so a
     handful of pending approvals would starve them — the same argument
-    ``core.utils.concurrency.get_inference_executor`` makes for model calls.
+    ``baselith.core.utils.concurrency.get_inference_executor`` makes for model calls.
     """
 
     async def test_callback_runs_on_the_hitl_pool(self) -> None:
@@ -268,7 +268,7 @@ class TestDedicatedExecutor:
         assert await manager.ask_input("q") == "ok"
 
     def test_pool_is_a_singleton_sized_from_settings(self) -> None:
-        from core.human.executor import (
+        from baselith.core.human.executor import (
             DEFAULT_HITL_CALLBACK_THREADS,
             get_hitl_executor,
             shutdown_hitl_executor,
@@ -284,7 +284,7 @@ class TestDedicatedExecutor:
             shutdown_hitl_executor()
 
     def test_pool_size_comes_from_the_setting(self, monkeypatch) -> None:
-        import core.human.executor as executor_mod
+        import baselith.core.human.executor as executor_mod
 
         monkeypatch.setattr(executor_mod, "_configured_threads", lambda: 3)
         executor_mod.shutdown_hitl_executor()
@@ -294,14 +294,17 @@ class TestDedicatedExecutor:
             executor_mod.shutdown_hitl_executor()
 
     def test_shutdown_is_idempotent(self) -> None:
-        from core.human.executor import get_hitl_executor, shutdown_hitl_executor
+        from baselith.core.human.executor import (
+            get_hitl_executor,
+            shutdown_hitl_executor,
+        )
 
         get_hitl_executor()
         shutdown_hitl_executor()
         shutdown_hitl_executor()
 
     def test_orchestration_config_exposes_the_thread_count(self) -> None:
-        from core.config.orchestration import OrchestrationConfig
+        from baselith.core.config.orchestration import OrchestrationConfig
 
         assert OrchestrationConfig().hitl_callback_threads == 8
 
@@ -345,7 +348,7 @@ class TestCancellation:
 
 class TestPublicExports:
     def test_package_exports_the_bound(self) -> None:
-        import core.human as human
+        import baselith.core.human as human
 
         assert human.DEFAULT_MAX_RECENT_REQUESTS == 256
         assert "DEFAULT_MAX_RECENT_REQUESTS" in human.__all__

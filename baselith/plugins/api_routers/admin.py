@@ -1,0 +1,220 @@
+"""
+Admin Router.
+
+Provides secure endpoints for administrative tasks, including analytics
+dashboards and system monitoring. Protected by HTTP Basic Authentication.
+"""
+
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+from baselith.core.middleware import authenticate_admin_basic
+from baselith.core.services.feedback_service import get_feedback_service
+
+router = APIRouter(tags=["admin"])
+security = HTTPBasic()
+
+#: Dashboard asset root. The admin page ships with the core static bundle
+#: (``baselith/core/static``, also mounted at ``/static`` by the app factory), not with
+#: this plugin: ``parents[2]`` is the repo/package root
+#: (baselith/plugins/api_routers/admin.py -> baselith/plugins/api_routers -> plugins -> <root>).
+BASE_DIR = Path(__file__).resolve().parents[2] / "core" / "static"
+
+
+async def verify_credentials(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(security),
+):
+    """
+    Verifica credenziali admin via Basic Auth.
+    Username and password are read from the .env file via config.py.
+    Enforces account lockout after repeated failures.
+
+    Lockout is keyed on the **client IP**, not the (guessable) admin username,
+    so an attacker cannot lock the legitimate admin out by hammering the login.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    # Lockout check, PBKDF2 verification (off-loop, bounded concurrency) and
+    # failure accounting run as one sequence in core, so a concurrent burst
+    # cannot race past the lockout threshold.
+    if not await authenticate_admin_basic(
+        client_ip, credentials.username, credentials.password
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenziali non valide",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    return credentials.username
+
+
+@router.get("/admin")
+def admin_page(_user: str = Depends(verify_credentials)):
+    """
+    Restituisce la pagina Admin (protetta da Basic Auth).
+    """
+    return FileResponse(BASE_DIR / "admin.html")
+
+
+@router.get("/admin/data")
+async def admin_data(
+    _user: str = Depends(verify_credentials),
+    days: int | None = Query(
+        default=30,
+        ge=1,
+        le=365,
+        description="Time window (in days) to consider for analytics. Use values >0.",
+    ),
+    recent_limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Number of recent feedbacks to return.",
+    ),
+    top_limit: int = Query(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum number of entries for popular queries/documents.",
+    ),
+):
+    """
+    Returns analytics/feedback data in JSON format (protected by Basic Auth).
+    - Aggregated totals (positive, negative, percentages)
+    - Daily time series
+    - Recent feedback with metadata and sources
+    - Most cited queries and documents in the selected period
+    """
+    feedback_service = get_feedback_service()
+    analytics = await feedback_service.get_analytics(
+        days=days,
+        recent_limit=recent_limit,
+        top_limit=top_limit,
+    )
+    return JSONResponse(analytics)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard companions of the API-key control plane
+# ---------------------------------------------------------------------------
+#
+# The dashboard authenticates with HTTP Basic, which ``require_admin`` /
+# ``require_admin_or_job`` (X-API-Key / Bearer only) deliberately do not
+# accept: browser-ambient Basic credentials are replayed on cross-site
+# requests, so they stay confined to this ``/admin/*`` surface. The routes
+# below reuse the API handlers so the payloads cannot drift; the unsafe one
+# (``POST /admin/reindex``) is covered by ``CSRFOriginMiddleware`` like every
+# other state-changing request.
+
+
+@router.get("/admin/status")
+def admin_status(_user: str = Depends(verify_credentials)) -> dict[str, object]:
+    """Return the ``/status`` payload for the dashboard (Basic Auth)."""
+    from baselith.plugins.api_routers.status import status as system_status
+
+    return system_status(_user)
+
+
+@router.post("/admin/reindex", status_code=status.HTTP_202_ACCEPTED)
+async def admin_reindex(
+    request: Request,
+    response: Response,
+    _user: str = Depends(verify_credentials),
+) -> dict[str, object]:
+    """Schedule the incremental ``/reindex`` for the dashboard (Basic Auth).
+
+    Same ``202`` + ``status_url`` contract as ``POST /reindex``; the dashboard
+    polls ``GET /admin/status`` (which embeds the indexing state).
+    """
+    from baselith.plugins.api_routers.index import reindex
+
+    return await reindex(request, response)
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter queue (terminally-failed background jobs)
+# ---------------------------------------------------------------------------
+
+
+def _dlq_summary(record) -> dict:
+    """Project a DeadLetterRecord to a JSON-safe summary (omits payload)."""
+    return {
+        "job_id": record.job_id,
+        "func_name": record.func_name,
+        "origin_queue": record.origin_queue,
+        "error": record.error,
+        "failed_at": record.failed_at,
+        "tenant_id": record.tenant_id,
+        "args_repr": record.args_repr,
+        "kwargs_repr": record.kwargs_repr,
+    }
+
+
+@router.get("/admin/dlq")
+def dlq_list(
+    _user: str = Depends(verify_credentials),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """List dead-lettered jobs, most-recently-failed first (Basic Auth)."""
+    from baselith.core.task_queue.dead_letter import get_dead_letter_queue
+
+    dlq = get_dead_letter_queue()
+    records = dlq.list(limit=limit, offset=offset)
+    return JSONResponse(
+        {"total": dlq.count(), "items": [_dlq_summary(r) for r in records]}
+    )
+
+
+@router.get("/admin/dlq/{job_id}")
+def dlq_get(job_id: str, _user: str = Depends(verify_credentials)):
+    """Return full detail (including traceback) for one dead-lettered job."""
+    from baselith.core.task_queue.dead_letter import get_dead_letter_queue
+
+    record = get_dead_letter_queue().get(job_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    detail = _dlq_summary(record)
+    detail["traceback"] = record.traceback
+    return JSONResponse(detail)
+
+
+@router.post("/admin/dlq/{job_id}/replay")
+def dlq_replay(job_id: str, _user: str = Depends(verify_credentials)):
+    """Re-enqueue a dead-lettered job onto its original queue (Basic Auth)."""
+    from baselith.core.task_queue.dead_letter import (
+        DeadLetterError,
+        get_dead_letter_queue,
+    )
+
+    try:
+        new_id = get_dead_letter_queue().replay(job_id)
+    except DeadLetterError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    return JSONResponse({"status": "requeued", "job_id": new_id})
+
+
+@router.delete("/admin/dlq/{job_id}")
+def dlq_purge(job_id: str, _user: str = Depends(verify_credentials)):
+    """Drop a single dead-lettered job record (Basic Auth)."""
+    from baselith.core.task_queue.dead_letter import get_dead_letter_queue
+
+    removed = get_dead_letter_queue().purge(job_id)
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return JSONResponse({"status": "purged", "job_id": job_id})
+
+
+@router.delete("/admin/dlq")
+def dlq_purge_all(_user: str = Depends(verify_credentials)):
+    """Clear the entire dead-letter queue (Basic Auth)."""
+    from baselith.core.task_queue.dead_letter import get_dead_letter_queue
+
+    count = get_dead_letter_queue().purge_all()
+    return JSONResponse({"status": "purged_all", "removed": count})

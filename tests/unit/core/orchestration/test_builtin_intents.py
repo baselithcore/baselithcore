@@ -9,9 +9,9 @@ constant silently short, and every catalogue reading it silently wrong.
 
 from __future__ import annotations
 
-from core.orchestration import BUILTIN_INTENTS
-from core.orchestration.orchestrator import Orchestrator
-from core.plugins.registry import PluginRegistry
+from baselith.core.orchestration import BUILTIN_INTENTS
+from baselith.core.orchestration.orchestrator import Orchestrator
+from baselith.core.plugins.registry import PluginRegistry
 
 
 def test_constant_matches_a_real_orchestrator() -> None:

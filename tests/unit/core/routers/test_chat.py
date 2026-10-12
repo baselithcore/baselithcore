@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from core.models.chat import ChatRequest, ChatResponse
+from baselith.core.models.chat import ChatRequest, ChatResponse
 
 
 @pytest.fixture
 def chat_router_module():
-    import core.chat.service as chat_service_module
-    import core.routers.chat as chat_router_module
+    import baselith.core.chat.service as chat_service_module
+    import baselith.core.routers.chat as chat_router_module
 
     # Ensure no previous test leaves behind a resolved global chat service.
     chat_service_module._chat_service = None
@@ -107,3 +107,104 @@ def test_chat_stream_endpoint(client, chat_router_module, mock_chat_service):
     mock_chat_service.handle_chat_stream_async.assert_called_once()
     call_args = mock_chat_service.handle_chat_stream_async.call_args[0][0]
     assert call_args.query == "Hello Stream"
+
+
+def _posted_run_ids(client, mock_chat_service, requests, user_ids):
+    """POST each (headers) in ``requests`` as the matching identity.
+
+    ``None`` is a request the auth layer attached no identity to (the
+    auth-disabled anonymous bypass), ``"anonymous"`` an anonymous AuthUser,
+    anything else an authenticated user of that id. Returns the run ids.
+    """
+    from fastapi import Request
+
+    from baselith.core.auth.types import AuthRole, AuthUser
+
+    mock_chat_service.handle_chat_async = AsyncMock(
+        return_value=ChatResponse(answer="ok", sources=[])
+    )
+    # The client fixture overrides exactly one dependency: require_user.
+    (require_user,) = list(client.app.dependency_overrides)
+    for headers, user_id in zip(requests, user_ids, strict=True):
+
+        async def as_identity(request: Request, user_id=user_id) -> str:
+            if user_id == "anonymous":
+                request.state.user = AuthUser(
+                    user_id="anonymous", roles={AuthRole.ANONYMOUS}
+                )
+            elif user_id is not None:
+                request.state.user = AuthUser(user_id=user_id, tenant_id="t1")
+            return user_id or "anonymous"
+
+        client.app.dependency_overrides[require_user] = as_identity
+        client.post("/chat", json={"query": "Hello"}, headers=headers)
+    return [
+        c.kwargs["run_id"] for c in mock_chat_service.handle_chat_async.call_args_list
+    ]
+
+
+def test_chat_run_id_follows_the_idempotency_key(client, mock_chat_service):
+    """A retry with the same Idempotency-Key is an attempt at the same run."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [
+            {"Idempotency-Key": "k-1"},
+            {"Idempotency-Key": "k-1"},
+            {"Idempotency-Key": "k-2"},
+        ],
+        ["alice", "alice", "alice"],
+    )
+    assert ids[0] == ids[1] != ids[2]
+    assert all(run_id.startswith("chat-") for run_id in ids)
+
+
+def test_chat_run_id_is_scoped_to_the_principal(client, mock_chat_service):
+    """Two users reusing a key never share a run, nor each other's answer."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"Idempotency-Key": "k-1"}, {"Idempotency-Key": "k-1"}],
+        ["alice", "bob"],
+    )
+    assert ids[0] != ids[1]
+
+
+@pytest.mark.parametrize("user_id", [None, "anonymous"])
+def test_anonymous_callers_never_get_a_replayable_run(
+    client, mock_chat_service, user_id
+):
+    """Every anonymous caller shares one principal id: a key from them would
+    let one caller read back another's recorded answer."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"Idempotency-Key": "k-1"}, {"Idempotency-Key": "k-1"}],
+        [user_id, user_id],
+    )
+    assert ids[0] != ids[1]
+
+
+def test_request_id_is_not_a_replay_key(client, mock_chat_service):
+    """X-Request-ID is client-chosen and echoed in responses and logs."""
+    ids = _posted_run_ids(
+        client,
+        mock_chat_service,
+        [{"X-Request-ID": "req-1"}, {"X-Request-ID": "req-1"}],
+        ["alice", "alice"],
+    )
+    assert ids[0] != ids[1]
+
+
+def test_chat_run_lease_held_elsewhere_answers_409(client, mock_chat_service):
+    from baselith.core.orchestration.checkpoint_errors import (
+        CheckpointLeaseHeldError,
+    )
+
+    mock_chat_service.handle_chat_async = AsyncMock(
+        side_effect=CheckpointLeaseHeldError("chat-x", "other-owner")
+    )
+    response = client.post(
+        "/chat", json={"query": "Hello"}, headers={"Idempotency-Key": "k-1"}
+    )
+    assert response.status_code == 409

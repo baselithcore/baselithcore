@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.loops.flow_handler import LoopFlowHandler
-from core.loops.priming import MAX_PRIMER_CHARS, prime_lessons
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import Pattern, PatternKind, PatternStatus
+from baselith.core.loops.flow_handler import LoopFlowHandler
+from baselith.core.loops.priming import MAX_PRIMER_CHARS, prime_lessons
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import Pattern, PatternKind, PatternStatus
 
 pytestmark = [pytest.mark.unit]
 

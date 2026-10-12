@@ -25,8 +25,8 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.middleware.gzip import GZipMiddleware
 
-from core.middleware._idempotency_store import keep_lock_alive
-from core.middleware.idempotency import IdempotencyMiddleware
+from baselith.core.middleware._idempotency_store import keep_lock_alive
+from baselith.core.middleware.idempotency import IdempotencyMiddleware
 
 pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
 
@@ -82,7 +82,9 @@ def _app() -> tuple[FastAPI, dict[str, int]]:
 
 
 def _mw(app: Any, fake: _Redis, **kwargs: Any) -> IdempotencyMiddleware:
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         return IdempotencyMiddleware(app, **kwargs)
 
 
@@ -284,7 +286,7 @@ def test_query_string_binds_even_when_the_body_is_never_read() -> None:
 
 def test_entry_without_a_target_digest_still_replays() -> None:
     """Entries stored before the query was fingerprinted replay as before."""
-    from core.middleware._idempotency_replay import decode_entry, encode_entry
+    from baselith.core.middleware._idempotency_replay import decode_entry, encode_entry
 
     entry = decode_entry(encode_entry(200, [], b"{}", None))
     assert entry is not None

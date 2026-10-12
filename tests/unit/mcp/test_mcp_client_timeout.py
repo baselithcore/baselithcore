@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.mcp.client import MCPClient
+from baselith.core.mcp.client import MCPClient
 
 
 class _HangingReader:
@@ -30,7 +30,7 @@ class _FakeWriter:
 async def test_send_request_times_out(monkeypatch):
     """A hung server triggers a timeout error and marks the client disconnected."""
     monkeypatch.setattr(
-        "core.mcp.client.get_mcp_config",
+        "baselith.core.mcp.client.get_mcp_config",
         lambda: SimpleNamespace(mcp_client_request_timeout=0.05),
     )
 

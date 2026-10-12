@@ -1,0 +1,476 @@
+"""
+OpenTelemetry-compatible tracing system.
+
+Provides distributed tracing with span management and context propagation.
+Note: Uses OpenTelemetry API patterns but can work without the full SDK.
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+from baselith.core.observability.logging import get_logger
+from baselith.core.observability.span_exporters import (
+    ConsoleExporter,
+    InMemoryExporter,
+    OTLPExporter,
+    SpanExporter,
+    _otel_active,
+)
+
+logger = get_logger(__name__)
+
+
+def _coerce_attr(value: Any) -> Any:
+    """Coerce a span attribute to an OTLP-accepted type (str/bool/int/float)."""
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(v, (str, bool, int, float)) for v in value
+    ):
+        return list(value)
+    return str(value)
+
+
+class SpanStatus(str, Enum):
+    """Span completion status."""
+
+    OK = "ok"
+    ERROR = "error"
+    UNSET = "unset"
+
+
+@dataclass
+class SpanContext:
+    """Span context for propagation."""
+
+    trace_id: str
+    span_id: str
+    parent_span_id: str | None = None
+
+    def to_headers(self) -> dict[str, str]:
+        """Convert to W3C trace context headers."""
+        return {
+            "traceparent": f"00-{self.trace_id}-{self.span_id}-01",
+        }
+
+    @classmethod
+    def from_headers(cls, headers: dict[str, str]) -> SpanContext | None:
+        """Parse from W3C trace context headers."""
+        traceparent = headers.get("traceparent")
+        if not traceparent:
+            return None
+
+        try:
+            parts = traceparent.split("-")
+            if len(parts) >= 3:
+                return cls(trace_id=parts[1], span_id=parts[2])
+        except Exception:
+            logger.debug("Failed to parse traceparent header", exc_info=True)
+        return None
+
+
+@dataclass
+class Span:
+    """
+    Represents a single trace span.
+
+    A span is a single operation within a trace.
+    """
+
+    name: str
+    context: SpanContext
+    start_time: float = field(default_factory=time.time)
+    end_time: float | None = None
+    status: SpanStatus = SpanStatus.UNSET
+    attributes: dict[str, Any] = field(default_factory=dict)
+    events: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def duration_ms(self) -> float | None:
+        """Get span duration in milliseconds."""
+        if self.end_time is None:
+            return None
+        return (self.end_time - self.start_time) * 1000
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """Set a span attribute."""
+        self.attributes[key] = value
+
+    def set_attributes(self, attributes: dict[str, Any]) -> None:
+        """Set multiple attributes."""
+        self.attributes.update(attributes)
+
+    def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
+        """Add an event to the span."""
+        self.events.append(
+            {
+                "name": name,
+                "timestamp": time.time(),
+                "attributes": attributes or {},
+            }
+        )
+
+    def set_status(self, status: SpanStatus, description: str | None = None) -> None:
+        """Set span status."""
+        self.status = status
+        if description:
+            self.attributes["status.description"] = description
+
+    def end(self) -> None:
+        """End the span."""
+        self.end_time = time.time()
+        if self.status == SpanStatus.UNSET:
+            self.status = SpanStatus.OK
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert span to dictionary."""
+        return {
+            "name": self.name,
+            "trace_id": self.context.trace_id,
+            "span_id": self.context.span_id,
+            "parent_span_id": self.context.parent_span_id,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "duration_ms": self.duration_ms,
+            "status": self.status.value,
+            "attributes": self.attributes,
+            "events": self.events,
+        }
+
+
+# The span currently open in this task/thread, shared by **every** tracer.
+#
+# Two properties have to hold at once, and each one rules out the obvious
+# implementation of the other:
+#
+# * per task/thread — an instance attribute was shared by every concurrent
+#   request, so a child opened in one task took the span another task had just
+#   started as its parent, and unrelated traces merged;
+# * per process, *not* per tracer — a tracer-scoped ContextVar isolates the
+#   parent lookup by tracer name, and since every subsystem asks for its own
+#   name (``agent``, ``llm-service``, ``embedding-service``, ``prompt-registry``)
+#   nothing ever nested: every span became the root of its own single-span
+#   trace. Without the OTel SDK installed — which is the default deployment —
+#   that flattened the whole waterfall and made the agents map structurally
+#   unable to attribute an LLM call to the agent that made it, or to draw a
+#   single edge.
+#
+# One module-level ContextVar satisfies both: context still follows the task,
+# and parentage is a property of the call stack rather than of which tracer the
+# caller happened to reach for.
+_CURRENT_SPAN: ContextVar[Span | None] = ContextVar(
+    "baselith.tracer.current", default=None
+)
+
+
+class Tracer:
+    """
+    Tracing interface for creating and managing spans.
+
+    Usage:
+        tracer = get_tracer("my-service")
+
+        with tracer.start_span("operation") as span:
+            span.set_attribute("key", "value")
+            # ... do work ...
+    """
+
+    def __init__(
+        self,
+        service_name: str,
+        exporter: SpanExporter | None = None,
+    ) -> None:
+        self._service_name = service_name
+        self._exporter = exporter or ConsoleExporter()
+        self._current = _CURRENT_SPAN
+        self._completed_spans: list[Span] = []
+        self._enabled = True
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = value
+
+    @property
+    def current_span(self) -> Span | None:
+        """Get the span active in the current task/thread, if any."""
+        return self._current.get()
+
+    def _generate_id(self) -> str:
+        """Generate a span/trace ID."""
+        return uuid.uuid4().hex[:16]
+
+    @contextmanager
+    def start_span(
+        self,
+        name: str,
+        parent: Span | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> Generator[Span, None, None]:
+        """
+        Start a new span as context manager.
+
+        Args:
+            name: Span name
+            parent: Parent span (uses current if not specified)
+            attributes: Initial attributes
+
+        Yields:
+            The created span
+        """
+        if not self._enabled:
+            # Return a no-op span
+            yield Span(
+                name=name,
+                context=SpanContext(trace_id="0" * 32, span_id="0" * 16),
+            )
+            return
+
+        # Determine parent
+        parent = parent or self._current.get()
+
+        # Create context
+        if parent:
+            context = SpanContext(
+                trace_id=parent.context.trace_id,
+                span_id=self._generate_id(),
+                parent_span_id=parent.context.span_id,
+            )
+        else:
+            context = SpanContext(
+                trace_id=self._generate_id() + self._generate_id(),
+                span_id=self._generate_id(),
+            )
+
+        # Create span
+        span = Span(
+            name=name,
+            context=context,
+            attributes={"service.name": self._service_name},
+        )
+        if attributes:
+            span.set_attributes(attributes)
+
+        # Set as current (for this task/thread only)
+        token = self._current.set(span)
+
+        # Bridge: when the real OTel SDK is installed, open a matching span so
+        # custom spans reach the OTLP collector and nest under auto-instrumented
+        # server spans. We end it ourselves in ``finally`` after mirroring state.
+        otel_span: Any = None
+        otel_cm: Any = None
+        if _otel_active():
+            try:
+                from opentelemetry import trace as _otel_trace
+
+                otel_cm = _otel_trace.get_tracer(
+                    self._service_name
+                ).start_as_current_span(name)
+                otel_span = otel_cm.__enter__()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("OTel span start failed for %s", name, exc_info=True)
+                otel_span = otel_cm = None
+
+        try:
+            yield span
+        except Exception as e:
+            span.set_status(SpanStatus.ERROR, str(e))
+            span.add_event("exception", {"message": str(e), "type": type(e).__name__})
+            if otel_span is not None:
+                self._mark_otel_error(otel_span, e)
+            raise
+        finally:
+            span.end()
+            try:
+                self._current.reset(token)
+            except ValueError:  # exited in a different context than entered
+                self._current.set(None)
+            self._completed_spans.append(span)
+            # In-process observers (dashboards, debug readers). Only when the
+            # OTel SDK is absent: with it active the same span already reaches
+            # the sinks through the bridge processor on the TracerProvider, and
+            # emitting here too would duplicate it.
+            if not _otel_active():
+                self._emit_to_sinks(span)
+
+            if otel_span is not None:
+                self._mirror_to_otel(otel_span, span)
+            if otel_cm is not None:
+                try:
+                    otel_cm.__exit__(None, None, None)
+                except Exception:  # pragma: no cover - defensive
+                    logger.debug("OTel span end failed for %s", name, exc_info=True)
+
+            # Export if batch is large enough
+            if len(self._completed_spans) >= 10:
+                self.flush()
+
+    def _emit_to_sinks(self, span: Span) -> None:
+        """Publish a completed span to in-process sinks (best-effort).
+
+        Kept behind ``has_span_sinks`` so an unobserved process pays only one
+        boolean check per span — no record is ever built for nobody.
+        """
+        try:
+            from baselith.core.observability.span_sink import (
+                SpanRecord,
+                emit_span,
+                has_span_sinks,
+            )
+
+            if not has_span_sinks():
+                return
+            emit_span(
+                SpanRecord(
+                    trace_id=span.context.trace_id,
+                    span_id=span.context.span_id,
+                    parent_span_id=span.context.parent_span_id,
+                    name=span.name,
+                    service=self._service_name,
+                    kind="internal",
+                    start_time=span.start_time,
+                    end_time=span.end_time or span.start_time,
+                    status=span.status.value,
+                    attributes=dict(span.attributes),
+                    events=list(span.events),
+                )
+            )
+        except Exception:
+            logger.debug("Span %s not emitted to sinks", span.name, exc_info=True)
+
+    @staticmethod
+    def _mirror_to_otel(otel_span: Any, span: Span) -> None:
+        """Copy homegrown span attributes/events/status onto the OTel span."""
+        try:
+            for key, value in span.attributes.items():
+                otel_span.set_attribute(key, _coerce_attr(value))
+            for event in span.events:
+                otel_span.add_event(
+                    event["name"],
+                    {k: _coerce_attr(v) for k, v in event["attributes"].items()},
+                )
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("Span %s not mirrored to OTel", span.name, exc_info=True)
+
+    @staticmethod
+    def _mark_otel_error(otel_span: Any, exc: Exception) -> None:
+        """Record an exception and ERROR status on the bridged OTel span."""
+        try:
+            from opentelemetry.trace import Status, StatusCode
+
+            otel_span.record_exception(exc)
+            otel_span.set_status(Status(StatusCode.ERROR, str(exc)))
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("OTel span error status not recorded", exc_info=True)
+
+    def flush(self) -> None:
+        """Export all completed spans."""
+        if self._completed_spans:
+            try:
+                self._exporter.export(self._completed_spans)
+            except Exception as e:
+                logger.warning(f"Failed to export spans: {e}")
+            self._completed_spans.clear()
+
+    def traced(
+        self,
+        name: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> Callable:
+        """
+        Decorator to trace a function.
+
+        Args:
+            name: Span name (defaults to function name)
+            attributes: Span attributes
+
+        Example:
+            @tracer.traced()
+            async def my_function():
+                ...
+        """
+
+        def decorator(func: Callable) -> Callable:
+            span_name = name or func.__name__
+
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                with self.start_span(span_name, attributes=attributes) as span:
+                    span.set_attribute("function", func.__name__)
+                    return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+
+# Global tracer registry
+_tracers: dict[str, Tracer] = {}
+
+
+def get_tracer(service_name: str = "default") -> Tracer:
+    """Get or create a tracer for the given service."""
+    if service_name not in _tracers:
+        _tracers[service_name] = Tracer(service_name)
+    return _tracers[service_name]
+
+
+# Global tracer instance for backward compatibility
+tracer = get_tracer()
+
+
+def setup_telemetry(
+    service_name: str = "baselith-core",
+    otlp_endpoint: str | None = None,
+    enable_fastapi: bool = True,
+    enable_redis: bool = True,
+    enable_httpx: bool = True,
+) -> None:
+    """
+    Set up OpenTelemetry instrumentation for the application.
+
+    Thin backward-compatible wrapper that delegates to the centralized backbone
+    in :mod:`baselith.core.observability.otel`, which owns provider configuration
+    (rich resource, sampling, OTLP traces + metrics, propagators, shutdown).
+
+    Args:
+        service_name: Name of the service for resource identification.
+        otlp_endpoint: OTLP collector endpoint (e.g., "http://localhost:4317").
+        enable_fastapi: Enable FastAPI auto-instrumentation.
+        enable_redis: Enable Redis auto-instrumentation.
+        enable_httpx: Enable HTTPX auto-instrumentation.
+    """
+    from baselith.core.observability.otel import setup_telemetry as _setup
+
+    _setup(
+        service_name=service_name,
+        otlp_endpoint=otlp_endpoint,
+        enable_fastapi=enable_fastapi,
+        enable_redis=enable_redis,
+        enable_httpx=enable_httpx,
+    )
+
+
+__all__ = [
+    "ConsoleExporter",
+    "InMemoryExporter",
+    "OTLPExporter",
+    "Span",
+    "SpanContext",
+    "SpanExporter",
+    "SpanStatus",
+    "Tracer",
+    "get_tracer",
+    "setup_telemetry",
+    "tracer",
+]

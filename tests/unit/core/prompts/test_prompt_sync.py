@@ -13,9 +13,9 @@ import asyncio
 
 import pytest
 
-from core.prompts.registry import PromptRegistry
-from core.prompts.sync import PromptSynchronizer
-from core.prompts.types import PromptVersion
+from baselith.core.prompts.registry import PromptRegistry
+from baselith.core.prompts.sync import PromptSynchronizer
+from baselith.core.prompts.types import PromptVersion
 
 
 class FakeBackend:

@@ -60,7 +60,7 @@ class TestFacadeContract:
 
     def test_version_is_the_single_source_of_truth(self) -> None:
         """The facade re-exports the version, it does not restate it."""
-        from core._version import __version__ as core_version
+        from baselith.core._version import __version__ as core_version
 
         assert baselith.__version__ == core_version
 
@@ -113,7 +113,7 @@ class TestFacadeIsLazy:
         probe = (
             "import sys, baselith; "
             "print(sorted(m for m in sys.modules if m.startswith('core.') "
-            "and m != 'core._version'))"
+            "and m != 'baselith.core._version'))"
         )
         result = subprocess.run(
             [sys.executable, "-c", probe],

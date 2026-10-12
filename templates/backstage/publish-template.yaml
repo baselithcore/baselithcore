@@ -14,7 +14,7 @@
 #      manifest patch, release runbook) on top of the source.
 #   4. Submit the packaged bundle to the marketplace hub via
 #      `POST /api/backstage/publish` on the framework host (wraps
-#      `core.marketplace.publisher.PluginPublisher.publish`).
+#      `baselith.core.marketplace.publisher.PluginPublisher.publish`).
 #   5. (Optional) Create a dedicated GitHub repository with the same
 #      bundle + CI workflow so later releases can be automated.
 #
@@ -78,7 +78,7 @@ spec:
         sourcePath:
           title: Plugin Path
           type: string
-          default: plugins/baselithbot
+          default: plugins/my-plugin
 
         includeDocs:
           title: Include docs/ directory
@@ -106,8 +106,8 @@ spec:
           title: Plugin Entry Point
           type: string
           description: >
-            Written into manifest.yaml (e.g. "plugin:BaselithbotPlugin").
-          default: "plugin:BaselithbotPlugin"
+            Written into manifest.yaml (e.g. "plugin:MyPlugin").
+          default: "plugin:MyPlugin"
 
         author:
           title: Author

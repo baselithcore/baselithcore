@@ -1,15 +1,15 @@
 import sys
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-# Mock heavy dependencies before they are imported by core.services.chat.service
+# Mock heavy dependencies before they are imported by baselith.core.services.chat.service
 sys.modules["sentence_transformers"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 
 import pytest  # noqa: E402
 
-from core.models.chat import ChatRequest  # noqa: E402
-from core.services.chat.exceptions import ChatServiceError  # noqa: E402
-from core.services.chat.service import (  # noqa: E402
+from baselith.core.models.chat import ChatRequest  # noqa: E402
+from baselith.core.services.chat.exceptions import ChatServiceError  # noqa: E402
+from baselith.core.services.chat.service import (  # noqa: E402
     ChatService,
     ChatServiceConfig,
 )
@@ -40,28 +40,36 @@ def test_initialization(chat_config, mock_plugin_registry):
 
 def test_embedder_property(chat_service):
     mock_embedder = MagicMock()
-    with patch("core.nlp.get_embedder", return_value=mock_embedder) as mock_get:
+    with patch(
+        "baselith.core.nlp.get_embedder", return_value=mock_embedder
+    ) as mock_get:
         assert chat_service.embedder == mock_embedder
         assert chat_service.embedder == mock_embedder  # Second call uses cache
         mock_get.assert_called_once_with(chat_service.config.embedder_model)
 
 
 def test_embedder_import_error(chat_service):
-    with patch("core.nlp.get_embedder", side_effect=ImportError("NLP missing")):
+    with patch(
+        "baselith.core.nlp.get_embedder", side_effect=ImportError("NLP missing")
+    ):
         with pytest.raises(ChatServiceError, match="NLP module not reachable"):
             _ = chat_service.embedder
 
 
 def test_reranker_property(chat_service):
     mock_reranker = MagicMock()
-    with patch("core.nlp.get_reranker", return_value=mock_reranker) as mock_get:
+    with patch(
+        "baselith.core.nlp.get_reranker", return_value=mock_reranker
+    ) as mock_get:
         assert chat_service.reranker == mock_reranker
         assert chat_service.reranker == mock_reranker
         mock_get.assert_called_once_with(chat_service.config.reranker_model)
 
 
 def test_reranker_import_error(chat_service):
-    with patch("core.nlp.get_reranker", side_effect=ImportError("Reranker missing")):
+    with patch(
+        "baselith.core.nlp.get_reranker", side_effect=ImportError("Reranker missing")
+    ):
         with pytest.raises(ChatServiceError, match="Re-ranking module not reachable"):
             _ = chat_service.reranker
 
@@ -82,7 +90,7 @@ def test_agent_property_no_registry():
 
 def test_agent_property_success(chat_service):
     mock_orch_cls = MagicMock()
-    with patch("core.orchestration.Orchestrator", mock_orch_cls):
+    with patch("baselith.core.orchestration.Orchestrator", mock_orch_cls):
         agent = chat_service.agent
         # checkpoint_store comes from the factory: a real store by default
         # (ORCHESTRATOR_CHECKPOINT_ENABLED defaults to on), None only when
@@ -98,11 +106,11 @@ def test_agent_property_success(chat_service):
 
 def test_agent_receives_memory_when_enabled(chat_service):
     """With CHAT_MEMORY_ENABLED the orchestrator gets an AgentMemory instance."""
-    from core.memory.manager import AgentMemory
+    from baselith.core.memory.manager import AgentMemory
 
     mock_orch_cls = MagicMock()
     chat_service.config.memory_enabled = True
-    with patch("core.orchestration.Orchestrator", mock_orch_cls):
+    with patch("baselith.core.orchestration.Orchestrator", mock_orch_cls):
         _ = chat_service.agent
 
     memory = mock_orch_cls.call_args.kwargs["memory_manager"]
@@ -114,8 +122,11 @@ def test_agent_without_memory_survives_broken_memory_backend(chat_service):
     mock_orch_cls = MagicMock()
     chat_service.config.memory_enabled = True
     with (
-        patch("core.orchestration.Orchestrator", mock_orch_cls),
-        patch("core.memory.manager.AgentMemory", side_effect=RuntimeError("no store")),
+        patch("baselith.core.orchestration.Orchestrator", mock_orch_cls),
+        patch(
+            "baselith.core.memory.manager.AgentMemory",
+            side_effect=RuntimeError("no store"),
+        ),
     ):
         _ = chat_service.agent
 
@@ -124,7 +135,8 @@ def test_agent_without_memory_survives_broken_memory_backend(chat_service):
 
 def test_agent_import_error(chat_service):
     with patch(
-        "core.orchestration.Orchestrator", side_effect=ImportError("Orch missing")
+        "baselith.core.orchestration.Orchestrator",
+        side_effect=ImportError("Orch missing"),
     ):
         with pytest.raises(ChatServiceError, match="Orchestration layer missing"):
             _ = chat_service.agent
@@ -302,9 +314,13 @@ def test_record_metric_success(chat_service):
     mock_err = MagicMock()
     mock_lat = MagicMock()
     with (
-        patch("core.observability.metrics.CHAT_REQUESTS_TOTAL", mock_total),
-        patch("core.observability.metrics.CHAT_REQUEST_ERRORS_TOTAL", mock_err),
-        patch("core.observability.metrics.CHAT_REQUEST_LATENCY_SECONDS", mock_lat),
+        patch("baselith.core.observability.metrics.CHAT_REQUESTS_TOTAL", mock_total),
+        patch(
+            "baselith.core.observability.metrics.CHAT_REQUEST_ERRORS_TOTAL", mock_err
+        ),
+        patch(
+            "baselith.core.observability.metrics.CHAT_REQUEST_LATENCY_SECONDS", mock_lat
+        ),
     ):
         chat_service._record_metric("chat_requests_total", route="sync")
         mock_total.labels.assert_called_with(route="sync")
@@ -318,7 +334,8 @@ def test_record_metric_success(chat_service):
 
 def test_record_metric_import_error_direct(chat_service):
     with patch(
-        "core.observability.metrics.CHAT_REQUESTS_TOTAL", side_effect=ImportError
+        "baselith.core.observability.metrics.CHAT_REQUESTS_TOTAL",
+        side_effect=ImportError,
     ):
         chat_service._record_metric("chat_requests_total", route="sync")
 
@@ -326,8 +343,8 @@ def test_record_metric_import_error_direct(chat_service):
 @pytest.mark.asyncio
 async def test_input_guard_is_built_once_across_requests(chat_service):
     """The service reuses the pipeline's compiled InputGuard, not one per call."""
-    from core.guardrails.input_guard import InputGuard
-    from core.orchestration import guard_pipeline
+    from baselith.core.guardrails.input_guard import InputGuard
+    from baselith.core.orchestration import guard_pipeline
 
     mock_agent = MagicMock()
     mock_agent.process = AsyncMock(return_value={"response": "hi"})

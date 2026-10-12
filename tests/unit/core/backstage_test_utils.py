@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from core.plugins.exporters.backstage_provider import BackstageProvider
-from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+from baselith.core.plugins.exporters.backstage_provider import BackstageProvider
+from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
 
 def make_metadata(

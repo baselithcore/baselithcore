@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.plugin_updates.cache import UpdateCache
-from core.plugin_updates.models import Refusal
-from core.plugin_updates.signed_assets import verify_signed_assets
-from core.plugins.signing import generate_keypair_hex
+from baselith.core.plugin_updates.cache import UpdateCache
+from baselith.core.plugin_updates.models import Refusal
+from baselith.core.plugin_updates.signed_assets import verify_signed_assets
+from baselith.core.plugins.signing import generate_keypair_hex
 
 from .test_checker import _info, _signed_tarball, _Source
 

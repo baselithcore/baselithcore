@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from core.cli.commands.doctor_checks import check_data_dirs, ensure_data_dirs
+from baselith.core.cli.commands.doctor_checks import check_data_dirs, ensure_data_dirs
 
 
 @pytest.fixture(autouse=True)
@@ -82,8 +82,8 @@ def test_startup_preflight_repairs_before_it_judges(
     monkeypatch: pytest.MonkeyPatch, _isolated_data_dir: Path
 ) -> None:
     """The wiring, not just the helper: a missing dir must not exit non-zero."""
-    import core.cli.commands.doctor as doctor
-    from core.cli.commands.run import _run_preflight
+    import baselith.core.cli.commands.doctor as doctor
+    from baselith.core.cli.commands.run import _run_preflight
 
     monkeypatch.setattr(
         doctor, "run_checks", lambda **_kwargs: [check_data_dirs()], raising=True

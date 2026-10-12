@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from core.scraper.middleware.rate_limiter import RateLimiterMiddleware
+from baselith.core.scraper.middleware.rate_limiter import RateLimiterMiddleware
 
 
 @pytest.mark.asyncio

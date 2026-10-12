@@ -26,10 +26,10 @@ def test_allowlist_is_sorted_unique_existing_packages() -> None:
     assert packages == sorted(set(packages)), "keep the allowlist sorted and unique"
     for name in packages:
         # The kernel, plus the public facade. ``baselith`` sits outside
-        # ``core/`` — so it is never a ``--candidates`` suggestion — but it is
+        # ``baselith/core/`` — so it is never a ``--candidates`` suggestion — but it is
         # the package every downstream program imports, and it is strict from
         # its first commit.
-        assert name == "baselith" or name.startswith("core."), name
+        assert name == "baselith" or name.startswith("baselith.core."), name
         target = package_path(REPO_ROOT, name)
         assert target.is_file() or (target / "__init__.py").is_file(), name
 
@@ -41,7 +41,7 @@ def test_the_public_facade_is_strict() -> None:
 
 def test_resilience_stays_strict() -> None:
     # The former check_core_resilience_typing.py gate lives on inside this one.
-    assert "core.resilience" in STRICT_CORE_PACKAGES
+    assert "baselith.core.resilience" in STRICT_CORE_PACKAGES
 
 
 def test_flag_set_is_not_weakened() -> None:
@@ -63,55 +63,58 @@ def test_kernel_packages_are_strict() -> None:
     from the allowlist is a regression, not a cleanup.
     """
     for name in (
-        "core.api",
-        "core.auth",
-        "core.cache",
-        "core.chat",
-        "core.config",
-        "core.db",
-        "core.di",
-        "core.memory",
-        "core.middleware",
-        "core.observability",
-        "core.orchestration",
-        "core.plugins",
-        "core.services.llm",
-        "core.services.vectorstore",
+        "baselith.core.api",
+        "baselith.core.auth",
+        "baselith.core.cache",
+        "baselith.core.chat",
+        "baselith.core.config",
+        "baselith.core.db",
+        "baselith.core.di",
+        "baselith.core.memory",
+        "baselith.core.middleware",
+        "baselith.core.observability",
+        "baselith.core.orchestration",
+        "baselith.core.plugins",
+        "baselith.core.services.llm",
+        "baselith.core.services.vectorstore",
     ):
         assert name in STRICT_CORE_PACKAGES, name
 
 
 def test_partially_covered_parent_is_replaced_by_subpackages(tmp_path: Path) -> None:
-    """``core.services`` never goes green as a whole; list its subpackages."""
+    """``baselith.core.services`` never goes green as a whole; list its subpackages."""
     for dotted in (
-        "core",
-        "core/services",
-        "core/services/llm",
-        "core/services/vision",
+        "baselith/core",
+        "baselith/core/services",
+        "baselith/core/services/llm",
+        "baselith/core/services/vision",
     ):
         pkg = tmp_path / dotted
         pkg.mkdir(parents=True, exist_ok=True)
         (pkg / "__init__.py").write_text("", encoding="utf-8")
 
-    names = all_core_packages(tmp_path, allowlist=("core.services.llm",))
+    names = all_core_packages(tmp_path, allowlist=("baselith.core.services.llm",))
 
-    assert "core.services" not in names
-    assert names == ["core.services.llm", "core.services.vision"]
-    assert candidate_packages(tmp_path, allowlist=("core.services.llm",)) == [
-        "core.services.vision"
+    assert "baselith.core.services" not in names
+    assert names == ["baselith.core.services.llm", "baselith.core.services.vision"]
+    assert candidate_packages(tmp_path, allowlist=("baselith.core.services.llm",)) == [
+        "baselith.core.services.vision"
     ]
 
 
 def test_candidates_exclude_allowlisted_packages(tmp_path: Path) -> None:
     for name in ("alpha", "beta"):
-        pkg = tmp_path / "core" / name
+        pkg = tmp_path / "baselith" / "core" / name
         pkg.mkdir(parents=True)
         (pkg / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "core" / "__init__.py").write_text("", encoding="utf-8")
-    (tmp_path / "core" / "context.py").write_text("", encoding="utf-8")
+    (tmp_path / "baselith" / "core" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "baselith" / "core" / "context.py").write_text("", encoding="utf-8")
 
-    assert candidate_packages(tmp_path, allowlist=("core.alpha",)) == [
-        "core.beta",
-        "core.context",
+    assert candidate_packages(tmp_path, allowlist=("baselith.core.alpha",)) == [
+        "baselith.core.beta",
+        "baselith.core.context",
     ]
-    assert package_path(tmp_path, "core.context") == tmp_path / "core" / "context.py"
+    assert (
+        package_path(tmp_path, "baselith.core.context")
+        == tmp_path / "baselith" / "core" / "context.py"
+    )

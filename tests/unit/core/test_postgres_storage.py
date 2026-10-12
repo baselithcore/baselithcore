@@ -4,9 +4,9 @@ from uuid import uuid4
 
 import pytest
 
-from core.config import StorageConfig
-from core.storage.models import Feedback, Interaction
-from core.storage.postgres import PostgresStorage
+from baselith.core.config import StorageConfig
+from baselith.core.storage.models import Feedback, Interaction
+from baselith.core.storage.postgres import PostgresStorage
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def mock_interaction():
 class TestPostgresStorage:
     @pytest.mark.asyncio
     async def test_initialize_schema(self, storage):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 
@@ -42,7 +42,7 @@ class TestPostgresStorage:
 
     @pytest.mark.asyncio
     async def test_health_check_success(self, storage):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 
@@ -51,13 +51,14 @@ class TestPostgresStorage:
     @pytest.mark.asyncio
     async def test_health_check_failure(self, storage):
         with patch(
-            "core.storage.postgres.get_async_cursor", side_effect=Exception("DB Down")
+            "baselith.core.storage.postgres.get_async_cursor",
+            side_effect=Exception("DB Down"),
         ):
             assert await storage.health_check() is False
 
     @pytest.mark.asyncio
     async def test_store_and_get_interaction(self, storage, mock_interaction):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 
@@ -81,7 +82,7 @@ class TestPostgresStorage:
 
     @pytest.mark.asyncio
     async def test_get_interactions_by_session(self, storage):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 
@@ -111,7 +112,7 @@ class TestPostgresStorage:
 
     @pytest.mark.asyncio
     async def test_store_and_get_feedback(self, storage):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 
@@ -140,7 +141,7 @@ class TestPostgresStorage:
 
     @pytest.mark.asyncio
     async def test_get_feedback_summary(self, storage):
-        with patch("core.storage.postgres.get_async_cursor") as mock_cursor:
+        with patch("baselith.core.storage.postgres.get_async_cursor") as mock_cursor:
             mock_cur = AsyncMock()
             mock_cursor.return_value.__aenter__.return_value = mock_cur
 

@@ -11,16 +11,16 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.context import _tenant_context
-from core.services.llm import LLMService
-from core.services.llm._generation import _build_cache_key
+from baselith.core.context import _tenant_context
+from baselith.core.services.llm import LLMService
+from baselith.core.services.llm._generation import _build_cache_key
 
 
 @pytest.fixture
 def strict_isolation_without_tenant():
     """Strict isolation on, no tenant bound to the current context."""
     token = _tenant_context.set(None)
-    with patch("core.context.get_app_config") as mock_config:
+    with patch("baselith.core.context.get_app_config") as mock_config:
         mock_config.return_value.strict_tenant_isolation = True
         yield
     _tenant_context.reset(token)
@@ -62,7 +62,7 @@ def test_cache_key_still_isolates_a_bound_tenant():
 
 
 @pytest.mark.asyncio
-@patch("core.services.llm.service.get_llm_config")
+@patch("baselith.core.services.llm.service.get_llm_config")
 async def test_generate_response_without_tenant_context(
     mock_config, strict_isolation_without_tenant
 ):

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from core.plugin_updates.apply.staging import StagedRelease, stage_release
+from baselith.core.plugin_updates.apply.staging import StagedRelease, stage_release
 
 from ..test_checker import _signed_tarball
 

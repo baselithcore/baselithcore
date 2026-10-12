@@ -1,4 +1,4 @@
-from core.cli.commands import up
+from baselith.core.cli.commands import up
 
 
 def test_up_prepares_runtime_and_persists_selected_image(tmp_path, monkeypatch):
@@ -42,7 +42,7 @@ def test_up_refuses_to_replace_unrelated_dockerfile(tmp_path, monkeypatch):
 
 
 def test_runtime_template_uses_configurable_core_image():
-    from core.cli.templates.docker_runtime import DOCKER_RUNTIME_FILES
+    from baselith.core.cli.templates.docker_runtime import DOCKER_RUNTIME_FILES
 
     assert "BASELITH_CORE_IMAGE" in DOCKER_RUNTIME_FILES["Dockerfile"]
     assert "BASELITH_CORE_IMAGE" in DOCKER_RUNTIME_FILES["docker-compose.core.yml"]

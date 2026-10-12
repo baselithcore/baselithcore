@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.services.llm import LLMService
-from core.world_model.state_predictor import StatePredictor
-from core.world_model.types import Action, ActionType, State
+from baselith.core.services.llm import LLMService
+from baselith.core.world_model.state_predictor import StatePredictor
+from baselith.core.world_model.types import Action, ActionType, State
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ async def test_compare_outcomes_predicts_alternatives_concurrently():
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
-    from core.world_model.state_predictor import StatePredictor
+    from baselith.core.world_model.state_predictor import StatePredictor
 
     predictor = StatePredictor(llm_service=MagicMock())
     in_flight = 0
@@ -108,7 +108,7 @@ async def test_compare_outcomes_predicts_alternatives_concurrently():
 
 def test_custom_predictor_never_resolves_the_llm_service(monkeypatch):
     """A deterministic predictor must not need a configured LLM to exist."""
-    import core.services.llm as llm_module
+    import baselith.core.services.llm as llm_module
 
     def _boom():
         raise AssertionError("get_llm_service must not be called")
@@ -123,8 +123,8 @@ def test_custom_predictor_never_resolves_the_llm_service(monkeypatch):
 @pytest.mark.asyncio
 async def test_unconfigured_llm_degrades_to_rule_based(monkeypatch):
     """No provider credentials: construction succeeds and effects still apply."""
-    import core.services.llm as llm_module
-    from core.services.llm.exceptions import LLMProviderError
+    import baselith.core.services.llm as llm_module
+    from baselith.core.services.llm.exceptions import LLMProviderError
 
     def _no_key():
         raise LLMProviderError("OpenAI API key is required")

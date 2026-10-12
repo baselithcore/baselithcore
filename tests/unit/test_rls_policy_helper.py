@@ -1,4 +1,4 @@
-"""``core.db.rls_policy``: plugin tables get exactly core's RLS policy.
+"""``baselith.core.db.rls_policy``: plugin tables get exactly core's RLS policy.
 
 Pinned without a database: the predicate is byte-identical to the one
 migration 010 ships (so a plugin table and a core table isolate the same way,
@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from core.context import (
+from baselith.core.context import (
     ReservedTenantError,
     get_current_tenant_id,
     reset_tenant_context,
     set_tenant_context,
     tenant_is_bound,
 )
-from core.db.rls_policy import (
+from baselith.core.db.rls_policy import (
     TENANT_POLICY_NAME,
     TENANT_POLICY_PREDICATE,
     row_tenant_scope,
@@ -34,6 +34,7 @@ pytestmark = [pytest.mark.unit]
 
 _MIGRATION = (
     Path(__file__).resolve().parents[2]
+    / "baselith"
     / "core"
     / "db"
     / "migrations"
@@ -100,7 +101,7 @@ def test_scope_is_a_no_op_for_the_bound_tenant() -> None:
 
 
 def test_scope_binds_a_differing_key_and_restores() -> None:
-    from core.context import reset_user_context, set_user_context
+    from baselith.core.context import reset_user_context, set_user_context
 
     token = set_tenant_context("org-1")
     user = set_user_context("u-1")  # the per-user key under personal tenancy
@@ -124,7 +125,7 @@ def test_scope_refuses_to_bind_the_maintenance_identity() -> None:
 
 
 def test_system_scope_itself_passes_through() -> None:
-    from core.db.connection import system_tenant_scope
+    from baselith.core.db.connection import system_tenant_scope
 
     with system_tenant_scope(), row_tenant_scope("system"):
         assert get_current_tenant_id() == "system"
@@ -132,8 +133,8 @@ def test_system_scope_itself_passes_through() -> None:
 
 def test_scope_binds_only_a_key_derived_from_the_principal() -> None:
     """The per-user key must be the bound user's id, never a caller's string."""
-    from core.context import reset_user_context, set_user_context
-    from core.db.rls_policy import ForeignTenantKeyError
+    from baselith.core.context import reset_user_context, set_user_context
+    from baselith.core.db.rls_policy import ForeignTenantKeyError
 
     token = set_tenant_context("org-1")
     user = set_user_context("u-1")

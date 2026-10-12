@@ -2,14 +2,14 @@
 
 import pytest
 
-from core.orchestration.autonomy import (
+from baselith.core.orchestration.autonomy import (
     ApprovalPendingError,
     ApprovalRequiredError,
     AutonomyLevel,
     AutonomyPolicy,
     enforce_approval,
 )
-from core.orchestration.checkpoint import (
+from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     STATUS_RUNNING,
     Checkpoint,
@@ -17,7 +17,7 @@ from core.orchestration.checkpoint import (
     InMemoryCheckpointStore,
     record_approval_decision,
 )
-from core.orchestration.enforcement import enforce_tool_invocation
+from baselith.core.orchestration.enforcement import enforce_tool_invocation
 
 SUPERVISED = AutonomyPolicy(level=AutonomyLevel.SUPERVISED)
 

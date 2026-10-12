@@ -8,13 +8,13 @@ from unittest.mock import patch
 
 import pytest
 
-from core.planning import (
+from baselith.core.planning import (
     Plan,
     PlanStep,
     TaskDecomposer,
     TaskPlanner,
 )
-from core.planning.planner import StepStatus
+from baselith.core.planning.planner import StepStatus
 
 # ============================================================================
 # PlanStep Tests
@@ -131,7 +131,7 @@ class TestTaskPlanner:
         assert planner._llm_service is None
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.get_llm_service", side_effect=ImportError)
+    @patch("baselith.core.services.llm.get_llm_service", side_effect=ImportError)
     async def test_create_plan_simple(self, mock_get):
         """Create simple plan without LLM."""
         planner = TaskPlanner()
@@ -143,7 +143,7 @@ class TestTaskPlanner:
         assert len(plan.steps) > 0
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.get_llm_service", side_effect=ImportError)
+    @patch("baselith.core.services.llm.get_llm_service", side_effect=ImportError)
     async def test_create_plan_has_dependencies(self, mock_get):
         """Created plan has proper dependencies."""
         planner = TaskPlanner()
@@ -155,7 +155,7 @@ class TestTaskPlanner:
         assert has_deps
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.get_llm_service", side_effect=ImportError)
+    @patch("baselith.core.services.llm.get_llm_service", side_effect=ImportError)
     async def test_validate_plan_valid(self, mock_get):
         """Validate a valid plan."""
         planner = TaskPlanner()
@@ -205,7 +205,7 @@ class TestTaskDecomposer:
         assert decomposer.max_depth == 3
 
     @pytest.mark.asyncio
-    @patch("core.services.llm.get_llm_service", side_effect=ImportError)
+    @patch("baselith.core.services.llm.get_llm_service", side_effect=ImportError)
     async def test_decompose_simple(self, mock_get):
         """Decompose without LLM."""
         decomposer = TaskDecomposer()
@@ -254,7 +254,7 @@ class TestTaskDecomposer:
 
 
 @pytest.mark.asyncio
-@patch("core.services.llm.get_llm_service", side_effect=ImportError)
+@patch("baselith.core.services.llm.get_llm_service", side_effect=ImportError)
 async def test_plan_execution_flow(mock_get):
     """Full planning workflow."""
     planner = TaskPlanner()

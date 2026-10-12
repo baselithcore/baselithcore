@@ -3,7 +3,7 @@
 # The line-ending half is not cosmetic here. Several trees are compared BYTE
 # FOR BYTE by a CI gate or hashed into a manifest: a Windows checkout that
 # converted LF to CRLF would fail those gates for a reason no diff explains,
-# and `plugins/*/ui/dist/**` would additionally break its integrity_sha256 and
+# and `baselith/plugins/*/ui/dist/**` would additionally break its integrity_sha256 and
 # stop the plugin loading under BASELITH_REQUIRE_SIGNED_PLUGINS.
 
 # Normalize text in the repository, check out with LF everywhere.
@@ -43,11 +43,10 @@
 uv.lock linguist-generated=true
 package-lock.json linguist-generated=true
 sdk/typescript/package-lock.json linguist-generated=true
-plugins/baselithbot/ui/package-lock.json linguist-generated=true
 # `-diff` IS right here: these are minified, content-hashed bundles where a
 # textual diff is noise, and the gate that guards them compares bytes, not
 # hunks.
-plugins/*/ui/dist/** linguist-generated=true -diff
+baselith/plugins/*/ui/dist/** linguist-generated=true -diff
 sdk/openapi.json linguist-generated=true
 mkdocs-site/docs/api/specs/openapi.json linguist-generated=true
 CHANGELOG.md linguist-generated=true

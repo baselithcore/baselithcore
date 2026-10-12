@@ -3,7 +3,7 @@ title: Meta-Agent & Debate
 description: Multi-persona meta-cognition and adversarial Generator-Challenger debate
 ---
 
-**Module**: `core/meta/`
+**Module**: `baselith/core/meta/`
 
 The Meta module implements a "Society of Mind" pattern: multiple personas generate
 competing perspectives on a query, debate them across rounds, and the strongest
@@ -21,7 +21,7 @@ accuracy matters more than consensus.
 ## Module Structure
 
 ```text
-core/meta/
+baselith/core/meta/
 ├── __init__.py                # Public exports
 ├── types.py                   # Perspective, DebateRound, DebateResult, MetaAgentResponse, DebateRole, ConsensusLevel
 ├── ensemble.py                # PersonaEnsemble
@@ -30,10 +30,10 @@ core/meta/
 └── generator_challenger.py    # GeneratorChallengerProtocol (adversarial)
 ```
 
-Public exports from `core.meta`:
+Public exports from `baselith.core.meta`:
 
 ```python
-from core.meta import (
+from baselith.core.meta import (
     Perspective,
     DebateRound,
     DebateResult,
@@ -55,7 +55,7 @@ from core.meta import (
 ### Example Usage
 
 ```python
-from core.meta import MultiPersonaAgent
+from baselith.core.meta import MultiPersonaAgent
 
 # Defaults: advocate + synthesizer + devil's-advocate ensemble, 3 debate rounds
 meta = MultiPersonaAgent()
@@ -85,8 +85,8 @@ exists but raises `RuntimeError` if called from within a running event loop.
 You can extend the ensemble with custom personas:
 
 ```python
-from core.personas import Persona
-from core.meta.types import DebateRole
+from baselith.core.personas import Persona
+from baselith.core.meta.types import DebateRole
 
 meta.add_persona(
     Persona(name="security_reviewer", description="Hunts for attack surface"),
@@ -132,7 +132,7 @@ Internals:
 | `MetaAgentResponse` | dataclass | `final_answer`, `perspectives`, `debate_result`, `synthesis_rationale`, `confidence`, `metadata`; `.perspective_count` |
 
 !!! note
-    `core.meta.types` also defines a `DebateRound` dataclass. The
+    `baselith.core.meta.types` also defines a `DebateRound` dataclass. The
     Generator-Challenger protocol (below) defines its **own** `DebateRound`
     dataclass in `generator_challenger.py` with a different shape. Import from
     the module you mean to avoid confusion.
@@ -144,7 +144,7 @@ Internals:
 The multi-persona `InternalDebate` is consensus-oriented. For high-stakes tasks
 where factual accuracy matters more than consensus, use
 `GeneratorChallengerProtocol` in
-[`core/meta/generator_challenger.py`](https://github.com/baselithcore/baselithcore/blob/main/core/meta/generator_challenger.py).
+[`baselith/core/meta/generator_challenger.py`](https://github.com/baselithcore/baselithcore/blob/main/baselith/core/meta/generator_challenger.py).
 
 | Symbol | Purpose |
 |--------|---------|
@@ -162,7 +162,7 @@ Judge — each of which may be sync or async. The protocol drives them up to
 ### Example Usage
 
 ```python
-from core.meta.generator_challenger import (
+from baselith.core.meta.generator_challenger import (
     GeneratorChallengerProtocol,
     Critique,
     Verdict,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from core.memory.hierarchy import HierarchicalMemory, MemoryTier
+from baselith.core.memory.hierarchy import HierarchicalMemory, MemoryTier
 
 
 def _embedder() -> AsyncMock:

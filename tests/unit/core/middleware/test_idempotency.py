@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from core.middleware.idempotency import IdempotencyMiddleware
+from baselith.core.middleware.idempotency import IdempotencyMiddleware
 
 # Replay/storage require a credential that verifies; see the conftest fixture.
 pytestmark = pytest.mark.usefixtures("idem_verified_credentials")
@@ -107,7 +107,9 @@ def _build(fake):
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app)
     return TestClient(mw, raise_server_exceptions=False), state
 
@@ -196,7 +198,9 @@ def test_in_flight_lock_returns_409():
         "path": "/count",
         "headers": [(b"authorization", _CRED["Authorization"].encode())],
     }
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(FastAPI())
     storage_key = mw._storage_key(scope, "dup")
     assert storage_key is not None
@@ -223,7 +227,9 @@ def test_non_mutating_methods_pass_through(method):
     def _read():
         return {"ok": True}
 
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app)
     client = TestClient(mw)
     r = client.get("/read", headers={"Idempotency-Key": "k"})
@@ -284,7 +290,9 @@ def test_multi_chunk_response_is_cached_and_replayed():
 
         return StreamingResponse(gen(), media_type="application/json")
 
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app)
     client = TestClient(mw, raise_server_exceptions=False)
 
@@ -306,7 +314,9 @@ def test_oversized_body_passes_through_uncached():
         state["count"] += 1
         return {"blob": "x" * 64}
 
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(app, max_body_bytes=16)
     client = TestClient(mw, raise_server_exceptions=False)
 
@@ -364,7 +374,8 @@ def test_anonymous_optin_is_scoped_per_source_address():
         os.environ, {"BASELITH_IDEMPOTENCY_ALLOW_ANONYMOUS": "true"}, clear=False
     ):
         with patch(
-            "core.middleware.idempotency.create_redis_client", return_value=fake
+            "baselith.core.middleware.idempotency.create_redis_client",
+            return_value=fake,
         ):
             mw = IdempotencyMiddleware(app)
 
@@ -435,7 +446,9 @@ def test_scripted_path_returns_409_while_in_flight():
         "path": "/count",
         "headers": [(b"authorization", _CRED["Authorization"].encode())],
     }
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(FastAPI())
     storage_key = mw._storage_key(scope, "dup")
     assert storage_key is not None
@@ -456,7 +469,9 @@ def test_scripted_path_fails_open_on_undecodable_entry():
         "path": "/count",
         "headers": [(b"authorization", _CRED["Authorization"].encode())],
     }
-    with patch("core.middleware.idempotency.create_redis_client", return_value=fake):
+    with patch(
+        "baselith.core.middleware.idempotency.create_redis_client", return_value=fake
+    ):
         mw = IdempotencyMiddleware(FastAPI())
     storage_key = mw._storage_key(scope, "bad")
     assert storage_key is not None

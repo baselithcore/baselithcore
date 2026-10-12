@@ -22,9 +22,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
-from core.plugins.manifest_rewrite import HASH_KEY, SIGNATURE_KEY, SURFACE_KEY
-from core.plugins.signing import generate_keypair_hex, verify_plugin_signature
+from baselith.core.plugins.integrity import CURRENT_HASH_SURFACE, compute_plugin_hash
+from baselith.core.plugins.manifest_rewrite import HASH_KEY, SIGNATURE_KEY, SURFACE_KEY
+from baselith.core.plugins.signing import generate_keypair_hex, verify_plugin_signature
 from scripts.sign_plugin_ed25519 import main
 
 pytestmark = [pytest.mark.unit]
@@ -98,7 +98,7 @@ def test_agrees_with_the_cli_signer_byte_for_byte(
     Built as a second, identical tree so the comparison is of the *written
     result*, not of one tool observing the other's output.
     """
-    from core.cli.commands.plugin.sign import sign_plugin
+    from baselith.core.cli.commands.plugin.sign import sign_plugin
 
     twin = tmp_path / "twin"
     twin.mkdir()

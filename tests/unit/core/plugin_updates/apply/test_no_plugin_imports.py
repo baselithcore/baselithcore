@@ -15,7 +15,7 @@ _CHECK = (
 def test_executor_never_imports_plugins() -> None:
     code = (
         "import sys\n"
-        "import core.plugin_updates.apply.executor, core.plugin_updates.apply._io\n"
+        "import baselith.core.plugin_updates.apply.executor, baselith.core.plugin_updates.apply._io\n"
         + _CHECK
     )
     subprocess.run([sys.executable, "-c", code], check=True, timeout=120, cwd=_ROOT)
@@ -24,8 +24,8 @@ def test_executor_never_imports_plugins() -> None:
 def test_updater_never_imports_plugins() -> None:
     code = (
         "import sys\n"
-        "import core.plugin_updates.apply.updater, core.plugin_updates.apply.executor\n"
-        "import core.cli.commands.plugin_updater\n" + _CHECK
+        "import baselith.core.plugin_updates.apply.updater, baselith.core.plugin_updates.apply.executor\n"
+        "import baselith.core.cli.commands.plugin_updater\n" + _CHECK
     )
     subprocess.run([sys.executable, "-c", code], check=True, timeout=120, cwd=_ROOT)
 
@@ -41,7 +41,7 @@ def test_cli_entry_skips_plugin_clis_and_never_starts_sentry(tmp_path: Path) -> 
     code = (
         "import sys\n"
         "sys.argv = ['baselith', 'plugin-updater', 'status']\n"
-        "from core.cli.__main__ import main\n"
+        "from baselith.core.cli.__main__ import main\n"
         "assert main() == 0\n"
         "if 'sentry_sdk' in sys.modules:\n"
         "    import sentry_sdk\n"

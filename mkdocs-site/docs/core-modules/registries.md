@@ -15,13 +15,13 @@ Sacred Core because they carry no domain logic.
 
 ## BaseRegistry
 
-`core.registries.BaseRegistry[T]` is a thread-safe, name-keyed registry: a
+`baselith.core.registries.BaseRegistry[T]` is a thread-safe, name-keyed registry: a
 ready-made `register` / `get` / `list` / `remove` primitive for new code that
 needs one.
 
 !!! note "Library API — not wired by default"
     `BaseRegistry` is an available primitive, not the backbone of the existing
-    registries: nothing in `core/` or the official plugins subclasses or
+    registries: nothing in `baselith/core/` or the official plugins subclasses or
     instantiates it today. The plugin registry, the agent, skill,
     document-source and extractor registries keep their own implementations.
     Reach for it when writing a new registry in host or plugin code instead of
@@ -53,8 +53,8 @@ If none yields a non-empty string, registration raises `KeyError`.
 ### Example
 
 ```python
-from core.registries import BaseRegistry
-from core.exceptions import DuplicateRegistrationError
+from baselith.core.registries import BaseRegistry
+from baselith.core.exceptions import DuplicateRegistrationError
 
 class Handler:
     def __init__(self, name: str): self.name = name
@@ -79,7 +79,7 @@ threads (e.g. hot-reload worker + request handlers).
 
 ## Exception Hierarchy
 
-`core.exceptions` defines a shallow, generic tree rooted at `BaselithError`.
+`baselith.core.exceptions` defines a shallow, generic tree rooted at `BaselithError`.
 Plugins and domain code should subclass the closest family rather than raising
 bare `Exception` / `RuntimeError`, so callers and observability can distinguish
 failure classes.
@@ -100,7 +100,7 @@ Domain-specific error types belong in the plugin that owns the domain — subcla
 the relevant family here so they remain catchable as `BaselithError`.
 
 ```python
-from core.exceptions import PluginConfigError
+from baselith.core.exceptions import PluginConfigError
 
 class MyPluginBadEndpoint(PluginConfigError):
     """Raised when the configured endpoint URL is unreachable."""

@@ -7,7 +7,7 @@ those generic names for an unrelated service silently redirected the broker,
 enqueueing jobs into a database no worker listens on.
 """
 
-from core.config.task_queue import TaskQueueConfig
+from baselith.core.config.task_queue import TaskQueueConfig
 
 
 class TestEnvIsolation:

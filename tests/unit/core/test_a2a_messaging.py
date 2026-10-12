@@ -4,7 +4,7 @@ Unit Tests for Core A2A Module - Messages, Parts, Tasks and Artifacts
 Tests for the A2A message envelopes and the task/artifact payload types.
 """
 
-from core.a2a import (
+from baselith.core.a2a import (
     A2AMessage,
     A2ARequest,
     A2AResponse,
@@ -137,7 +137,7 @@ class TestPartTypes:
 
     def test_text_part(self):
         """Test TextPart."""
-        from core.a2a import TextPart
+        from baselith.core.a2a import TextPart
 
         part = TextPart(text="Hello, world!")
 
@@ -153,7 +153,7 @@ class TestPartTypes:
 
     def test_file_part(self):
         """Test FilePart."""
-        from core.a2a import FileContent, FilePart
+        from baselith.core.a2a import FileContent, FilePart
 
         content = FileContent(
             name="test.txt",
@@ -172,7 +172,7 @@ class TestPartTypes:
 
     def test_data_part(self):
         """Test DataPart."""
-        from core.a2a import DataPart
+        from baselith.core.a2a import DataPart
 
         part = DataPart(data={"key": "value", "count": 42})
 
@@ -185,7 +185,7 @@ class TestPartTypes:
 
     def test_part_from_dict(self):
         """Test part_from_dict factory."""
-        from core.a2a import DataPart, TextPart, part_from_dict
+        from baselith.core.a2a import DataPart, TextPart, part_from_dict
 
         text_data = {"kind": "text", "text": "Hello"}
         text_part = part_from_dict(text_data)
@@ -206,7 +206,7 @@ class TestMessage:
 
     def test_user_message(self):
         """Create user message."""
-        from core.a2a import Message, Role
+        from baselith.core.a2a import Message, Role
 
         msg = Message.user_message("Hello, agent!")
 
@@ -216,7 +216,7 @@ class TestMessage:
 
     def test_agent_message(self):
         """Create agent message."""
-        from core.a2a import Message, Role
+        from baselith.core.a2a import Message, Role
 
         msg = Message.agent_message("Hello, user!")
 
@@ -225,7 +225,7 @@ class TestMessage:
 
     def test_serialization(self):
         """Test Message serialization."""
-        from core.a2a import Message
+        from baselith.core.a2a import Message
 
         original = Message.user_message("Test message")
 
@@ -248,7 +248,7 @@ class TestTaskAndArtifact:
 
     def test_task_creation(self):
         """Create task."""
-        from core.a2a import Task, TaskState
+        from baselith.core.a2a import Task, TaskState
 
         task = Task.create(TaskState.SUBMITTED)
 
@@ -258,7 +258,7 @@ class TestTaskAndArtifact:
 
     def test_task_state_transitions(self):
         """Test task state transitions."""
-        from core.a2a import Message, Task, TaskState
+        from baselith.core.a2a import Message, Task, TaskState
 
         task = Task.create()
 
@@ -272,7 +272,7 @@ class TestTaskAndArtifact:
 
     def test_task_artifacts(self):
         """Test adding artifacts."""
-        from core.a2a import Artifact, Task
+        from baselith.core.a2a import Artifact, Task
 
         task = Task.create()
 
@@ -288,7 +288,7 @@ class TestTaskAndArtifact:
 
     def test_task_serialization(self):
         """Test Task serialization."""
-        from core.a2a import Artifact, Task, TaskState
+        from baselith.core.a2a import Artifact, Task, TaskState
 
         task = Task.create(TaskState.COMPLETED)
         task.add_artifact(Artifact.text_artifact("Output"))

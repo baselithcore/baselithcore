@@ -64,7 +64,7 @@ reachable only from a `core.*` package carries the tier that package declares
 — see [API Stability Tiers](../advanced/api-stability.md).
 
 `LoopBudget` illustrates the distinction. As `baselith.LoopBudget` it is
-stable. The package it happens to live in, `core.orchestration`, is `beta`
+stable. The package it happens to live in, `baselith.core.orchestration`, is `beta`
 and its other exports may still move.
 
 ## Example

@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.llm.messages import Message, TextBlock
-from core.services.llm.tool_calling import LLMResult
+from baselith.core.services.llm.messages import Message, TextBlock
+from baselith.core.services.llm.tool_calling import LLMResult
 
-_SDK = "core.services.llm.providers.openai_provider.openai"
+_SDK = "baselith.core.services.llm.providers.openai_provider.openai"
 _LEAKY = "Here's a thinking process:\n1. x\n</think>\n\nciao"
 
 
@@ -40,7 +40,7 @@ async def _aiter(items):
 
 @pytest.fixture
 def provider():
-    from core.services.llm.providers.vllm_provider import VLLMProvider
+    from baselith.core.services.llm.providers.vllm_provider import VLLMProvider
 
     return VLLMProvider(api_base="http://gpu:8002")
 
@@ -60,7 +60,7 @@ async def test_structured_and_message_results_are_cleaned(provider):
         message=Message(role="assistant", content=[TextBlock(text=_LEAKY)]),
     )
     with patch(
-        "core.services.llm.providers.vllm_provider._generate_messages",
+        "baselith.core.services.llm.providers.vllm_provider._generate_messages",
         AsyncMock(return_value=result),
     ):
         out = await provider.generate_messages([], model="qwen")

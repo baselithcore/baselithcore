@@ -1,6 +1,6 @@
 """Unicode canonicalization shared by keyword indexing, dedup and cache keys."""
 
-from core.utils.text_canon import canonical_key, canonicalize
+from baselith.core.utils.text_canon import canonical_key, canonicalize
 
 
 class TestCanonicalize:

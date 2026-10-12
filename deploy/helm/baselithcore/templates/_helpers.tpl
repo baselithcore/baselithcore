@@ -153,7 +153,7 @@ that can never pass a probe.
 Hosts accepted by TrustedHostMiddleware, as the JSON list the app parses.
 
 `APP_ENV=production` with an empty TRUSTED_HOSTS is a hard startup abort
-(core/api/startup_checks.py), and the chart ships APP_ENV=production — so a
+(baselith/core/api/startup_checks.py), and the chart ships APP_ENV=production — so a
 default install crash-loops unless the deployment's own names are carried
 through. Ingress hosts (when the ingress is on) plus the in-cluster Service
 names, which is what the probes and in-cluster callers use.

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.personas.few_shot import FewShotLibrary
-from core.skill_evolution.distillation import (
+from baselith.core.personas.few_shot import FewShotLibrary
+from baselith.core.skill_evolution.distillation import (
     patterns_to_few_shot,
     sync_strategies_to_library,
 )
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import Pattern, PatternKind, PatternStatus
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import Pattern, PatternKind, PatternStatus
 
 pytestmark = [pytest.mark.unit]
 

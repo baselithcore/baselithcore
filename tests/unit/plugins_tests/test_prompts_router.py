@@ -12,11 +12,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import plugins.api_routers.prompts as prompts_module
-from core.prompts.registry import PromptRegistry
-from core.prompts.sync import PromptSynchronizer
-from plugins.api_routers.admin import verify_credentials
-from plugins.api_routers.prompts import router
+import baselith.plugins.api_routers.prompts as prompts_module
+from baselith.core.prompts.registry import PromptRegistry
+from baselith.core.prompts.sync import PromptSynchronizer
+from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.prompts import router
 from tests.unit.core.prompts.test_prompt_sync import FakeBackend
 
 

@@ -1,0 +1,465 @@
+"""Execution Mixin for Orchestrator."""
+
+import asyncio
+import contextvars
+import time
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any, Optional
+
+from baselith.core.context import set_plugin_context
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.autonomy import ApprovalPendingError
+from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
+from baselith.core.orchestration.checkpoint_lease import end_checkpoint_attempt
+from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
+from baselith.core.orchestration.limits import (
+    BudgetExceededError,
+    LoopBudget,
+    LoopLimits,
+)
+from baselith.core.orchestration.mixins._agent_attribution import (
+    dispatch_attribution,
+    intent_owner,
+)
+from baselith.core.orchestration.mixins._context_assembly import (
+    annotate_modality,
+    enforce_tenant_isolation,
+    inject_capabilities,
+    inject_memory_context,
+    rag_only_intent,
+)
+from baselith.core.orchestration.mixins._failure_paths import (
+    handle_budget_exceeded,
+    handle_cancellation,
+    handle_checkpoint_conflict,
+    handle_handler_error,
+)
+from baselith.core.orchestration.mixins._flow_events import (
+    FLOW_EVENT_KEY,
+    build_flow_completed,
+    emit_staged_flow_completed,
+)
+from baselith.core.orchestration.mixins._streaming import (
+    # Re-exported: callers import the stream's failure line from here.
+    STREAM_ERROR_MESSAGE as STREAM_ERROR_MESSAGE,
+)
+from baselith.core.orchestration.run_events import EventType, publish_run_event
+
+try:
+    from baselith.core.events import EventNames, get_event_bus
+
+    _HAS_EVENT_BUS = True
+except ImportError:
+    _HAS_EVENT_BUS = False
+
+if TYPE_CHECKING:
+    from baselith.core.human import HumanIntervention
+    from baselith.core.learning import FeedbackCollector
+    from baselith.core.memory import AgentMemory
+    from baselith.core.orchestration.autonomy import AutonomyPolicy
+    from baselith.core.orchestration.checkpoint import (
+        CheckpointManager,
+        CheckpointStore,
+    )
+    from baselith.core.orchestration.contract import ContractValidator
+    from baselith.core.orchestration.protocols import FlowHandler, StreamHandler
+
+logger = get_logger(__name__)
+
+#: Private result flag: ``_process_with_budget`` already guarded the answer.
+_OUTPUT_GUARDED_KEY = "_output_guarded"
+
+
+class ExecutionMixin:
+    """Mixin for query execution and processing."""
+
+    memory_manager: Optional["AgentMemory"]
+    human_intervention: Optional["HumanIntervention"]
+    feedback_collector: Optional["FeedbackCollector"]
+    loop_limits: LoopLimits
+    contract_validator: Optional["ContractValidator"]
+    autonomy_policy: "AutonomyPolicy"
+    checkpoint_store: Optional["CheckpointStore"]
+    _flow_handlers: dict[str, "FlowHandler"]
+    _stream_handlers: dict[str, "StreamHandler"]
+    # References to in-flight background memory writes: fire-and-forget tasks
+    # without a reference can be garbage-collected mid-run.
+    _memory_write_tasks: set
+    # Bounds concurrent background memory writes (lazy-init on first write).
+    _memory_write_sem: "asyncio.Semaphore | None"
+
+    def _bind_intent_plugin(self, intent: str) -> contextvars.Token | None:
+        """Bind the plugin owning *intent*'s handler to the plugin context.
+
+        Lets downstream seams (e.g. the central per-plugin LLM policy)
+        attribute the dispatch to its owning plugin. Returns the reset token,
+        or ``None`` when the intent is core-owned/unknown. Best-effort:
+        attribution failures never block a dispatch.
+
+        Dispatch sites use :func:`dispatch_attribution` instead, which binds the
+        same context *and* opens the agent span. This remains for callers that
+        want the binding alone.
+        """
+        owner = intent_owner(self, intent)
+        return set_plugin_context(owner) if owner else None
+
+    def _schedule_memory_write(
+        self, query: str, response_text: str, intent: str | None
+    ) -> None:
+        """Persist the interaction to memory off the request path.
+
+        Body in :func:`baselith.core.orchestration.mixins._memory_write.schedule_memory_write`
+        (extracted for the module size cap).
+        """
+        from baselith.core.orchestration.mixins._memory_write import (
+            schedule_memory_write,
+        )
+
+        schedule_memory_write(self, query, response_text, intent)
+
+    # This is provided by IntentMixin
+    async def classify_intent_async(self, query: str) -> str:
+        """
+        Internal placeholder for intent classification.
+
+        This method should be implemented by the IntentMixin or an
+        equivalent provider in the concrete Orchestrator class.
+
+        Args:
+            query: The user input to classify.
+
+        Returns:
+            str: The identifier of the classified intent.
+
+        Raises:
+            NotImplementedError: If not overridden by a mixin.
+        """
+        raise NotImplementedError
+
+    async def process(
+        self,
+        query: str,
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Process a user query through the orchestration pipeline.
+
+        Args:
+            query: User query text
+            context: Optional context (history, metadata, etc.)
+            intent: Optional forced intent string
+            run_id: Optional stable id for durable checkpointing. Required to
+                ``resume`` a prior run; auto-generated for a fresh run when a
+                ``checkpoint_store`` is configured.
+            resume: When True (with ``run_id`` and a configured store), reload
+                the prior checkpoint and continue — completed tool steps replay
+                from the store instead of re-executing.
+
+        Returns:
+            Processing result dictionary
+        """
+        from baselith.core.orchestration.budget_context import (
+            activate_budget,
+            deactivate_budget,
+        )
+        from baselith.core.orchestration.guard_pipeline import (
+            guard_input_async,
+            guard_output_async,
+        )
+
+        # Input guardrails run before any budget/LLM spend; a blocked query
+        # returns a structured result instead of entering the loop. The async
+        # variant layers content moderation (when configured) on top of the
+        # regex guard.
+        blocked = await guard_input_async(query)
+        if blocked is not None:
+            return blocked
+
+        context = context or {}
+
+        # Inject per-request budget tracker. Handlers downstream call
+        # ``budget.tick()`` before each agent loop step; LLM dollar cost is
+        # charged ambiently via ``budget_context`` from inside LLMService, so
+        # every generate call in this request counts against ``budget_usd``.
+        budget = LoopBudget(limits=getattr(self, "loop_limits", LoopLimits()))
+        context["loop_budget"] = budget
+        token = activate_budget(budget)
+        guarded: dict[str, Any] | None = None
+        prior_checkpoint = context.get("checkpoint")
+        try:
+            result = await self._process_with_budget(
+                query, context, intent, budget, run_id, resume
+            )
+            # Output guardrails (PII redaction, harmful-content filter, and
+            # opt-in content moderation) on the final response text before it
+            # leaves the orchestrator — unless the handler's answer was guarded
+            # before it was recorded and published (see _process_with_budget).
+            if not result.pop(_OUTPUT_GUARDED_KEY, False):
+                result = await guard_output_async(result)
+            guarded = result
+            return guarded
+        finally:
+            # Stop this attempt's lease heartbeat and hand the run back —
+            # only for a manager this call created, never a caller's.
+            if context.get("checkpoint") is not prior_checkpoint:
+                await end_checkpoint_attempt(context.get("checkpoint"))
+            deactivate_budget(token)
+            emit_staged_flow_completed(context, guarded)
+
+    async def _init_checkpoint(
+        self,
+        store: "CheckpointStore",
+        query: str,
+        context: dict[str, Any],
+        intent: str | None,
+        budget: LoopBudget,
+        run_id: str | None,
+        resume: bool,
+    ) -> "CheckpointManager":
+        """Create or resume a checkpoint and start its lease heartbeat.
+
+        Body in :func:`~baselith.core.orchestration.checkpoint_init.init_checkpoint`.
+        """
+        from baselith.core.orchestration.checkpoint_init import init_checkpoint
+
+        manager = await init_checkpoint(
+            store, query, context, intent, budget, run_id, resume
+        )
+        manager.start_heartbeat()
+        return manager
+
+    async def _process_with_budget(
+        self,
+        query: str,
+        context: dict[str, Any],
+        intent: str | None,
+        budget: LoopBudget,
+        run_id: str | None = None,
+        resume: bool = False,
+    ) -> dict[str, Any]:
+        """Body of :meth:`process`, run with the budget bound as ambient."""
+        if getattr(self, "contract_validator", None) is not None:
+            context["contract_validator"] = self.contract_validator
+        if getattr(self, "autonomy_policy", None) is not None:
+            context["autonomy_policy"] = self.autonomy_policy
+
+        # 0. Tenant isolation guard — prevent cross-tenant leakage if middleware
+        #    has been bypassed or context has been tampered. The middleware sets
+        #    the ambient tenant; here we ensure context agrees.
+        enforce_tenant_isolation(context)
+
+        # 0a. Modality hint — stamp context["modality"] from any attachment
+        #     material so handlers can branch on it without re-sniffing bytes.
+        annotate_modality(context)
+
+        # 0b. Durable checkpoint setup. When a store is configured, create or
+        #     resume a checkpoint and expose the manager on the context so
+        #     handlers can make their tool steps idempotent (context["checkpoint"]).
+        checkpoint_mgr: CheckpointManager | None = None
+        store = getattr(self, "checkpoint_store", None)
+        if store is not None:
+            checkpoint_mgr = await self._init_checkpoint(
+                store, query, context, intent, budget, run_id, resume
+            )
+            context["checkpoint"] = checkpoint_mgr
+            # Resume restores the previously-classified intent, skipping a
+            # redundant (and possibly nondeterministic) re-classification.
+            if checkpoint_mgr.checkpoint.intent:
+                intent = checkpoint_mgr.checkpoint.intent
+
+        # 0c. rag_only pins the default (retrieval) intent and skips the
+        #     classifier; an explicitly passed intent still wins.
+        intent = intent or rag_only_intent(self, context)
+
+        # 1. Retrieve Context from Memory + classify intent.
+        #    Memory recall (embedding + vector search) and intent classification
+        #    (which consumes only `query`) are independent, so overlap them
+        #    instead of paying both latencies in series. When intent is already
+        #    known (provided or restored from a checkpoint), recall runs alone.
+        if not intent:
+            _, intent = await asyncio.gather(
+                inject_memory_context(self, query, context, budget),
+                self.classify_intent_async(query),
+            )
+        else:
+            await inject_memory_context(self, query, context, budget)
+
+        # Intent is always resolved by here (provided, restored, or classified);
+        # the assert restores the concrete type after gather's Any unpacking.
+        assert intent is not None
+
+        # 2. Inject Capabilities (human intervention, feedback, skills catalog).
+        #    The query rides along so the skill catalog is ranked for *this*
+        #    request instead of dumping every card into the prompt.
+        inject_capabilities(self, context, query=query)
+
+        context["intent"] = intent
+
+        # Record the freshly-classified intent on a new checkpoint so a resume
+        # of this run reuses it instead of re-classifying.
+        if checkpoint_mgr is not None and checkpoint_mgr.checkpoint.intent is None:
+            checkpoint_mgr.checkpoint.intent = intent
+
+        start_time = time.time()
+
+        # Structured run-event stream (astream_events equivalent): lifecycle
+        # events flow whenever the run is addressable by id — with or without
+        # a checkpoint store. No subscribers ⇒ publish is a no-op.
+        events_run_id = checkpoint_mgr.run_id if checkpoint_mgr is not None else run_id
+        publish_run_event(events_run_id, EventType.RUN_STARTED, {"intent": intent})
+
+        # Emit flow started event
+        if _HAS_EVENT_BUS:
+            try:
+                get_event_bus().emit_sync(
+                    EventNames.FLOW_STARTED,
+                    {"intent": intent, "query": query[:100]},
+                )
+            except Exception as e:
+                logger.warning(f"Failed to emit start event: {e}")
+
+        # Get handler for intent
+        handler = self._flow_handlers.get(intent)
+
+        if not handler:
+            logger.warning(f"No handler registered for intent: {intent}")
+            return {
+                "response": f"No handler available for intent: {intent}",
+                "intent": intent,
+                "error": True,
+            }
+
+        # Execute handler — bound to its owning plugin so downstream seams
+        # (e.g. the central per-plugin LLM policy) attribute the work to it,
+        # and wrapped in an agent span so the trace stream records which agent
+        # ran and under which parent.
+        try:
+            # The run's checkpoint is also ambient while the handler runs, so a
+            # crew, group chat or ToT search it starts records its units.
+            with dispatch_attribution(self, intent), bind_checkpoint(checkpoint_mgr):
+                result = await handler.handle(query, context)
+            result["intent"] = intent
+            result["budget"] = budget.snapshot().__dict__
+
+            # Guard the answer before it is stored or published: memory, replays
+            # and /runs history keep it, /runs events RESPONSE_FINAL carries it.
+            from baselith.core.orchestration.guard_pipeline import guard_output_async
+
+            result = await guard_output_async(result)
+            result[_OUTPUT_GUARDED_KEY] = True
+
+            # 3. Save Interaction to Memory — in the background. Each write
+            #    is an embedding + vector upsert; awaiting them here adds two
+            #    round trips of latency AFTER the answer is already computed.
+            if self.memory_manager:
+                self._schedule_memory_write(query, result.get("response", ""), intent)
+
+            # Stage the completion event: process() emits it after the output
+            # guard, so it carries the text the user received (_flow_events).
+            if _HAS_EVENT_BUS:
+                context[FLOW_EVENT_KEY] = build_flow_completed(
+                    intent=intent,
+                    query=query,
+                    response=result.get("response", ""),
+                    context=context,
+                    start_time=start_time,
+                    run_id=events_run_id,
+                    budget=budget,
+                    success=not result.get("error", False),
+                )
+
+            # Persist final budget + mark the checkpoint completed.
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.complete(result.get("response"))
+
+            publish_run_event(
+                events_run_id,
+                EventType.RESPONSE_FINAL,
+                {"intent": intent, "response": result.get("response", "")},
+            )
+            return result
+        except ApprovalPendingError as e:
+            # Durable human-in-the-loop pause: the checkpoint is already
+            # persisted as awaiting_approval (with the pending tool/category);
+            # persist the budget too so the resumed run keeps its caps. Not an
+            # error — the caller records a decision and resumes by run_id.
+            logger.info(
+                "run_paused_awaiting_approval",
+                extra={"intent": intent, "run_id": e.run_id, "tool": e.tool_name},
+            )
+            if checkpoint_mgr is not None:
+                checkpoint_mgr.update_budget(budget.snapshot())
+                await checkpoint_mgr.store.save(checkpoint_mgr.checkpoint)
+            publish_run_event(
+                events_run_id,
+                EventType.HUMAN_REQUEST,
+                {"tool_name": e.tool_name, "category": e.category},
+            )
+            return {
+                "response": str(e),
+                "intent": intent,
+                "error": False,
+                "awaiting_approval": True,
+                "run_id": e.run_id,
+                "pending_approval": {
+                    "tool_name": e.tool_name,
+                    "category": e.category,
+                },
+            }
+        except asyncio.CancelledError:
+            # Not an Exception: the generic handler below never saw it, so a
+            # client disconnect or a shutdown left the checkpoint pinned at
+            # ``running``. Record the cancellation, then re-raise — swallowing
+            # it would break structured concurrency for the awaiting task.
+            await handle_cancellation(intent, checkpoint_mgr, events_run_id)
+            raise
+        except BudgetExceededError as e:
+            return await handle_budget_exceeded(
+                e, intent, checkpoint_mgr, events_run_id
+            )
+        except CheckpointConflictError as e:
+            return handle_checkpoint_conflict(e, intent, events_run_id)
+        except Exception as e:
+            return await handle_handler_error(
+                e, intent, checkpoint_mgr, events_run_id, start_time
+            )
+
+    async def process_stream(
+        self,
+        query: str,
+        context: dict[str, Any] | None = None,
+        intent: str | None = None,
+        run_id: str | None = None,
+        resume: bool = False,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Process a user query with streaming response.
+
+        Args:
+            query: User query text
+            context: Optional context
+            intent: Optional forced intent string
+            run_id: Optional stable id of the streamed run. With a
+                ``checkpoint_store`` the stream is a checkpointed run (an id
+                is generated when omitted): its durable steps record, and the
+                delivered answer is recorded when the stream completes.
+            resume: With ``run_id``, claim the run's checkpoint and continue
+                it — recorded steps replay, the answer is regenerated (see
+                :mod:`baselith.core.orchestration.mixins._streaming`).
+
+        Yields:
+            Response tokens/chunks
+        """
+        from contextlib import aclosing
+
+        from baselith.core.orchestration.mixins._streaming import run_stream
+
+        async with aclosing(
+            run_stream(self, query, context, intent, run_id, resume)
+        ) as stream:
+            async for chunk in stream:
+                yield chunk

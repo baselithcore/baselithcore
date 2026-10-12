@@ -1,4 +1,4 @@
-"""Unit tests for ``core.world_model.payments`` — the AP2 execution seam."""
+"""Unit tests for ``baselith.core.world_model.payments`` — the AP2 execution seam."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from core.observability import audit as audit_module
-from core.observability.audit import AuditEventType
-from core.world_model.mandates import (
+from baselith.core.observability import audit as audit_module
+from baselith.core.observability.audit import AuditEventType
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     InMemoryReplayGuard,
@@ -27,7 +27,7 @@ from core.world_model.mandates import (
     sign_cart,
     sign_intent,
 )
-from core.world_model.payments import (
+from baselith.core.world_model.payments import (
     InMemoryReceiptStore,
     PaymentExecutionError,
     PaymentExecutor,

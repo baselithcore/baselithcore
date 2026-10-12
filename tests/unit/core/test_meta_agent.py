@@ -6,7 +6,7 @@ Tests for multi-persona ensemble reasoning.
 
 import pytest
 
-from core.meta import (
+from baselith.core.meta import (
     DebateResult,
     DebateRound,
     InternalDebate,
@@ -15,9 +15,13 @@ from core.meta import (
     PersonaEnsemble,
     Perspective,
 )
-from core.meta.ensemble import ADVOCATE_PERSONA, CRITIC_PERSONA, SYNTHESIZER_PERSONA
-from core.meta.types import ConsensusLevel, DebateRole
-from core.personas import Persona
+from baselith.core.meta.ensemble import (
+    ADVOCATE_PERSONA,
+    CRITIC_PERSONA,
+    SYNTHESIZER_PERSONA,
+)
+from baselith.core.meta.types import ConsensusLevel, DebateRole
+from baselith.core.personas import Persona
 
 # ============================================================================
 # Types Tests

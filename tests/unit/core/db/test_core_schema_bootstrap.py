@@ -16,7 +16,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.db.schema import init_core_schema_best_effort, should_run_core_schema_init
+from baselith.core.db.schema import (
+    init_core_schema_best_effort,
+    should_run_core_schema_init,
+)
 
 
 class TestShouldRunCoreSchemaInit:
@@ -39,7 +42,7 @@ class TestShouldRunCoreSchemaInit:
 class TestInitCoreSchemaBestEffort:
     @pytest.mark.asyncio
     async def test_reports_success_when_the_upgrade_runs(self) -> None:
-        with patch("core.db.schema.init_db", new=AsyncMock()) as init_db:
+        with patch("baselith.core.db.schema.init_db", new=AsyncMock()) as init_db:
             assert await init_core_schema_best_effort() is True
         init_db.assert_awaited_once()
 
@@ -51,7 +54,7 @@ class TestInitCoreSchemaBestEffort:
         database happens to be down" from a degraded boot into a crash loop.
         """
         with patch(
-            "core.db.schema.init_db",
+            "baselith.core.db.schema.init_db",
             new=AsyncMock(side_effect=OSError("connection refused")),
         ):
             assert await init_core_schema_best_effort() is False
@@ -60,10 +63,10 @@ class TestInitCoreSchemaBestEffort:
     async def test_the_failure_is_logged_not_swallowed(self) -> None:
         with (
             patch(
-                "core.db.schema.init_db",
+                "baselith.core.db.schema.init_db",
                 new=AsyncMock(side_effect=OSError("connection refused")),
             ),
-            patch("core.db.schema.logger") as logger,
+            patch("baselith.core.db.schema.logger") as logger,
         ):
             await init_core_schema_best_effort()
 

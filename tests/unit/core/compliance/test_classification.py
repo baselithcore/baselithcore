@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from core.compliance.classification import classify_system, obligations_for
-from core.compliance.prohibited import (
+from baselith.core.compliance.classification import classify_system, obligations_for
+from baselith.core.compliance.prohibited import (
     ProhibitedPractice,
     ProhibitedPracticeError,
     enforce_practices,
     screen_practices,
 )
-from core.compliance.types import (
+from baselith.core.compliance.types import (
     AiSystem,
     AnnexIIIArea,
     Art6Derogation,

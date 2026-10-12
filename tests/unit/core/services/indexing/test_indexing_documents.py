@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.services.indexing.service import (
+from baselith.core.services.indexing.service import (
     IndexedDocument,
     IndexingService,
     IndexingStats,
@@ -36,7 +36,7 @@ async def test_index_documents_basic(indexing_service, mock_vectorstore):
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             return_value=[("test_source", mock_source)],
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
@@ -75,7 +75,7 @@ async def test_index_documents_incremental(indexing_service, mock_vectorstore):
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             return_value=[("test_source", mock_source)],
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
@@ -108,7 +108,7 @@ async def test_index_documents_delete_stale(indexing_service, mock_vectorstore):
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             return_value=[("test_source", mock_source)],
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
@@ -136,7 +136,8 @@ async def test_ingest_file(indexing_service, mock_vectorstore):
     mock_source_class.return_value = mock_source_inst
 
     with patch(
-        "core.doc_sources.filesystem.FilesystemDocumentSource", mock_source_class
+        "baselith.core.doc_sources.filesystem.FilesystemDocumentSource",
+        mock_source_class,
     ):
         stats = await indexing_service.ingest_file("some/path.txt")
 
@@ -174,7 +175,7 @@ async def test_source_cleanup_error(indexing_service):
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             return_value=[("bad_source", mock_source)],
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
@@ -189,13 +190,15 @@ async def test_record_metrics(indexing_service):
     stats = IndexingStats(new_documents=2, duration_seconds=1.5)
     # Patch the metrics in the service module's namespace
     with (
-        patch("core.services.indexing.service.INDEXING_RUNS_TOTAL") as m1,
-        patch("core.services.indexing.service.INDEXING_DURATION_SECONDS") as m2,
-        patch("core.services.indexing.service.INDEXED_DOCUMENTS_TOTAL") as m3,
-        patch("core.services.indexing.service.INDEXED_DOCUMENTS_GAUGE") as m4,
+        patch("baselith.core.services.indexing.service.INDEXING_RUNS_TOTAL") as m1,
+        patch(
+            "baselith.core.services.indexing.service.INDEXING_DURATION_SECONDS"
+        ) as m2,
+        patch("baselith.core.services.indexing.service.INDEXED_DOCUMENTS_TOTAL") as m3,
+        patch("baselith.core.services.indexing.service.INDEXED_DOCUMENTS_GAUGE") as m4,
     ):
         # Patch the telemetry instance in the service module
-        import core.services.indexing.service as service_module
+        import baselith.core.services.indexing.service as service_module
 
         with patch.object(service_module, "telemetry") as mock_telemetry:
             indexing_service._record_metrics(stats, incremental=True)
@@ -243,7 +246,7 @@ async def test_ingest_file_with_metadata(indexing_service, mock_vectorstore):
     mock_source_inst.read_item = AsyncMock(return_value=mock_item)
 
     with patch(
-        "core.doc_sources.filesystem.FilesystemDocumentSource",
+        "baselith.core.doc_sources.filesystem.FilesystemDocumentSource",
         return_value=mock_source_inst,
     ):
         # Hits line 245
@@ -254,7 +257,7 @@ async def test_ingest_file_with_metadata(indexing_service, mock_vectorstore):
 
 def test_build_document_skips_empty_content():
     # An item with no content yields no Document (so it never reaches indexing).
-    from core.services.indexing._batch import build_document
+    from baselith.core.services.indexing._batch import build_document
 
     empty = MagicMock()
     empty.content = None
@@ -322,7 +325,7 @@ async def test_iter_source_items_async_gen(indexing_service):
 @pytest.mark.asyncio
 async def test_index_documents_no_sources(indexing_service):
     with (
-        patch("core.doc_sources.create_document_sources", return_value=[]),
+        patch("baselith.core.doc_sources.create_document_sources", return_value=[]),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
         patch.object(indexing_service, "_save_state", new_callable=AsyncMock),
     ):
@@ -332,11 +335,11 @@ async def test_index_documents_no_sources(indexing_service):
 
 @pytest.mark.asyncio
 async def test_index_documents_source_config_error(indexing_service):
-    from core.doc_sources import DocumentSourceError
+    from baselith.core.doc_sources import DocumentSourceError
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             side_effect=DocumentSourceError("Invalid config"),
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),
@@ -350,7 +353,7 @@ async def test_ingest_file_no_item(indexing_service):
     mock_source_inst = AsyncMock()
     mock_source_inst.read_item = AsyncMock(return_value=None)
     with patch(
-        "core.doc_sources.filesystem.FilesystemDocumentSource",
+        "baselith.core.doc_sources.filesystem.FilesystemDocumentSource",
         return_value=mock_source_inst,
     ):
         stats = await indexing_service.ingest_file("missing.txt")
@@ -368,8 +371,8 @@ async def test_reindex_collection(indexing_service):
 
 @pytest.mark.asyncio
 async def test_global_instance():
-    import core.services.indexing.service as service_module
-    from core.services.indexing.service import get_indexing_service
+    import baselith.core.services.indexing.service as service_module
+    from baselith.core.services.indexing.service import get_indexing_service
 
     # Temporarily reset global
     old_instance = service_module._indexing_service
@@ -403,7 +406,7 @@ async def test_index_version_bumps_on_registry_change(
 
     with (
         patch(
-            "core.doc_sources.create_document_sources",
+            "baselith.core.doc_sources.create_document_sources",
             return_value=[("test_source", mock_source)],
         ),
         patch.object(indexing_service, "_load_state", new_callable=AsyncMock),

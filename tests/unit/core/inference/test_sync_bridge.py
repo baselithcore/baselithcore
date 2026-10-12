@@ -8,8 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from qdrant_client.models import PointStruct, VectorParams
 
-from core.config.inference import QdrantServerConfig
-from core.services.inference import QdrantRuntime, SyncInference, TenantScopeError
+from baselith.core.config.inference import QdrantServerConfig
+from baselith.core.services.inference import (
+    QdrantRuntime,
+    SyncInference,
+    TenantScopeError,
+)
 
 
 @pytest.fixture
@@ -95,7 +99,7 @@ async def _noop() -> None:
 
 
 async def test_async_shutdown_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    from core.services.inference import sync_bridge
+    from baselith.core.services.inference import sync_bridge
 
     def _boom() -> None:
         raise RuntimeError("bridge exploded")

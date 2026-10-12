@@ -17,13 +17,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.orchestration.handlers.simulation_handler import (
+from baselith.core.orchestration.handlers.simulation_handler import (
     DEFAULT_SIMULATION_ROUNDS,
     MAX_SIMULATION_ROUNDS,
     SimulationHandler,
     resolve_rounds,
 )
-from core.orchestration.handlers.swarm_handler import SwarmHandler
+from baselith.core.orchestration.handlers.swarm_handler import SwarmHandler
 
 
 @pytest.mark.parametrize(
@@ -119,7 +119,7 @@ def test_swarm_request_colony_takes_context_memory():
 
 
 def test_factory_supplied_memory_is_not_overridden():
-    from core.swarm.colony import Colony
+    from baselith.core.swarm.colony import Colony
 
     own = object()
     handler = SwarmHandler(colony_factory=lambda: Colony(memory_manager=own))  # type: ignore[arg-type]
@@ -128,7 +128,7 @@ def test_factory_supplied_memory_is_not_overridden():
 
 
 def test_orchestrator_hands_its_memory_to_swarm_handlers():
-    from core.orchestration import Orchestrator
+    from baselith.core.orchestration import Orchestrator
 
     memory = MagicMock()
     orchestrator = Orchestrator(

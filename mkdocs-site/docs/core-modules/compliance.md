@@ -4,7 +4,7 @@ description: AI system registry, Art. 5/6 classification, Annex IV documentation
 ---
 
 The incident and transparency subsystems cover *events* and *disclosures*.
-`core/compliance/` covers the thing they attach to: **which AI systems do we
+`baselith/core/compliance/` covers the thing they attach to: **which AI systems do we
 operate, in which risk category, under which role** — and the governance
 artefacts that follow from that answer.
 
@@ -39,7 +39,7 @@ Opt-in via `COMPLIANCE_ENABLED` (default off); Sacred Core, domain-agnostic.
 ## Registering a system
 
 ```python
-from core.compliance import AiSystem, AnnexIIIArea, get_ai_system_registry
+from baselith.core.compliance import AiSystem, AnnexIIIArea, get_ai_system_registry
 
 registry = get_ai_system_registry()
 system, classification = await registry.register(
@@ -89,7 +89,7 @@ gate, not a detector** — whether a system performs social scoring is a questio
 about its purpose and deployment context that no runtime check can answer.
 
 ```python
-from core.compliance import ProhibitedPractice, enforce_practices
+from baselith.core.compliance import ProhibitedPractice, enforce_practices
 
 enforce_practices("scorer", [ProhibitedPractice.SOCIAL_SCORING])
 # ProhibitedPracticeError: Prohibited AI practice declared: Art. 5(1)(c) — …
@@ -116,7 +116,7 @@ for duty in await registry.obligations(system.id):
 ## Art. 9 risk management
 
 The obligation most easily mistaken for something the runtime already does.
-`core/world_model/risk_assessor.py` scores the risk of an *action* the agent is
+`baselith/core/world_model/risk_assessor.py` scores the risk of an *action* the agent is
 about to take; Art. 9 requires a **continuous iterative process across the whole
 lifecycle**, systematically reviewed and updated.
 
@@ -126,7 +126,7 @@ person*, **and** verified by testing — Art. 9(8) asks for evidence the measure
 perform, so acceptance alone leaves the risk open.
 
 ```python
-from core.compliance import (
+from baselith.core.compliance import (
     HarmCategory, IdentifiedRisk, RiskManagementSystem, RiskTreatment,
     get_risk_management_service,
 )
@@ -172,7 +172,7 @@ on purpose: inventing content the operator never asserted would be worse than an
 obvious gap.
 
 ```python
-from core.compliance import draft_from_system, get_technical_documentation_service
+from baselith.core.compliance import draft_from_system, get_technical_documentation_service
 
 doc = draft_from_system(system)
 print([s.value for s in doc.missing_sections()])
@@ -204,7 +204,7 @@ Art. 13(3) fixes sixteen content elements; `missing_elements()` names the empty
 ones and `issue()` refuses while any remain.
 
 ```python
-from core.compliance import draft_instructions, get_instructions_service
+from baselith.core.compliance import draft_instructions, get_instructions_service
 
 instructions = draft_instructions(
     system, risk_file=risk_file, monitoring_plan=plan,
@@ -236,7 +236,7 @@ envisaged measures, **prior consultation with the supervisory authority is a
 precondition for processing**, not a follow-up.
 
 ```python
-from core.compliance import get_dpia_service
+from baselith.core.compliance import get_dpia_service
 
 service = get_dpia_service()
 await service.save(dpia)
@@ -261,7 +261,7 @@ are missing — a completion flag over empty statutory elements is a false claim
 in the record.
 
 ```python
-from core.compliance import FriaRisk, FundamentalRightsImpactAssessment, get_fria_service
+from baselith.core.compliance import FriaRisk, FundamentalRightsImpactAssessment, get_fria_service
 
 fria = FundamentalRightsImpactAssessment(
     system_id=system.id,
@@ -290,7 +290,7 @@ required-element sets; a third-country transfer with neither safeguard nor
 documented derogation is reported as incomplete.
 
 ```python
-from core.compliance import ProcessingActivity, get_ropa_service
+from baselith.core.compliance import ProcessingActivity, get_ropa_service
 
 await get_ropa_service().save(
     ProcessingActivity(
@@ -318,8 +318,8 @@ keeps being true. A plan declares the metrics watched in production with their
 alert thresholds; observations are evaluated as they arrive.
 
 ```python
-from core.compliance import MonitoringMetric, PostMarketMonitoringPlan
-from core.compliance.post_market import ThresholdDirection
+from baselith.core.compliance import MonitoringMetric, PostMarketMonitoringPlan
+from baselith.core.compliance.post_market import ThresholdDirection
 
 plan = PostMarketMonitoringPlan(
     system_id=system.id,
@@ -351,7 +351,7 @@ Art. 72(1) requirement — a plan drawn up at launch and never revisited monitor
 nothing:
 
 ```python
-from core.compliance import get_post_market_service
+from baselith.core.compliance import get_post_market_service
 
 service = get_post_market_service()
 await service.save(plan)
@@ -387,7 +387,7 @@ Art. 36(1) prior consultation is outstanding — the one state here that is not
 merely untidy but unlawful.
 
 ```python
-from core.compliance import ComplianceReviewScheduler, sweep_summary
+from baselith.core.compliance import ComplianceReviewScheduler, sweep_summary
 
 findings = await ComplianceReviewScheduler().sweep()
 if sweep_summary(findings)["needs_attention"]:
@@ -400,7 +400,7 @@ overdue artefacts in the others. Enable it with
 nobody polls only moves the failure one step, to information that exists unread.
 
 Bias examination for Art. 10(2)(f)/(g) and Art. 15 lives next door in
-[`core/evaluation/fairness.py`](evaluation.md) — group selection rates,
+[`baselith/core/evaluation/fairness.py`](evaluation.md) — group selection rates,
 demographic parity, disparate impact, equalized odds and per-group accuracy.
 
 ## Admin API
@@ -492,7 +492,7 @@ operator never configured. Gaps are logged one line each with the article that
 motivates them; strict mode raises `ComplianceProfileError` at startup instead.
 
 ```python
-from core.compliance import ComplianceProfile, evaluate_profile
+from baselith.core.compliance import ComplianceProfile, evaluate_profile
 
 report = evaluate_profile(ComplianceProfile.AI_ACT_HIGH_RISK)
 for gap in report.gaps:
@@ -522,7 +522,7 @@ where these records must outlive the process by years. Set
 reclassification and document write also lands in the
 [audit trail](audit-trail.md) as a `compliance.*` event.
 
-The SQLite stores (`core/compliance/persistence.py`) never run a statement on the
+The SQLite stores (`baselith/core/compliance/persistence.py`) never run a statement on the
 event loop: every public store operation makes exactly one `asyncio.to_thread`
 hop that covers the whole unit of work — lock, statement, fetch, JSON decode and
 model rehydration — so a compliance write cannot stall in-flight requests.

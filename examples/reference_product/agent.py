@@ -10,14 +10,14 @@ This agent demonstrates the full lifecycle contract:
 
 from typing import Any
 
-from core.lifecycle import (
+from baselith.core.lifecycle import (
     AgentError,
     AgentState,
     FrameworkErrorCode,
     LifecycleMixin,
 )
-from core.observability.logging import get_logger
-from core.orchestration.protocols import AgentProtocol
+from baselith.core.observability.logging import get_logger
+from baselith.core.orchestration.protocols import AgentProtocol
 
 logger = get_logger(__name__)
 

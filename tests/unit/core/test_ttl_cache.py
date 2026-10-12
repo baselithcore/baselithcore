@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.cache import TTLCache
+from baselith.core.cache import TTLCache
 
 
 class TestTTLCacheOptimization:

@@ -28,8 +28,8 @@ ROUTE_GATES = (
 )
 
 LITERAL_SCAN = (
-    "core",
-    "plugins",
+    "baselith/core",
+    "baselith/plugins",
     "scripts",
     "configs",
     "deploy",
@@ -127,7 +127,7 @@ def cli_tree(repo_root: Path) -> dict[str, dict] | None:
     import argparse
 
     try:
-        cli_main = importlib.import_module("core.cli.__main__")
+        cli_main = importlib.import_module("baselith.core.cli.__main__")
         commands: list[str] = list(cli_main.COMMANDS)
     except Exception:
         return None
@@ -137,7 +137,7 @@ def cli_tree(repo_root: Path) -> dict[str, dict] | None:
     for cmd_name in commands:
         try:
             module = importlib.import_module(
-                f"core.cli.commands.{cmd_name.replace('-', '_')}"
+                f"baselith.core.cli.commands.{cmd_name.replace('-', '_')}"
             )
             if hasattr(module, "register_parser"):
                 module.register_parser(subparsers, argparse.HelpFormatter)
@@ -168,7 +168,7 @@ def known_routes(repo_root: Path) -> set[str] | None:
     try:
         from fastapi import FastAPI
 
-        from core.api.factory import create_app
+        from baselith.core.api.factory import create_app
 
         app = create_app()
     except Exception:
@@ -214,7 +214,7 @@ def known_routes(repo_root: Path) -> set[str] | None:
 
     # Routers core ships for the host to mount (documented, not auto-mounted).
     try:
-        from core.a2a import create_a2a_router
+        from baselith.core.a2a import create_a2a_router
 
         scratch = FastAPI()
         # The server is only touched inside the endpoints; the paths are what we need.
@@ -223,12 +223,14 @@ def known_routes(repo_root: Path) -> set[str] | None:
     except Exception:
         pass
 
-    api_routers = repo_root / "plugins" / "api_routers"
+    api_routers = repo_root / "baselith" / "plugins" / "api_routers"
     for module_file in sorted(api_routers.glob("*.py")):
         if module_file.name.startswith("_") or module_file.name == "plugin.py":
             continue
         try:
-            module = importlib.import_module(f"plugins.api_routers.{module_file.stem}")
+            module = importlib.import_module(
+                f"baselith.plugins.api_routers.{module_file.stem}"
+            )
         except Exception:
             continue
         router = getattr(module, "router", None)

@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.a2a import AgentCard, EchoA2AServer
-from core.a2a.protocol import ErrorCode
+from baselith.core.a2a import AgentCard, EchoA2AServer
+from baselith.core.a2a.protocol import ErrorCode
 
 
 def _request(method, params=None, req_id="r1"):

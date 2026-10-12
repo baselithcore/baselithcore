@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates.models import ReleaseInfo, SystemUpdate
-from core.plugin_updates.upgrade import (
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates.models import ReleaseInfo, SystemUpdate
+from baselith.core.plugin_updates.upgrade import (
     MAX_INSTRUCTIONS_BYTES,
     Deployment,
     build_upgrade_instructions,
@@ -18,7 +18,10 @@ from core.plugin_updates.upgrade import (
     read_namespace,
     render_instructions,
 )
-from core.plugin_updates.upgrade_models import PluginBoundsIssue, UpgradeInstructions
+from baselith.core.plugin_updates.upgrade_models import (
+    PluginBoundsIssue,
+    UpgradeInstructions,
+)
 
 REPO = "baselithcore/baselithcore"
 

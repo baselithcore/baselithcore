@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.task_queue.jobs import agent_run as job_module
+from baselith.core.task_queue.jobs import agent_run as job_module
 
 pytestmark = [pytest.mark.unit]
 
@@ -55,7 +55,7 @@ class TestRunAgentTask:
     def test_success_tracks_and_notifies(self, harness, monkeypatch):
         tracker, webhooks = harness
 
-        async def fake_chat(req):
+        async def fake_chat(req, **_kwargs):
             assert req.query == "hello"
             return _Response()
 
@@ -70,7 +70,7 @@ class TestRunAgentTask:
     def test_failure_marks_failed_and_notifies(self, harness, monkeypatch):
         tracker, webhooks = harness
 
-        async def fake_chat(req):
+        async def fake_chat(req, **_kwargs):
             raise RuntimeError("provider down")
 
         monkeypatch.setattr(job_module, "_handle_chat", fake_chat)
@@ -83,7 +83,7 @@ class TestRunAgentTask:
     def test_webhook_failure_does_not_fail_job(self, harness, monkeypatch):
         tracker, webhooks = harness
 
-        async def fake_chat(req):
+        async def fake_chat(req, **_kwargs):
             return _Response()
 
         async def broken_emit(event_type, data, *, tenant_id="default"):
@@ -108,7 +108,7 @@ class TestRetryAwareFailure:
 
     @pytest.fixture
     def failing(self, harness, monkeypatch):
-        async def fake_chat(req):
+        async def fake_chat(req, **_kwargs):
             raise RuntimeError("provider down")
 
         monkeypatch.setattr(job_module, "_handle_chat", fake_chat)
@@ -143,7 +143,7 @@ class TestRetryAwareFailure:
         tracker, webhooks = harness
         calls = {"n": 0}
 
-        async def flaky_chat(req):
+        async def flaky_chat(req, **_kwargs):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("transient")
@@ -162,7 +162,7 @@ class TestRetryAwareFailure:
 
 
 def test_tracker_mark_retrying_is_non_terminal_status():
-    from core.task_queue.status import TaskStatus, TaskTracker
+    from baselith.core.task_queue.status import TaskStatus, TaskTracker
 
     recorded = {}
 

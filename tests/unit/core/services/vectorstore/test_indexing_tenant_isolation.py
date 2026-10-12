@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.context import reset_tenant_context, set_tenant_context
-from core.models.domain import Document
-from core.services.vectorstore import VectorStoreService
-from core.services.vectorstore._indexing import RESERVED_PAYLOAD_KEYS
+from baselith.core.context import reset_tenant_context, set_tenant_context
+from baselith.core.models.domain import Document
+from baselith.core.services.vectorstore import VectorStoreService
+from baselith.core.services.vectorstore._indexing import RESERVED_PAYLOAD_KEYS
 
 
 def _one_vector_per_text(_embedder, texts, _cache, **_kwargs):
@@ -29,7 +29,7 @@ def _one_vector_per_text(_embedder, texts, _cache, **_kwargs):
 
 @pytest.fixture(autouse=True)
 def mock_redis_cache():
-    with patch("core.services.vectorstore.service.RedisCache") as mock:
+    with patch("baselith.core.services.vectorstore.service.RedisCache") as mock:
         mock.return_value.get = AsyncMock(return_value=None)
         mock.return_value.set = AsyncMock()
         mock.return_value.delete = AsyncMock()
@@ -56,7 +56,7 @@ def _service(provider: Any) -> VectorStoreService:
 
 
 @pytest.mark.asyncio
-@patch("core.services.vectorstore._indexing.get_embeddings_cached")
+@patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
 async def test_metadata_cannot_claim_another_tenant(
     mock_get_embeddings, tenant: str
 ) -> None:
@@ -83,7 +83,7 @@ async def test_metadata_cannot_claim_another_tenant(
 
 
 @pytest.mark.asyncio
-@patch("core.services.vectorstore._indexing.get_embeddings_cached")
+@patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
 async def test_metadata_cannot_shadow_retrieval_keys(
     mock_get_embeddings, tenant: str
 ) -> None:
@@ -106,7 +106,7 @@ async def test_metadata_cannot_shadow_retrieval_keys(
 
 
 @pytest.mark.asyncio
-@patch("core.services.vectorstore._indexing.get_embeddings_cached")
+@patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
 async def test_unreserved_metadata_still_rides_along(
     mock_get_embeddings, tenant: str
 ) -> None:

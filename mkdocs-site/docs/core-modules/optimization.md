@@ -3,14 +3,14 @@ title: Optimization Loop
 description: Automated prompt tuning and agent performance optimization
 ---
 
-The `core/optimization` module implements an active learning loop that monitors agent performance and suggests (or applies) improvements to system prompts.
+The `baselith/core/optimization` module implements an active learning loop that monitors agent performance and suggests (or applies) improvements to system prompts.
 
 !!! note "Library API — not wired by default"
     The default app never starts an `OptimizationLoop` and never calls
     `PromptOptimizer`, `auto_tune`, `compile_prompt` or the evolutionary
     search: the "autonomous process" below runs only after host code calls
     `OptimizationLoop.start()`, which subscribes it to evaluation events. The
-    one piece the running app uses is `core.optimization.caching.RedisCache`,
+    one piece the running app uses is `baselith.core.optimization.caching.RedisCache`,
     behind the vector-store search cache.
 
 ## Overview
@@ -45,8 +45,8 @@ The `PromptOptimizer` uses a "Meta-Prompting" strategy to generate better instru
 ### Triggering Optimization
 
 ```python
-from core.optimization.optimizer import PromptOptimizer
-from core.learning.feedback import FeedbackCollector
+from baselith.core.optimization.optimizer import PromptOptimizer
+from baselith.core.learning.feedback import FeedbackCollector
 
 optimizer = PromptOptimizer(FeedbackCollector())
 
@@ -84,7 +84,7 @@ if result.applied:
 
 `auto_tune` can rewrite an agent's system prompt from production feedback —
 self-modification that, ungated, ships whatever the meta-prompt produced.
-`core/optimization/tune_gate.py` holds the non-negotiable between generation
+`baselith/core/optimization/tune_gate.py` holds the non-negotiable between generation
 and application. **Off by default this release**: with
 `BASELITH_OPTIMIZER_EVAL_GATE=true`, the candidate must pass a
 `TuneEvaluator` before `apply_fn` runs.
@@ -109,8 +109,8 @@ and application. **Off by default this release**: with
   [autonomy category](orchestration.md#autonomypolicy-three-tier-spectrum).
 
 ```python
-from core.evaluation.prompt_eval import PromptEvaluator
-from core.optimization.optimizer import PromptOptimizer
+from baselith.core.evaluation.prompt_eval import PromptEvaluator
+from baselith.core.optimization.optimizer import PromptOptimizer
 
 async def replay_suite(agent_id: str, candidate_prompt: str) -> float:
     report = await PromptEvaluator(candidate_prompt).run(suites[agent_id])
@@ -121,12 +121,12 @@ optimizer = PromptOptimizer(FeedbackCollector(), tune_evaluator=replay_suite)
 
 The reusable gate itself is `review_candidate(agent_id, candidate_prompt,
 evaluator, threshold=..., register_as=...)` in
-`core.optimization.tune_gate`, for callers applying tuned prompts outside
+`baselith.core.optimization.tune_gate`, for callers applying tuned prompts outside
 `auto_tune`.
 
 ---
 
-## Evolutionary search (`core/optimization/evolution/`)
+## Evolutionary search (`baselith/core/optimization/evolution/`)
 
 `PromptOptimizer` refines one prompt from feedback; the evolution package
 runs a **population** search (GEPA/AlphaEvolve-style) over versioned text
@@ -158,7 +158,7 @@ artifacts — prompts, skills, configs — scored per evaluation instance.
   self-modification and stays on the audit trail.
 
 ```python
-from core.optimization import (
+from baselith.core.optimization import (
     CandidateArchive,
     EvolutionBudget,
     EvolutionEngine,
@@ -208,7 +208,7 @@ counted in `evaluations_used` but never skipped to stay under
 
 ## DSPy-lite prompt compilation (`compile_prompt`)
 
-`core/optimization/compile.py` closes the loop from the other end: instead
+`baselith/core/optimization/compile.py` closes the loop from the other end: instead
 of mutating prose, `compile_prompt` **bootstraps few-shot demonstrations**
 from the base prompt's own passing answers and lands the winner through the
 same eval-gated, candidate-labelled registry path as the tune gate.
@@ -218,8 +218,8 @@ trainset + metric -> bootstrap demos -> candidate -> eval gate -> registry
 ```
 
 ```python
-from core.evaluation.prompt_eval import EvalCase
-from core.optimization import compile_prompt
+from baselith.core.evaluation.prompt_eval import EvalCase
+from baselith.core.optimization import compile_prompt
 
 trainset = [
     EvalCase(
@@ -272,7 +272,7 @@ of the base prompt is never registered.
 
 ---
 
-## Result cache (`core/optimization/caching.py`)
+## Result cache (`baselith/core/optimization/caching.py`)
 
 `RedisCache` namespaces every key by tenant: `{prefix}:{tenant_id}:{cache_prefix}:{key}`.
 The tenant id comes from `get_tenant_or_default()` rather than

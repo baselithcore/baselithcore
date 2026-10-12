@@ -2,8 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.bootstrap.lazy_init import initialize_hierarchical_memory
-from core.memory.hierarchy import HierarchicalMemory
+from baselith.core.bootstrap.lazy_init import initialize_hierarchical_memory
+from baselith.core.memory.hierarchy import HierarchicalMemory
 
 
 @pytest.mark.asyncio
@@ -11,8 +11,8 @@ async def test_initialize_hierarchical_memory():
     """Test that the hierarchical memory factory works correctly."""
 
     with (
-        patch("core.services.llm.service.get_llm_service") as mock_get_llm,
-        patch("core.nlp.models.get_embedder") as mock_get_embedder,
+        patch("baselith.core.services.llm.service.get_llm_service") as mock_get_llm,
+        patch("baselith.core.nlp.models.get_embedder") as mock_get_embedder,
     ):
         # Setup mocks
         mock_llm = MagicMock()

@@ -14,7 +14,7 @@ followed by the act — which is the harmful shape; mentioning the act is not.
 
 import pytest
 
-from core.guardrails.output_guard import OutputGuard
+from baselith.core.guardrails.output_guard import OutputGuard
 
 pytestmark = pytest.mark.unit
 

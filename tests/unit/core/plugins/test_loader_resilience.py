@@ -21,13 +21,13 @@ from pathlib import Path
 
 import pytest
 
-from core.plugins import PluginLoader, PluginRegistry
+from baselith.core.plugins import PluginLoader, PluginRegistry
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-EXAMPLE_PLUGIN = REPO_ROOT / "plugins" / "example-plugin"
+EXAMPLE_PLUGIN = REPO_ROOT / "baselith" / "plugins" / "example-plugin"
 
 GOOD_PLUGIN = """
-from core.plugins import Plugin
+from baselith.core.plugins import Plugin
 
 
 class GoodPlugin(Plugin):
@@ -46,7 +46,7 @@ def _clean_sys_modules():
     before = set(sys.modules)
     yield
     for key in set(sys.modules) - before:
-        if key.startswith("plugins."):
+        if key.startswith("baselith.plugins."):
             del sys.modules[key]
 
 
@@ -85,7 +85,7 @@ class TestInvalidManifestIsRefused:
     async def test_refusal_names_the_offending_key(
         self, registry, tmp_path, monkeypatch
     ):
-        from core.plugins import loader as loader_module
+        from baselith.core.plugins import loader as loader_module
 
         messages: list[str] = []
         monkeypatch.setattr(
@@ -152,7 +152,7 @@ class TestRefusalIsTracked:
 
     @pytest.mark.asyncio
     async def test_refusal_records_failed_with_a_reason(self, registry, tmp_path):
-        from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+        from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
         lifecycle = PluginLifecycleManager()
         plugin_dir = _write_good_plugin(tmp_path, "tracked_typo")
@@ -176,7 +176,7 @@ class TestRefusalIsTracked:
     @pytest.mark.asyncio
     async def test_failed_transition_works_for_an_untracked_plugin(self):
         """lifecycle.transition_to_failed must not need prior tracking."""
-        from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+        from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
         lifecycle = PluginLifecycleManager()
         await lifecycle.transition_to_failed("never-seen", ValueError("boom"))
@@ -189,7 +189,7 @@ class TestRefusalIsTracked:
     @pytest.mark.asyncio
     async def test_unloading_transition_works_for_an_untracked_plugin(self):
         """Same latent KeyError one method down; fixed with it."""
-        from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+        from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
         lifecycle = PluginLifecycleManager()
         await lifecycle.transition_to_unloading("never-seen")
@@ -197,7 +197,7 @@ class TestRefusalIsTracked:
 
     @pytest.mark.asyncio
     async def test_valid_plugin_still_reaches_loaded(self, registry, tmp_path):
-        from core.plugins.lifecycle import PluginLifecycleManager, PluginState
+        from baselith.core.plugins.lifecycle import PluginLifecycleManager, PluginState
 
         lifecycle = PluginLifecycleManager()
         plugin_dir = _write_good_plugin(tmp_path, "tracked_ok")
@@ -240,7 +240,7 @@ class TestPartialFailure:
         _write_good_plugin(tmp_path, "alpha_ok")
         _write_good_plugin(tmp_path, "beta_ok")
 
-        from core.plugins import bulk_load
+        from baselith.core.plugins import bulk_load
 
         real = bulk_load._instantiate_one
         calls: list[str] = []

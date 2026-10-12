@@ -19,8 +19,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from rq import Worker
 
-from core.task_queue.trace_context import inject_trace_context
-from core.task_queue.worker import TenantAwareWorker
+from baselith.core.task_queue.trace_context import inject_trace_context
+from baselith.core.task_queue.worker import TenantAwareWorker
 
 pytestmark = [pytest.mark.unit]
 
@@ -96,7 +96,7 @@ class TestTenantBinding:
         seen = {}
 
         def _capture(*_args, **_kwargs):
-            from core.context import get_current_tenant_id
+            from baselith.core.context import get_current_tenant_id
 
             seen["tenant"] = get_current_tenant_id()
 
@@ -105,7 +105,7 @@ class TestTenantBinding:
         assert seen["tenant"] == "acme"
 
     def test_tenant_context_is_restored_afterwards(self, worker):
-        from core.context import get_current_tenant_id
+        from baselith.core.context import get_current_tenant_id
 
         before = get_current_tenant_id()
         with patch.object(Worker, "perform_job", return_value=None):
@@ -116,7 +116,7 @@ class TestTenantBinding:
         seen = {}
 
         def _capture(*_args, **_kwargs):
-            from core.context import get_current_tenant_id
+            from baselith.core.context import get_current_tenant_id
 
             seen["tenant"] = get_current_tenant_id()
 
@@ -129,9 +129,11 @@ class TestTenantBinding:
     ):
         """With RLS on, ``default`` is another tenant's rows — a job that names
         no tenant must declare itself instead of inheriting one."""
-        from core.db.connection import SYSTEM_TENANT_ID
+        from baselith.core.db.connection import SYSTEM_TENANT_ID
 
-        monkeypatch.setattr("core.task_queue.worker._rls_enabled", lambda: True)
+        monkeypatch.setattr(
+            "baselith.core.task_queue.worker._rls_enabled", lambda: True
+        )
         assert self._tenant_during(worker) == SYSTEM_TENANT_ID
 
     def test_tenantless_job_without_rls_keeps_the_default_fallback(
@@ -139,13 +141,19 @@ class TestTenantBinding:
     ):
         """Nothing reads app.tenant_id for access control when RLS is off, so
         the historical namespace must not shift under existing deployments."""
-        monkeypatch.setattr("core.task_queue.worker._rls_enabled", lambda: False)
+        monkeypatch.setattr(
+            "baselith.core.task_queue.worker._rls_enabled", lambda: False
+        )
         assert self._tenant_during(worker) == "default"
 
     def test_missing_system_scope_helper_is_tolerated(self, worker, monkeypatch):
         """The helper is optional: an older core must still run jobs."""
-        monkeypatch.setattr("core.task_queue.worker._rls_enabled", lambda: True)
-        monkeypatch.setattr("core.task_queue.worker._system_tenant_scope", lambda: None)
+        monkeypatch.setattr(
+            "baselith.core.task_queue.worker._rls_enabled", lambda: True
+        )
+        monkeypatch.setattr(
+            "baselith.core.task_queue.worker._system_tenant_scope", lambda: None
+        )
         with patch.object(Worker, "perform_job", return_value="ok"):
             assert worker.perform_job(_job(meta={}), _queue()) == "ok"
         assert self._tenant_during(worker) == "default"

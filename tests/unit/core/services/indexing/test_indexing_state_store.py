@@ -59,9 +59,9 @@ async def test_get_redis_client_success(indexing_service):
     indexing_service._store._redis = None
     mock_redis = MagicMock()
     with (
-        patch("core.cache.create_redis_client", return_value=mock_redis),
+        patch("baselith.core.cache.create_redis_client", return_value=mock_redis),
         patch(
-            "core.config.get_storage_config",
+            "baselith.core.config.get_storage_config",
             return_value=MagicMock(cache_redis_url="redis://localhost"),
         ),
     ):
@@ -123,13 +123,17 @@ async def test_close_redis(indexing_service):
 async def test_get_redis_client_no_url(indexing_service):
     mock_storage_config = MagicMock()
     mock_storage_config.cache_redis_url = None
-    with patch("core.config.get_storage_config", return_value=mock_storage_config):
+    with patch(
+        "baselith.core.config.get_storage_config", return_value=mock_storage_config
+    ):
         client = indexing_service._store._get_redis_client()
         assert client is None
 
 
 @pytest.mark.asyncio
 async def test_get_redis_client_error(indexing_service):
-    with patch("core.config.get_storage_config", side_effect=Exception("Boom")):
+    with patch(
+        "baselith.core.config.get_storage_config", side_effect=Exception("Boom")
+    ):
         client = indexing_service._store._get_redis_client()
         assert client is None

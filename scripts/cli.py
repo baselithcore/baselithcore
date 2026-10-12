@@ -24,7 +24,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
-PLUGINS_DIR = PROJECT_ROOT / "plugins"
+PLUGINS_DIR = PROJECT_ROOT / "baselith" / "plugins"
 
 
 # ============================================================================

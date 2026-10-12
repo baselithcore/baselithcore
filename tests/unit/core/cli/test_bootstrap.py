@@ -2,7 +2,7 @@
 
 The behaviour under test is the one that used to break RQ workers: running
 ``baselith`` from a checkout while ``import core`` resolves to an installed
-distribution. See :mod:`core.cli.bootstrap`.
+distribution. See :mod:`baselith.core.cli.bootstrap`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from core.cli import bootstrap
+from baselith.core.cli import bootstrap
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def test_find_checkout_root_ignores_unrelated_dir(tmp_path: Path) -> None:
 
 
 def test_core_is_from_true_for_own_tree() -> None:
-    import core
+    from baselith import core
 
     root = Path(core.__file__).resolve().parent.parent
     assert bootstrap.core_is_from(root) is True
@@ -107,7 +107,7 @@ def test_ensure_checkout_precedence_execs_with_checkout(
 
     assert len(calls) == 1
     _exe, argv, env = calls[0]
-    assert argv[1:] == ["-m", "core.cli", "queue", "worker"]
+    assert argv[1:] == ["-m", "baselith.core.cli", "queue", "worker"]
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(checkout.resolve())
 
 

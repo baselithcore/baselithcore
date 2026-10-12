@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.config.storage import StorageConfig
-from core.db import connection as conn_mod
-from core.db import pool_budget
-from core.db.pool_budget import ConnectionBudget, check_connection_budget
+from baselith.core.config.storage import StorageConfig
+from baselith.core.db import connection as conn_mod
+from baselith.core.db import pool_budget
+from baselith.core.db.pool_budget import ConnectionBudget, check_connection_budget
 
 pytestmark = [pytest.mark.unit]
 

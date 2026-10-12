@@ -10,8 +10,8 @@ in ``tests/integration/test_event_stream_redis.py``
 
 import pytest
 
-from core.events.stream_redis import DEFAULT_STREAM_KEY, RedisEventStream
-from core.events.types import Event
+from baselith.core.events.stream_redis import DEFAULT_STREAM_KEY, RedisEventStream
+from baselith.core.events.types import Event
 
 
 class FakeRedis:
@@ -203,7 +203,7 @@ def test_the_backend_matches_the_protocol_signatures():
     """``RedisEventStream`` must be swappable for the in-memory reference."""
     import inspect
 
-    from core.events.stream import EventStream, InMemoryEventStream
+    from baselith.core.events.stream import EventStream, InMemoryEventStream
 
     for name in ("append", "ensure_group", "read", "ack", "reclaim"):
         expected = inspect.signature(getattr(EventStream, name))

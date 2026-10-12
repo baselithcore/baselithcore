@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import core
-from core.evaluation.cassette import CASSETTE_DIR, Cassette
+from baselith import core
+from baselith.core.evaluation.cassette import CASSETTE_DIR, Cassette
 
 
 def test_default_dir_is_cwd_relative() -> None:

@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from core.orchestration.orchestrator import Orchestrator
+from baselith.core.orchestration.orchestrator import Orchestrator
 
 
 class _FlowHandler:

@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from core.config.incidents import IncidentReportingConfig
-from core.incidents.gdpr import (
+from baselith.core.config.incidents import IncidentReportingConfig
+from baselith.core.incidents.gdpr import (
     AUTHORITY_NOTIFICATION_HOURS,
     Art34Exemption,
     BreachRiskLevel,
@@ -15,9 +15,9 @@ from core.incidents.gdpr import (
     BreachStatus,
     PersonalDataBreach,
 )
-from core.incidents.gdpr_service import BreachNotFoundError, BreachService
-from core.incidents.persistence import SQLiteBreachStore
-from core.incidents.types import GdprMilestoneKind
+from baselith.core.incidents.gdpr_service import BreachNotFoundError, BreachService
+from baselith.core.incidents.persistence import SQLiteBreachStore
+from baselith.core.incidents.types import GdprMilestoneKind
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ class TestServiceWorkflow:
         # Patch the module logger instead of capturing stdout: the global
         # structlog sink is process-wide mutable state, so a stdout assert is
         # order-dependent under random test ordering.
-        with patch("core.incidents.gdpr_service.logger") as log:
+        with patch("baselith.core.incidents.gdpr_service.logger") as log:
             updated = await service.notify_authority(breach.id)
         assert updated.is_late is True
         assert updated.delay_reason is None

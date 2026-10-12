@@ -1,5 +1,5 @@
 """
-Unit tests for core.plugins.exporters.backstage_provider and protocols.
+Unit tests for baselith.core.plugins.exporters.backstage_provider and protocols.
 
 Coverage:
 - BackstageExporter Protocol structural check
@@ -29,12 +29,12 @@ from backstage_test_utils import (
     make_provider as _provider,
 )
 
-from core.plugins.exporters.backstage_provider import (
+from baselith.core.plugins.exporters.backstage_provider import (
     _scan_source_files,
     _slugify_title,
 )
-from core.plugins.lifecycle import PluginState
-from core.plugins.protocols import BackstageExporter, CatalogExporter
+from baselith.core.plugins.lifecycle import PluginState
+from baselith.core.plugins.protocols import BackstageExporter, CatalogExporter
 
 # ── Protocol checks ───────────────────────────────────────────────────────────
 
@@ -207,7 +207,7 @@ class TestToCatalogInfo:
         self, plugin, tmp_path
     ):
         # A plugin's directory may differ from its registry name (the real
-        # `plugins/web_scraper` registers as `web-scraper`). Every annotation
+        # `baselith/plugins/web_scraper` registers as `web-scraper`). Every annotation
         # addressing a repository path must follow the directory, or the
         # source, manifest and TechDocs links all 404.
         plugin_dir = tmp_path / "plugins" / "my_plugin"
@@ -365,7 +365,7 @@ class TestDetectAgenticPatterns:
     @pytest.mark.asyncio
     async def test_source_scan_detects_import(self, tmp_path):
         (tmp_path / "agent.py").write_text(
-            "from core.reflection import ReflectionAgent\n"
+            "from baselith.core.reflection import ReflectionAgent\n"
         )
         plugin = _make_plugin()
         # Point the module __file__ at the tmp_path
@@ -408,13 +408,13 @@ class TestGetHealthStatus:
 class TestScanSourceFiles:
     def test_detects_from_import(self, tmp_path):
         (tmp_path / "agent.py").write_text(
-            "from core.reasoning.tot import TreeOfThoughts\n"
+            "from baselith.core.reasoning.tot import TreeOfThoughts\n"
         )
         found = _scan_source_files(tmp_path)
         assert "baselith.ai/pattern-reasoning" in found
 
     def test_detects_import_statement(self, tmp_path):
-        (tmp_path / "plugin.py").write_text("import core.swarm\n")
+        (tmp_path / "plugin.py").write_text("import baselith.core.swarm\n")
         found = _scan_source_files(tmp_path)
         assert "baselith.ai/pattern-swarm" in found
 
@@ -424,8 +424,8 @@ class TestScanSourceFiles:
         assert found == []
 
     def test_no_duplicates_across_files(self, tmp_path):
-        (tmp_path / "a.py").write_text("from core.reasoning import X\n")
-        (tmp_path / "b.py").write_text("from core.reasoning import Y\n")
+        (tmp_path / "a.py").write_text("from baselith.core.reasoning import X\n")
+        (tmp_path / "b.py").write_text("from baselith.core.reasoning import Y\n")
         found = _scan_source_files(tmp_path)
         assert found.count("baselith.ai/pattern-reasoning") == 1
 
@@ -455,7 +455,9 @@ class TestSlugifyTitle:
 
 class TestAnnotationPathSafety:
     def test_file_location_annotations_sanitizes_traversal(self):
-        from core.plugins.exporters.entity_model import file_location_annotations
+        from baselith.core.plugins.exporters.entity_model import (
+            file_location_annotations,
+        )
 
         ann = file_location_annotations("/srv/repo", "../../etc/passwd")
         loc = ann["backstage.io/managed-by-location"]
@@ -463,7 +465,9 @@ class TestAnnotationPathSafety:
         assert "../" not in loc
 
     def test_file_location_annotations_keeps_legit_names(self):
-        from core.plugins.exporters.entity_model import file_location_annotations
+        from baselith.core.plugins.exporters.entity_model import (
+            file_location_annotations,
+        )
 
         ann = file_location_annotations("/srv/repo/", "coding_agent")
         assert (

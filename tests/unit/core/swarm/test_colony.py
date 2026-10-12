@@ -1,9 +1,9 @@
 import pytest
 
-from core.config.swarm import SwarmConfig
-from core.swarm.colony import Colony
-from core.swarm.pheromones import PheromoneSystem
-from core.swarm.types import (
+from baselith.core.config.swarm import SwarmConfig
+from baselith.core.swarm.colony import Colony
+from baselith.core.swarm.pheromones import PheromoneSystem
+from baselith.core.swarm.types import (
     AgentProfile,
     AgentStatus,
     Capability,

@@ -1,0 +1,163 @@
+"""
+High-Level Conversational Orchestration Service.
+
+Acts as the primary interface for managing complex agent-human
+dialogues. Coordinates between embedders, rerankers, and history
+managers, providing a plugin-extensible framework for RAG workflows,
+streaming responses, and state-aware interactions.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from baselith.core.chat.dependencies import (
+    ChatDependencies,
+    ChatDependencyConfig,
+    create_default_dependencies,
+)
+from baselith.core.config.chat import get_chat_config
+from baselith.core.observability.logging import get_logger
+from baselith.core.services.chat import ChatService as CoreChatService
+from baselith.core.services.chat import ChatServiceConfig
+from baselith.core.services.chat.utils.history import ChatHistoryManager
+
+logger = get_logger(__name__)
+
+
+class ChatService(CoreChatService):
+    """
+    Application-specific conversational engine.
+
+    Bridges the core ChatService logic with framework-level dependency
+    injection and plugin registries. Manages the lifecycle of RAG
+    pipelines, history pruning, and response synthesis, ensuring
+    high-quality, context-aware agent outputs.
+    """
+
+    # Class-level constants for backwards compatibility
+    FINAL_TOP_K = 6
+    INITIAL_SEARCH_K = 40
+
+    def __init__(
+        self,
+        *,
+        dependencies: ChatDependencies | None = None,
+        dependency_config: ChatDependencyConfig | None = None,
+        plugin_registry: Any | None = None,
+    ) -> None:
+        """
+        Initialize ChatService with application dependencies.
+
+        Args:
+            dependencies: Pre-built ChatDependencies (optional).
+            dependency_config: Configuration for building dependencies (optional).
+            plugin_registry: Plugin registry for extensibility.
+        """
+        # Build dependencies if not provided
+        if dependencies is None:
+            dependencies = create_default_dependencies(dependency_config)
+
+        # Store dependencies for direct access (backwards compatibility)
+        self.dependencies = dependencies
+
+        # Build core config from dependency config
+        dep_cfg = dependency_config or ChatDependencyConfig()
+        core_config = ChatServiceConfig(
+            initial_search_k=self.INITIAL_SEARCH_K,
+            final_top_k=self.FINAL_TOP_K,
+            streaming_enabled=True,  # Always True, handled by config
+            embedder_model=dep_cfg.embedder_model,
+            reranker_model=dep_cfg.reranker_model,
+            history_enabled=dep_cfg.history_enabled,
+            history_max_turns=dep_cfg.history_max_turns,
+            memory_enabled=get_chat_config().long_term_memory_enabled,
+        )
+
+        # Initialize core service with injected dependencies
+        super().__init__(
+            config=core_config,
+            embedder=dependencies.embedder,
+            reranker=dependencies.reranker,
+            response_cache=dependencies.response_cache,
+            precheck_cache=dependencies.precheck_cache,
+            rerank_cache=dependencies.rerank_cache,
+            history_manager=dependencies.history_manager,
+            plugin_registry=plugin_registry,
+        )
+
+        # Keep formatting attributes from dependencies (backwards compatibility)
+        self.newline = dependencies.newline
+        self.double_newline = dependencies.double_newline
+        self.section_separator = dependencies.section_separator
+
+    # Expose dependencies directly for backwards compatibility
+    @property
+    def embedder(self) -> Any:
+        """Get embedder from dependencies."""
+        return self.dependencies.embedder
+
+    @property
+    def reranker(self) -> Any:
+        """Get reranker from dependencies."""
+        return self.dependencies.reranker
+
+    @property
+    def history_manager(self) -> ChatHistoryManager:
+        """Get history manager from dependencies."""
+        return self.dependencies.history_manager
+
+
+_chat_service: ChatService | None = None
+
+
+def get_chat_service(plugin_registry: Any | None = None) -> ChatService:
+    """Get or create the application ChatService lazily."""
+    global _chat_service
+
+    if plugin_registry is not None:
+        if (
+            _chat_service is None
+            or _chat_service.plugin_registry is not plugin_registry
+        ):
+            _chat_service = ChatService(plugin_registry=plugin_registry)
+        return _chat_service
+
+    if _chat_service is None:
+        _chat_service = ChatService()
+    return _chat_service
+
+
+class _LazyChatServiceProxy:
+    """Resolve the backing ChatService only when the first request needs it."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_chat_service(), name)
+
+    def __repr__(self) -> str:
+        if _chat_service is None:
+            return "<LazyChatServiceProxy unresolved>"
+        return repr(_chat_service)
+
+
+chat_service = _LazyChatServiceProxy()
+
+
+def initialize_chat_service_with_plugins(plugin_registry: Any) -> None:
+    """
+    Initialize chat service with plugin registry after app startup.
+
+    This is called from backend.py after plugins are loaded.
+
+    Args:
+        plugin_registry: The plugin registry to inject.
+    """
+    get_chat_service(plugin_registry)
+
+
+__all__ = [
+    "ChatService",
+    "chat_service",
+    "get_chat_service",
+    "initialize_chat_service_with_plugins",
+]

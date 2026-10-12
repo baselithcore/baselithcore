@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-import core.config.guardrails as guardrails_settings
-from core.guardrails.moderation import get_guardrails_config
-from core.orchestration import guard_pipeline
+import baselith.core.config.guardrails as guardrails_settings
+from baselith.core.guardrails.moderation import get_guardrails_config
+from baselith.core.orchestration import guard_pipeline
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def fresh_settings(monkeypatch):
 
 
 def test_defaults_match_the_dataclass(fresh_settings, monkeypatch):
-    from core.guardrails.config import GuardrailsConfig
+    from baselith.core.guardrails.config import GuardrailsConfig
 
     for name in ("GUARDRAILS_ALLOWED_TOPICS", "GUARDRAILS_CUSTOM_BLOCK_PATTERNS"):
         monkeypatch.delenv(name, raising=False)

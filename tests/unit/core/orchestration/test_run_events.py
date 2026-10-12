@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.api.events import AgentEvent, EventType
-from core.orchestration.checkpoint import (
+from baselith.core.api.events import AgentEvent, EventType
+from baselith.core.orchestration.checkpoint import (
     Checkpoint,
     CheckpointManager,
     InMemoryCheckpointStore,
 )
-from core.orchestration.run_events import (
+from baselith.core.orchestration.run_events import (
     TERMINAL_EVENT_TYPES,
     RunEventStream,
     get_run_event_stream,
@@ -158,7 +158,7 @@ class _BoomHandler:
 
 
 def _orchestrator(store=None, handler=None):
-    from core.orchestration.orchestrator import Orchestrator
+    from baselith.core.orchestration.orchestrator import Orchestrator
 
     orch = Orchestrator(checkpoint_store=store, default_intent="test_intent")
     orch.classify_intent_async = AsyncMock(return_value="test_intent")  # type: ignore
@@ -204,6 +204,58 @@ class TestLifecycleEvents:
         orch = _orchestrator(store=None)
         await orch.process("hello", intent="test_intent")
         assert published == []
+
+
+class _LeakyHandler:
+    """Answers with text the output guard must redact."""
+
+    async def handle(self, query, context):
+        return {"response": "write to mario.rossi@example.com"}
+
+
+@pytest.mark.asyncio
+class TestGuardedAnswerIsWhatLeaves:
+    """The answer was stored and published before the output guard ran, so
+    /runs/{id}/events subscribers, the checkpoint history and memory got it
+    raw."""
+
+    async def test_final_event_carries_the_guarded_answer(self):
+        orch = _orchestrator(store=InMemoryCheckpointStore(), handler=_LeakyHandler())
+        events = [e async for e in stream_run_events(orch, "hello", run_id="r-pii")]
+        assert events[-1].type == EventType.RESPONSE_FINAL
+        assert "mario.rossi@example.com" not in events[-1].data["response"]
+
+    async def test_checkpoint_records_the_guarded_answer(self):
+        store = InMemoryCheckpointStore()
+        orch = _orchestrator(store=store, handler=_LeakyHandler())
+        result = await orch.process("hello", run_id="r-pii")
+        recorded = await store.load("r-pii")
+        assert "mario.rossi@example.com" not in recorded.answer
+        assert recorded.answer == result["response"]
+        assert "_output_guarded" not in result
+
+    async def test_memory_stores_the_guarded_answer(self):
+        orch = _orchestrator(store=None, handler=_LeakyHandler())
+        written = []
+        orch.memory_manager = object()
+        orch._schedule_memory_write = lambda q, text, intent: written.append(text)
+        await orch.process("hello", run_id="r-mem")
+        assert written and "mario.rossi@example.com" not in written[0]
+
+    async def test_the_answer_is_guarded_once(self, monkeypatch):
+        from baselith.core.orchestration import guard_pipeline
+
+        calls = []
+        original = guard_pipeline.guard_output_async
+
+        async def counting(result):
+            calls.append(result.get("response"))
+            return await original(result)
+
+        monkeypatch.setattr(guard_pipeline, "guard_output_async", counting)
+        orch = _orchestrator(store=InMemoryCheckpointStore(), handler=_LeakyHandler())
+        await orch.process("hello", run_id="r-once")
+        assert len(calls) == 1
 
 
 @pytest.mark.asyncio

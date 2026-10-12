@@ -1,20 +1,4 @@
-from core.agents.coding import CodingAgent as CoreCodingAgent
-from core.agents.coding.agent import CodeLanguage as CoreCodeLanguage
-from core.agents.coding_tools import (
-    register_coding_tools as core_register_coding_tools,
-)
-from plugins.coding_agent import (
-    CodeLanguage,
-    CodingAgent,
-    register_coding_tools,
-)
-from plugins.coding_agent.plugin import CodingAgentPlugin
-
-
-def test_legacy_core_imports_resolve_to_plugin_exports() -> None:
-    assert CoreCodingAgent is CodingAgent
-    assert CoreCodeLanguage is CodeLanguage
-    assert core_register_coding_tools is register_coding_tools
+from baselith.plugins.coding_agent.plugin import CodingAgentPlugin
 
 
 def test_coding_agent_plugin_exposes_manifest_metadata() -> None:

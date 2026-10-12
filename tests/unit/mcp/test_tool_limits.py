@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 
 def _config(**overrides):
@@ -248,7 +248,7 @@ class TestHandlerErrorText:
     async def test_correlation_id_is_logged_with_the_full_text(
         self, monkeypatch
     ) -> None:
-        import core.mcp.tool_handlers as tool_handlers
+        import baselith.core.mcp.tool_handlers as tool_handlers
 
         records: list[tuple[str, dict]] = []
 

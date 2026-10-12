@@ -1,11 +1,11 @@
-"""Tests for PDF Reader in core.doc_sources."""
+"""Tests for PDF Reader in baselith.core.doc_sources."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.doc_sources.readers import read_pdf
+from baselith.core.doc_sources.readers import read_pdf
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def test_read_pdf_empty_pages(sample_pdf_path):
         mock_reader.pages = [page1]
 
         # Patching run_pdf_ocr as backup
-        with patch("core.doc_sources.readers.run_pdf_ocr") as mock_ocr:
+        with patch("baselith.core.doc_sources.readers.run_pdf_ocr") as mock_ocr:
             mock_ocr.return_value = "OCR Text"
             result = read_pdf(sample_pdf_path)
 
@@ -71,7 +71,7 @@ def test_read_pdf_import_error(sample_pdf_path):
         # We need to reload the module or just mock the import inside read_pdf
         # Since read_pdf has 'from pypdf import PdfReader' inside it,
         # patching sys.modules or mocking the import might work.
-        with patch("core.doc_sources.readers.warn_missing_dependency"):
+        with patch("baselith.core.doc_sources.readers.warn_missing_dependency"):
             # We must verify that it returns None if pypdf cannot be imported
             # Actually, read_pdf does the import inside.
             # If sys.modules['pypdf'] is None, it will fail the import.

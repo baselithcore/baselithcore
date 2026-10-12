@@ -3,7 +3,7 @@
 
 Replays the adversarial corpus in ``evals/red_team/`` through the guardrail
 surfaces (input guard, indirect-injection scanner, output guard) via
-:mod:`core.evaluation.red_team` and exits non-zero when a case flips verdict.
+:mod:`baselith.core.evaluation.red_team` and exits non-zero when a case flips verdict.
 
 No LLM is invoked — the gate is deterministic and CI-safe (no API keys, no
 cost, no network), exactly like the trajectory and fairness gates. Red-team
@@ -27,7 +27,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.evaluation.red_team import (  # noqa: E402
+from baselith.core.evaluation.red_team import (  # noqa: E402
     RedTeamLoadError,
     load_red_team_cases,
     run_red_team_suite,

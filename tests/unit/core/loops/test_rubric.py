@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.loops.rubric import RubricJudge, rubric_verifier
+from baselith.core.loops.rubric import RubricJudge, rubric_verifier
 
 pytestmark = [pytest.mark.unit]
 

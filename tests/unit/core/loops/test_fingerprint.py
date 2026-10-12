@@ -1,6 +1,6 @@
 """Failure fingerprinting: stability, discrimination, normalization."""
 
-from core.loops.fingerprint import failure_fingerprint, failure_lines
+from baselith.core.loops.fingerprint import failure_fingerprint, failure_lines
 
 PYTEST_FAIL = """
 =========================== short test summary info ============================

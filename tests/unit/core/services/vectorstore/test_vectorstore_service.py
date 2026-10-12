@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from core.models.domain import Document, SearchResult
-from core.services.vectorstore import VectorStoreService
-from core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.models.domain import Document, SearchResult
+from baselith.core.services.vectorstore import VectorStoreService
+from baselith.core.services.vectorstore.exceptions import VectorStoreError
 
 
 def _one_vector_per_text(_embedder, texts, _cache, **_kwargs):
@@ -27,7 +27,7 @@ def _one_vector_per_text(_embedder, texts, _cache, **_kwargs):
 @pytest.fixture(autouse=True)
 def mock_redis_cache():
     """Mock RedisCache to avoid connection issues during tests."""
-    with patch("core.services.vectorstore.service.RedisCache") as mock:
+    with patch("baselith.core.services.vectorstore.service.RedisCache") as mock:
         mock.return_value.get = AsyncMock(return_value=None)
         mock.return_value.set = AsyncMock()
         mock.return_value.delete = AsyncMock()
@@ -37,8 +37,10 @@ def mock_redis_cache():
 class TestVectorStoreService:
     """Tests for VectorStore service."""
 
-    @patch("core.services.vectorstore.service.get_vectorstore_config")
-    @patch("core.services.vectorstore.providers.qdrant_provider.QdrantProvider")
+    @patch("baselith.core.services.vectorstore.service.get_vectorstore_config")
+    @patch(
+        "baselith.core.services.vectorstore.providers.qdrant_provider.QdrantProvider"
+    )
     def test_initialization(self, mock_provider_class, mock_config):
         """Test service initialization."""
         mock_config.return_value = Mock(
@@ -137,7 +139,7 @@ class TestVectorStoreService:
         )
 
     @pytest.mark.asyncio
-    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    @patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_documents(self, mock_get_embeddings):
         """Test document indexing with Document objects."""
         mock_config = Mock(
@@ -179,7 +181,7 @@ class TestVectorStoreService:
         assert len(points) >= 1  # Should be at least one chunk
 
     @pytest.mark.asyncio
-    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    @patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_uses_reader_supplied_structured_chunks(
         self, mock_get_embeddings
     ):
@@ -234,7 +236,7 @@ class TestVectorStoreService:
         assert "ingestion_chunks" not in payload
 
     @pytest.mark.asyncio
-    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    @patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_upserts_durably_by_default(self, mock_get_embeddings):
         """Indexing must wait for the write, so it is visible and errors surface.
 
@@ -261,7 +263,7 @@ class TestVectorStoreService:
         assert mock_provider.upsert.call_args.kwargs["wait"] is True
 
     @pytest.mark.asyncio
-    @patch("core.services.vectorstore._indexing.get_embeddings_cached")
+    @patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
     async def test_index_wait_is_caller_overridable(self, mock_get_embeddings):
         """A caller that knowingly accepts a non-durable write can opt out."""
         mock_config = Mock(
@@ -337,7 +339,9 @@ class TestVectorStoreService:
         mock_hit.vector = None
         mock_provider.search.return_value = [mock_hit]
 
-        with patch("core.services.retrieval.reranker.get_reranker") as mock_get:
+        with patch(
+            "baselith.core.services.retrieval.reranker.get_reranker"
+        ) as mock_get:
             mock_reranker = Mock()
             mock_get.return_value = mock_reranker
             mock_reranker.rerank = AsyncMock(
@@ -374,21 +378,23 @@ class TestVectorStoreService:
 
         # Index with no chunks
         mock_embedder = Mock()
-        with patch("core.services.vectorstore._indexing.chunk_text", return_value=[]):
+        with patch(
+            "baselith.core.services.vectorstore._indexing.chunk_text", return_value=[]
+        ):
             count = await service.index(
                 [Document(id="1", content="c")], embedder=mock_embedder
             )
             assert count == 0
 
-    @patch("core.services.vectorstore.service.get_vectorstore_config")
+    @patch("baselith.core.services.vectorstore.service.get_vectorstore_config")
     def test_create_provider_unsupported(self, mock_config):
         mock_config.return_value = Mock(provider="unsupported")
         with pytest.raises(VectorStoreError, match="Unsupported provider"):
             VectorStoreService()
 
     def test_get_vectorstore_service(self):
-        import core.services.vectorstore.service as vs_module
-        from core.services.vectorstore.service import get_vectorstore_service
+        import baselith.core.services.vectorstore.service as vs_module
+        from baselith.core.services.vectorstore.service import get_vectorstore_service
 
         # Reset global to ensure instantiation is tested
         old_service = vs_module._vectorstore_service
@@ -396,7 +402,7 @@ class TestVectorStoreService:
 
         try:
             with patch(
-                "core.services.vectorstore.service.VectorStoreService"
+                "baselith.core.services.vectorstore.service.VectorStoreService"
             ) as mock_cls:
                 service = get_vectorstore_service()
                 assert service == mock_cls.return_value

@@ -15,7 +15,7 @@ from opentelemetry.sdk.trace.sampling import (
     TraceIdRatioBased,
 )
 
-from core.observability import otel
+from baselith.core.observability import otel
 
 pytestmark = [pytest.mark.unit]
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.services.llm.model_capabilities import (
+from baselith.core.services.llm.model_capabilities import (
     ThinkingMode,
     capabilities_for,
     clamp_effort,
@@ -245,7 +245,7 @@ class TestPre35OutputCeilings:
         assert default_max_tokens(model) == 4096
 
     def test_a_row_is_what_makes_their_ceiling_enforceable(self):
-        from core.services.llm.model_capabilities import clamp_max_tokens
+        from baselith.core.services.llm.model_capabilities import clamp_max_tokens
 
         assert clamp_max_tokens("claude-3-5-sonnet-20240620", 20000) == 8192
 

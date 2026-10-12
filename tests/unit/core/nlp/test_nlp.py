@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from core.nlp.models import CachedEmbedder, get_embedder, get_reranker
-from core.nlp.spacy_utils import extract_spacy_metadata, is_spacy_available
+from baselith.core.nlp.models import CachedEmbedder, get_embedder, get_reranker
+from baselith.core.nlp.spacy_utils import extract_spacy_metadata, is_spacy_available
 
 
 @pytest.fixture
@@ -116,8 +116,8 @@ class TestCachedEmbedder:
 class TestFactoryFunctions:
     def test_get_embedder(self):
         with (
-            patch("core.nlp.models.SentenceTransformer") as mock_st,
-            patch("core.nlp.models.CrossEncoder") as mock_ce,
+            patch("baselith.core.nlp.models.SentenceTransformer") as mock_st,
+            patch("baselith.core.nlp.models.CrossEncoder") as mock_ce,
         ):
             # clear lru_cache to ensure new call
             get_embedder.cache_clear()
@@ -128,8 +128,8 @@ class TestFactoryFunctions:
 
     def test_get_reranker(self):
         with (
-            patch("core.nlp.models.SentenceTransformer") as mock_st,
-            patch("core.nlp.models.CrossEncoder") as mock_ce,
+            patch("baselith.core.nlp.models.SentenceTransformer") as mock_st,
+            patch("baselith.core.nlp.models.CrossEncoder") as mock_ce,
         ):
             get_reranker.cache_clear()
             _ = get_reranker("test-reranker")
@@ -138,8 +138,8 @@ class TestFactoryFunctions:
 
     def test_get_embedder_requires_optional_dependency(self):
         with (
-            patch("core.nlp.models.SentenceTransformer", None),
-            patch("core.nlp.models.CrossEncoder", None),
+            patch("baselith.core.nlp.models.SentenceTransformer", None),
+            patch("baselith.core.nlp.models.CrossEncoder", None),
         ):
             get_embedder.cache_clear()
             with pytest.raises(RuntimeError, match="baselith-core\\[rag\\]"):
@@ -147,8 +147,8 @@ class TestFactoryFunctions:
 
     def test_get_reranker_requires_optional_dependency(self):
         with (
-            patch("core.nlp.models.SentenceTransformer", None),
-            patch("core.nlp.models.CrossEncoder", None),
+            patch("baselith.core.nlp.models.SentenceTransformer", None),
+            patch("baselith.core.nlp.models.CrossEncoder", None),
         ):
             get_reranker.cache_clear()
             with pytest.raises(RuntimeError, match="baselith-core\\[rag\\]"):
@@ -156,7 +156,7 @@ class TestFactoryFunctions:
 
 
 class TestSpacyUtils:
-    @patch("core.nlp.spacy_utils.get_spacy_pipeline")
+    @patch("baselith.core.nlp.spacy_utils.get_spacy_pipeline")
     def test_extract_spacy_metadata(self, mock_get_pipeline):
         # Mock nlp pipeline
         mock_nlp = MagicMock()
@@ -196,7 +196,7 @@ class TestSpacyUtils:
         assert "Apple (ORG)" in metadata["spacy_entities"]
         assert "iPhone (PRODUCT)" in metadata["spacy_entities"]
 
-    @patch("core.nlp.spacy_utils.get_spacy_pipeline")
+    @patch("baselith.core.nlp.spacy_utils.get_spacy_pipeline")
     def test_is_spacy_available(self, mock_pipeline):
         mock_pipeline.return_value = "something"
         assert is_spacy_available()
@@ -247,7 +247,7 @@ class TestEmbedderSingleFlight:
     def test_redis_cache_stays_opt_in_by_default(self, mock_sentence_transformer):
         """Shared cache alone is not enough: without the explicit flag the hot
         path keeps its current in-process-only behaviour."""
-        from core.cache import RedisTTLCache
+        from baselith.core.cache import RedisTTLCache
 
         redis_cache = MagicMock(spec=RedisTTLCache)
         redis_cache.namespace = "test:embed:3"

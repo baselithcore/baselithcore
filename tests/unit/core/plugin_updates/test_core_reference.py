@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from core._core_version import CORE_VERSION
-from core.config import plugin_updates as cfg_mod
-from core.config.plugin_updates import PluginUpdateConfig
-from core.plugin_updates import service as svc_mod
-from core.plugin_updates.models import CheckReport, ReleaseInfo, SystemUpdate
+from baselith.core._core_version import CORE_VERSION
+from baselith.core.config import plugin_updates as cfg_mod
+from baselith.core.config.plugin_updates import PluginUpdateConfig
+from baselith.core.plugin_updates import service as svc_mod
+from baselith.core.plugin_updates.models import CheckReport, ReleaseInfo, SystemUpdate
 
 PUBLIC = "baselithcore/baselithcore"
 

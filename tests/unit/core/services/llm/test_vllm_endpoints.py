@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.config.services import LLMConfig
-from core.services.llm.preflight import VLLMProbe
-from core.services.llm.vllm_endpoints import (
+from baselith.core.config.services import LLMConfig
+from baselith.core.services.llm.preflight import VLLMProbe
+from baselith.core.services.llm.vllm_endpoints import (
     VLLMEndpointRegistry,
     get_vllm_registry,
     vllm_endpoints,
@@ -24,9 +24,9 @@ from core.services.llm.vllm_endpoints import (
 
 A = "http://gpu:8002/v1"
 B = "http://gpu:8003/v1"
-_PROBE = "core.services.llm.vllm_endpoints.probe_vllm"
-_PROBE_SYNC = "core.services.llm.vllm_endpoints.probe_vllm_sync"
-_PREFLIGHT_PROBE = "core.services.llm._vllm_preflight.probe_vllm"
+_PROBE = "baselith.core.services.llm.vllm_endpoints.probe_vllm"
+_PROBE_SYNC = "baselith.core.services.llm.vllm_endpoints.probe_vllm_sync"
+_PREFLIGHT_PROBE = "baselith.core.services.llm._vllm_preflight.probe_vllm"
 
 
 def _config(**kwargs) -> LLMConfig:
@@ -78,7 +78,7 @@ class TestEndpointList:
         assert vllm_endpoints(_config(provider="openai", model="m")) == []
 
     def test_configured_means_at_least_one_endpoint(self):
-        from core.services.llm.runtime import api_base_for, provider_configured
+        from baselith.core.services.llm.runtime import api_base_for, provider_configured
 
         config = _config(provider="openai", model="m", env={"LLM_VLLM_ENDPOINTS": B})
         assert provider_configured(config, "vllm") is True
@@ -160,8 +160,8 @@ class TestRouting:
 
 class TestGovernedAndPreflight:
     def test_a_pin_hands_plugins_the_server_of_its_model(self):
-        from core.services.llm.governed import resolve_governed_client_config
-        from core.services.llm.policy import (
+        from baselith.core.services.llm.governed import resolve_governed_client_config
+        from baselith.core.services.llm.policy import (
             PluginLLMPolicy,
             set_plugin_llm_policy_resolver,
         )
@@ -182,9 +182,12 @@ class TestGovernedAndPreflight:
         )
         try:
             with (
-                patch("core.services.llm.governed.get_llm_config", return_value=config),
                 patch(
-                    "core.services.llm.runtime.resolve_llm_credential",
+                    "baselith.core.services.llm.governed.get_llm_config",
+                    return_value=config,
+                ),
+                patch(
+                    "baselith.core.services.llm.runtime.resolve_llm_credential",
                     return_value=None,
                 ),
                 patch(_PROBE_SYNC, probe),
@@ -195,7 +198,7 @@ class TestGovernedAndPreflight:
         assert gov is not None and gov.api_base == B
 
     async def test_preflight_checks_every_server_and_the_union(self):
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(
             provider="vllm",
@@ -207,7 +210,7 @@ class TestGovernedAndPreflight:
         with (
             patch(_PREFLIGHT_PROBE, probe),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value={"llama3.2:latest"}),
             ),
         ):
@@ -217,7 +220,7 @@ class TestGovernedAndPreflight:
         assert codes == ["vllm_models_unverified", "vllm_unreachable"]
 
     async def test_a_model_no_answering_server_serves_is_missing(self):
-        from core.services.llm.preflight import check_local_endpoints
+        from baselith.core.services.llm.preflight import check_local_endpoints
 
         config = _config(
             provider="vllm", model="llama", env={"LLM_VLLM_ENDPOINTS": f"{A},{B}"}
@@ -226,7 +229,7 @@ class TestGovernedAndPreflight:
         with (
             patch(_PREFLIGHT_PROBE, probe),
             patch(
-                "core.services.llm.preflight.probe_ollama",
+                "baselith.core.services.llm.preflight.probe_ollama",
                 AsyncMock(return_value={"llama3.2:latest"}),
             ),
         ):

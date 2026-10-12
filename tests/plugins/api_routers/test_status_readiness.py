@@ -2,7 +2,7 @@
 
 import pytest
 
-from plugins.api_routers import status
+from baselith.plugins.api_routers import status
 
 
 class _FakeResponse:
@@ -62,7 +62,9 @@ async def test_db_check_never_raises(monkeypatch):
     def _boom(*_a, **_k):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr("core.db.connection.get_async_connection", _boom, raising=False)
+    monkeypatch.setattr(
+        "baselith.core.db.connection.get_async_connection", _boom, raising=False
+    )
     assert await status._check_database() is False
 
 

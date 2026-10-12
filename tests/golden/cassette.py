@@ -1,4 +1,4 @@
-"""Golden cassettes — the implementation moved to :mod:`core.evaluation.cassette`.
+"""Golden cassettes — the implementation moved to :mod:`baselith.core.evaluation.cassette`.
 
 The eval regression gate needs the same replay machinery, and ``core`` cannot
 import from the test tree. Rather than keep two copies in step, the machinery
@@ -8,7 +8,7 @@ moved and this module re-exports it, so every existing
 
 from pathlib import Path
 
-from core.evaluation.cassette import (
+from baselith.core.evaluation.cassette import (
     Cassette,
     CassetteMismatch,
     Expect,

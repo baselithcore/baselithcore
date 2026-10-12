@@ -1,4 +1,4 @@
-"""Unit tests for ``core.evaluation.regression_runner``."""
+"""Unit tests for ``baselith.core.evaluation.regression_runner``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     DEFAULT_PASS_THRESHOLD,
     RecordedRun,
     RegressionLoadError,

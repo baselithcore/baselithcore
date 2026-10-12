@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from core.guardrails.config import COMPILED_PII_PATTERNS
-from core.guardrails.output_guard import OutputGuard
+from baselith.core.guardrails.config import COMPILED_PII_PATTERNS
+from baselith.core.guardrails.output_guard import OutputGuard
 
 ADVERSARIAL = {
     "dotted_run": "a." * 25000,

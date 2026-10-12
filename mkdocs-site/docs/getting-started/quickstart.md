@@ -145,7 +145,7 @@ streaming, and crew processes.
 
 ```text
 baselith-core/
-├── core/                   # Framework core (DO NOT modify)
+├── baselith/core/                   # Framework core (DO NOT modify)
 │   ├── agents/             # Base agents
 │   ├── config/             # Centralized configuration
 │   ├── memory/             # Memory system
@@ -167,7 +167,7 @@ baselith-core/
     Run `baselith info` to get a structured overview of your current workspace and environment.
 
 !!! warning "Core Modification"
-    The `core/` directory contains framework infrastructure. **Never modify core files directly.** All customization should be done through plugins.
+    The `baselith/core/` directory contains framework infrastructure. **Never modify core files directly.** All customization should be done through plugins.
 
 ---
 

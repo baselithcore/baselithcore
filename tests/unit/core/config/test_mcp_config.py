@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from core.config import MCPConfig, get_mcp_config
-from core.config.mcp import MIN_TOOL_RESULT_BYTES
+from baselith.core.config import MCPConfig, get_mcp_config
+from baselith.core.config.mcp import MIN_TOOL_RESULT_BYTES
 
 
 class TestMCPConfig:

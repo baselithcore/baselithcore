@@ -7,7 +7,7 @@ import time
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from core.world_model.mandates import (
+from baselith.core.world_model.mandates import (
     CartItem,
     CartMandate,
     InMemoryReplayGuard,
@@ -17,12 +17,12 @@ from core.world_model.mandates import (
     sign_cart,
     sign_intent,
 )
-from core.world_model.payments import (
+from baselith.core.world_model.payments import (
     InMemoryReceiptStore,
     PaymentExecutor,
     execute_payment,
 )
-from plugins.payments import MockPSPAdapter, PaymentsPlugin
+from baselith.plugins.payments import MockPSPAdapter, PaymentsPlugin
 
 pytestmark = [pytest.mark.unit]
 

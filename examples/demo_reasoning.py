@@ -1,10 +1,10 @@
 import asyncio
 import os
 
-from core.services.llm.service import LLMService
+from baselith.core.services.llm.service import LLMService
 
 # Standard imports for Baselith-Core
-from plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+from baselith.plugins.reasoning_agent.reasoning_agent import ReasoningAgent
 
 
 class MockLLMProvider:

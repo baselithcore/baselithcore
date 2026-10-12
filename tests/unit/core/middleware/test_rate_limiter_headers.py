@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from core.middleware.rate_limiter import RateLimiter, _rate_limit_headers
+from baselith.core.middleware.rate_limiter import RateLimiter, _rate_limit_headers
 
 
 def test_headers_shape():

@@ -8,8 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.orchestration.handlers.multimodal_reasoning import MultiModalReasoningHandler
-from core.services.vision import ImageContent, VisionResponse
+from baselith.core.orchestration.handlers.multimodal_reasoning import (
+    MultiModalReasoningHandler,
+)
+from baselith.core.services.vision import ImageContent, VisionResponse
 
 
 @pytest.fixture
@@ -200,13 +202,13 @@ class TestMultiModalReasoningHandlerIntegration:
 
     def test_handler_exports(self):
         """Test that handler is properly exported."""
-        from core.orchestration.handlers import MultiModalReasoningHandler
+        from baselith.core.orchestration.handlers import MultiModalReasoningHandler
 
         assert MultiModalReasoningHandler is not None
 
     def test_orchestrator_registers_handler(self):
         """Test that Orchestrator registers the multimodal reasoning handler."""
-        from core.orchestration import Orchestrator
+        from baselith.core.orchestration import Orchestrator
 
         orchestrator = Orchestrator()
         intents = orchestrator.get_registered_intents()
@@ -215,7 +217,7 @@ class TestMultiModalReasoningHandlerIntegration:
 
     def test_intent_classification_patterns(self):
         """Test that intent patterns are registered correctly."""
-        from core.orchestration import Orchestrator
+        from baselith.core.orchestration import Orchestrator
 
         orchestrator = Orchestrator()
         available = orchestrator.intent_classifier.get_available_intents()

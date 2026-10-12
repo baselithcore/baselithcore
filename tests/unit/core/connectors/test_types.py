@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.connectors import (
+from baselith.core.connectors import (
     ActionSpec,
     ConnectorCapability,
     ConnectorHealth,

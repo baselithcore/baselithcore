@@ -23,7 +23,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.agents import BrowserAgent
+from baselith.plugins.browser_agent import BrowserAgent
 
 
 async def demo_navigate_and_screenshot(agent: BrowserAgent, url: str) -> None:

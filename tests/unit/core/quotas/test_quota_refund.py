@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from core.config.quotas import QuotaConfig
-from core.quotas.manager import QuotaManager
-from core.quotas.store import (
+from baselith.core.config.quotas import QuotaConfig
+from baselith.core.quotas.manager import QuotaManager
+from baselith.core.quotas.store import (
     CHECK_AND_INCR_LUA,
     REFUND_LUA,
     InMemoryQuotaStore,

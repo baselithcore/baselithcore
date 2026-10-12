@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, patch
 import jwt
 import pytest
 
-from core.auth.jwt import JWTHandler
-from core.auth.types import AuthRole
+from baselith.core.auth.jwt import JWTHandler
+from baselith.core.auth.types import AuthRole
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def mock_redis():
 
 @pytest.fixture
 def handler(mock_redis):
-    with patch("core.auth.jwt.create_redis_client", return_value=mock_redis):
+    with patch("baselith.core.auth.jwt.create_redis_client", return_value=mock_redis):
         yield JWTHandler(
             secret_key="test-secret-with-at-least-thirty-two-chars",
             algorithm="HS256",
@@ -56,7 +56,9 @@ async def test_second_verify_is_a_cache_hit(handler, mock_redis):
     first = await handler.verify_token(token)
     assert mock_redis.get.await_count == 1
 
-    with patch("core.auth.jwt.jwt.decode", side_effect=AssertionError) as decode_spy:
+    with patch(
+        "baselith.core.auth.jwt.jwt.decode", side_effect=AssertionError
+    ) as decode_spy:
         second = await handler.verify_token(token)
 
     # decode must NOT be called on the hit path.
@@ -72,21 +74,21 @@ async def test_cache_expiry_forces_reverification(handler, mock_redis):
     token = handler.create_token("user123", roles={AuthRole.USER})
 
     # t0: miss -> populates cache with expiry at t0 + ttl.
-    with patch("core.auth.jwt.time.monotonic", return_value=1000.0):
+    with patch("baselith.core.auth.jwt.time.monotonic", return_value=1000.0):
         await handler.verify_token(token)
     assert mock_redis.get.await_count == 1
 
     # Still within the window: hit, no extra decode/redis.
-    with patch("core.auth.jwt.time.monotonic", return_value=1003.0):
+    with patch("baselith.core.auth.jwt.time.monotonic", return_value=1003.0):
         with patch(
-            "core.auth.jwt.jwt.decode", side_effect=AssertionError
+            "baselith.core.auth.jwt.jwt.decode", side_effect=AssertionError
         ) as decode_spy:
             await handler.verify_token(token)
     decode_spy.assert_not_called()
     assert mock_redis.get.await_count == 1
 
     # Past the max TTL window: entry is stale -> full re-verification.
-    with patch("core.auth.jwt.time.monotonic", return_value=2000.0):
+    with patch("baselith.core.auth.jwt.time.monotonic", return_value=2000.0):
         user = await handler.verify_token(token)
     assert user.user_id == "user123"
     assert mock_redis.get.await_count == 2
@@ -107,7 +109,7 @@ async def test_revoke_evicts_local_cache_entry(handler, mock_redis):
     # After revocation, the next verify is a miss that consults Redis again;
     # simulate the blacklist now containing the jti.
     mock_redis.get.return_value = b"1"
-    from core.auth.types import InvalidTokenError
+    from baselith.core.auth.types import InvalidTokenError
 
     with pytest.raises(InvalidTokenError):
         await handler.verify_token(token)
@@ -130,7 +132,7 @@ async def test_expired_token_is_not_cached(handler):
         payload, "test-secret-with-at-least-thirty-two-chars", algorithm="HS256"
     )
 
-    from core.auth.types import TokenExpiredError
+    from baselith.core.auth.types import TokenExpiredError
 
     with pytest.raises(TokenExpiredError):
         await handler.verify_token(token)
@@ -141,7 +143,7 @@ async def test_expired_token_is_not_cached(handler):
 @pytest.mark.asyncio
 async def test_cache_is_bounded_by_max_entries(handler):
     """A flood of distinct valid tokens must not grow the cache unbounded."""
-    from core.auth import jwt as jwt_mod
+    from baselith.core.auth import jwt as jwt_mod
 
     # Shrink the cap so the test stays fast; restore afterwards.
     original_cap = jwt_mod._VERIFY_CACHE_MAX_ENTRIES

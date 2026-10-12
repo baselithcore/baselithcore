@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from core.skill_evolution.store import InMemoryPatternStore
-from core.skill_evolution.types import (
+from baselith.core.skill_evolution.store import InMemoryPatternStore
+from baselith.core.skill_evolution.types import (
     EvidenceRef,
     Pattern,
     PatternKind,

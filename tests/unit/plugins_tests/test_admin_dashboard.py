@@ -3,7 +3,7 @@
 Three defects combined to make the dashboard unusable out of the box:
 
 * ``GET /admin`` answered 500 — the page was looked up under
-  ``plugins/static`` while it ships in ``core/static``;
+  ``plugins/static`` while it ships in ``baselith/core/static``;
 * the page's data calls (``/status``, ``POST /reindex``) are API-key/Bearer
   routes, so the dashboard's HTTP Basic credentials always got 401 — it now
   calls the Basic-gated ``/admin/status`` and ``/admin/reindex`` companions;
@@ -32,7 +32,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from core.api.factory import create_app
+from baselith.core.api.factory import create_app
 
 
 class _Indexing:
@@ -49,8 +49,8 @@ same_origin = {"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}
 cross_site = {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}
 
 with patch(
-    "plugins.api_routers.status.get_indexing_service", return_value=_Indexing()
-), patch("core.services.bootstrap.get_indexing_service", return_value=_Indexing()):
+    "baselith.plugins.api_routers.status.get_indexing_service", return_value=_Indexing()
+), patch("baselith.core.services.bootstrap.get_indexing_service", return_value=_Indexing()):
     page = client.get("/admin", auth=auth)
     results = {
         "page": [page.status_code, "reindexDocs" in page.text],

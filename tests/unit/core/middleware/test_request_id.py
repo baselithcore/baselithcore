@@ -6,8 +6,8 @@ import re
 
 import pytest
 
-from core.middleware.observability import RequestIdMiddleware
-from core.observability.setup import request_id_ctx
+from baselith.core.middleware.observability import RequestIdMiddleware
+from baselith.core.observability.setup import request_id_ctx
 
 _UUID4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

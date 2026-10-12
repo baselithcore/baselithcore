@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pydantic import SecretStr
 
-from core.models.chat import ChatResponse
-from core.transparency import (
+from baselith.core.models.chat import ChatResponse
+from baselith.core.transparency import (
     DisclosureService,
     ProvenanceTagger,
     TransparencyService,
 )
-from core.transparency.provenance import PROVENANCE_HEADER
-from plugins.api_routers.chat import _DISCLOSURE_HEADER, _apply_transparency
+from baselith.core.transparency.provenance import PROVENANCE_HEADER
+from baselith.plugins.api_routers.chat import _DISCLOSURE_HEADER, _apply_transparency
 
 
 def _service(*, enabled: bool) -> TransparencyService:

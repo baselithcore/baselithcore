@@ -19,9 +19,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.context import set_tenant_context
-from core.graph._cache import SyncTTLCache
-from core.graph.core import GraphDb
+from baselith.core.context import set_tenant_context
+from baselith.core.graph._cache import SyncTTLCache
+from baselith.core.graph.core import GraphDb
 
 _ROWS = [["header"], ["row"], ["stats"]]
 
@@ -111,7 +111,7 @@ class TestSyncTTLCache:
         # Capture the real clock first: patching `time.monotonic` with a lambda
         # that calls `time.monotonic` would recurse into the patch.
         later = time.monotonic() + 1
-        monkeypatch.setattr("core.graph._cache.time.monotonic", lambda: later)
+        monkeypatch.setattr("baselith.core.graph._cache.time.monotonic", lambda: later)
 
         assert cache.get("k") is None
 

@@ -14,12 +14,12 @@ Two JSON-RPC/MCP conformance rules the dispatcher broke:
 
 from __future__ import annotations
 
-from core.mcp.modern import (
+from baselith.core.mcp.modern import (
     CLIENT_CAPABILITIES_KEY,
     MODERN_PROTOCOL_VERSION,
     PROTOCOL_VERSION_KEY,
 )
-from core.mcp.server import MCPServer
+from baselith.core.mcp.server import MCPServer
 
 
 def _modern(method: str, msg_id: int | None = 1) -> dict:

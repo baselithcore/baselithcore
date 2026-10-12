@@ -100,10 +100,12 @@ and `BASELITH_OTEL_ASGI_SUB_SPANS=true` override them respectively.
 
 ## Alerts
 
-`prometheusRule.enabled` renders a `PrometheusRule` with eleven rules: the RED
-HTTP metrics the app already exports (`http_requests_total`,
-`http_request_duration_seconds`), `mas_llm_*` and `security_events_total`, plus
-kube-state-metrics and the kubelet's volume stats. It is off by default: a rule
+`prometheusRule.enabled` renders a `PrometheusRule` with fifteen health rules: the
+RED HTTP metrics the app already exports (`http_requests_total`,
+`http_request_duration_seconds`), `mas_llm_*`, `security_events_total` and the
+online-evaluation quality verdict (`mas_eval_online_degraded`, plus the monitor's
+own failures), kube-state-metrics and the kubelet's volume stats — and a
+separate group with the two update notices. It is off by default: a rule
 object referencing a Prometheus that is not there is dead YAML, and a chart that
 ships alerts nobody routed teaches operators to ignore the ones that do fire.
 
@@ -204,7 +206,7 @@ plugins:
   config:
     api_routers: {enabled: true}
     browser_agent: {enabled: true}
-    baselithbot: {enabled: true, headless: true}
+    reasoning_agent: {enabled: true}
 ```
 
 The chart renders it into a ConfigMap mounted read-only over

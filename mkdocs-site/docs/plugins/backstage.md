@@ -120,34 +120,34 @@ Detection runs three complementary strategies in order, merging results:
 
 1. **Tag-based** (zero I/O): intersects `manifest.yaml` tags against known pattern aliases. A tag `"reasoning"` resolves to `baselith.ai/pattern-reasoning`.
 2. **Resource-based** (zero I/O): maps `required_resources` / `optional_resources` to known patterns. For example, declaring `llm` as a resource implies `baselith.ai/pattern-reasoning`.
-3. **Source-scan** (async, non-blocking): scans `.py` files in the plugin directory for `from core.X` / `import core.X` import statements, executed in an executor thread to avoid blocking the event loop.
+3. **Source-scan** (async, non-blocking): scans `.py` files in the plugin directory for `from baselith.core.X` / `import baselith.core.X` import statements, executed in an executor thread to avoid blocking the event loop.
 
 ### Detected Patterns
 
 | Detected Pattern | Detection Rule (module import) | Backstage Label |
 | :--- | :--- | :--- |
-| **Reasoning** | `core.reasoning` | `baselith.ai/pattern-reasoning` |
-| **Reflection** | `core.reflection` | `baselith.ai/pattern-reflection` |
-| **Planning** | `core.planning` | `baselith.ai/pattern-planning` |
-| **Guardrails** | `core.guardrails` | `baselith.ai/pattern-guardrails` |
-| **Swarm** | `core.swarm` | `baselith.ai/pattern-swarm` |
-| **Agent-to-Agent (A2A)** | `core.a2a` | `baselith.ai/pattern-a2a` |
-| **Human-in-the-Loop** | `core.human` | `baselith.ai/pattern-human-in-the-loop` |
-| **MCP** | `core.mcp` | `baselith.ai/pattern-mcp` |
-| **World Model** | `core.world_model` | `baselith.ai/pattern-world-model` |
-| **Exploration** | `core.exploration` | `baselith.ai/pattern-exploration` |
-| **Adversarial** | `core.adversarial` | `baselith.ai/pattern-adversarial` |
-| **Personas** | `core.personas` | `baselith.ai/pattern-personas` |
-| **Meta-Agent** | `core.meta` | `baselith.ai/pattern-meta-agent` |
-| **Learning** | `core.learning` | `baselith.ai/pattern-learning` |
-| **Fine-tuning** | `core.finetuning` | `baselith.ai/pattern-finetuning` |
-| **Memory Tiering** | `core.memory` | `baselith.ai/pattern-memory-tiering` |
-| **Evaluation** | `core.evaluation` | `baselith.ai/pattern-evaluation` |
-| **Task Queue** | `core.task_queue` | `baselith.ai/pattern-task-queue` |
-| **Goals** | `core.goals` | `baselith.ai/pattern-goals` |
-| **Orchestration** | `core.orchestration` | `baselith.ai/pattern-orchestration` |
-| **Knowledge Graph** | `core.graph` | `baselith.ai/pattern-knowledge-graph` |
-| **Multi-Tenancy** | `core.context` | `baselith.ai/pattern-multi-tenancy` |
+| **Reasoning** | `baselith.core.reasoning` | `baselith.ai/pattern-reasoning` |
+| **Reflection** | `baselith.core.reflection` | `baselith.ai/pattern-reflection` |
+| **Planning** | `baselith.core.planning` | `baselith.ai/pattern-planning` |
+| **Guardrails** | `baselith.core.guardrails` | `baselith.ai/pattern-guardrails` |
+| **Swarm** | `baselith.core.swarm` | `baselith.ai/pattern-swarm` |
+| **Agent-to-Agent (A2A)** | `baselith.core.a2a` | `baselith.ai/pattern-a2a` |
+| **Human-in-the-Loop** | `baselith.core.human` | `baselith.ai/pattern-human-in-the-loop` |
+| **MCP** | `baselith.core.mcp` | `baselith.ai/pattern-mcp` |
+| **World Model** | `baselith.core.world_model` | `baselith.ai/pattern-world-model` |
+| **Exploration** | `baselith.core.exploration` | `baselith.ai/pattern-exploration` |
+| **Adversarial** | `baselith.core.adversarial` | `baselith.ai/pattern-adversarial` |
+| **Personas** | `baselith.core.personas` | `baselith.ai/pattern-personas` |
+| **Meta-Agent** | `baselith.core.meta` | `baselith.ai/pattern-meta-agent` |
+| **Learning** | `baselith.core.learning` | `baselith.ai/pattern-learning` |
+| **Fine-tuning** | `baselith.core.finetuning` | `baselith.ai/pattern-finetuning` |
+| **Memory Tiering** | `baselith.core.memory` | `baselith.ai/pattern-memory-tiering` |
+| **Evaluation** | `baselith.core.evaluation` | `baselith.ai/pattern-evaluation` |
+| **Task Queue** | `baselith.core.task_queue` | `baselith.ai/pattern-task-queue` |
+| **Goals** | `baselith.plugins.goals` | `baselith.ai/pattern-goals` |
+| **Orchestration** | `baselith.core.orchestration` | `baselith.ai/pattern-orchestration` |
+| **Knowledge Graph** | `baselith.core.graph` | `baselith.ai/pattern-knowledge-graph` |
+| **Multi-Tenancy** | `baselith.core.context` | `baselith.ai/pattern-multi-tenancy` |
 
 ### Resource-to-Pattern shortcuts
 
@@ -233,7 +233,7 @@ Returns the Backstage Scaffolder template that submits an existing plugin direct
 
 ### `POST /api/backstage/publish`
 
-Thin wrapper around `core.marketplace.publisher.PluginPublisher.publish`. Consumed by the publish Scaffolder template via the `http:backstage:request` action. Request body:
+Thin wrapper around `baselith.core.marketplace.publisher.PluginPublisher.publish`. Consumed by the publish Scaffolder template via the `http:backstage:request` action. Request body:
 
 ```json
 {
@@ -484,7 +484,7 @@ All Components are emitted in the explicit `default` namespace (`metadata.namesp
 
 ### `readiness` → `spec.lifecycle`
 
-`spec.lifecycle` is **maturity**, derived from the manifest `readiness` through `readiness_to_lifecycle` (`core/plugins/exporters/entity_model.py`):
+`spec.lifecycle` is **maturity**, derived from the manifest `readiness` through `readiness_to_lifecycle` (`baselith/core/plugins/exporters/entity_model.py`):
 
 | Manifest `readiness` | Backstage lifecycle |
 | :--- | :--- |

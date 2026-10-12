@@ -1,11 +1,11 @@
-"""Tests for TOTP multi-factor authentication (core/auth/mfa.py)."""
+"""Tests for TOTP multi-factor authentication (baselith/core/auth/mfa.py)."""
 
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 from pydantic import SecretStr
 
-from core.auth import (
+from baselith.core.auth import (
     MFAEnrollment,
     TOTPProvider,
     generate_recovery_codes,
@@ -16,7 +16,7 @@ from core.auth import (
     verify_recovery_code,
     verify_totp,
 )
-from core.auth.mfa import DEFAULT_PERIOD
+from baselith.core.auth.mfa import DEFAULT_PERIOD
 
 
 class TestSecretGeneration:

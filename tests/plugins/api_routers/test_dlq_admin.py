@@ -4,8 +4,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.task_queue.dead_letter import DeadLetterError, DeadLetterRecord
-from plugins.api_routers import admin
+from baselith.core.task_queue.dead_letter import DeadLetterError, DeadLetterRecord
+from baselith.plugins.api_routers import admin
 
 
 def _record(job_id="j1"):
@@ -58,7 +58,7 @@ def client(monkeypatch):
     fake = FakeDLQ()
     monkeypatch.setattr(admin, "get_dead_letter_queue", lambda: fake, raising=False)
     monkeypatch.setattr(
-        "core.task_queue.dead_letter.get_dead_letter_queue", lambda: fake
+        "baselith.core.task_queue.dead_letter.get_dead_letter_queue", lambda: fake
     )
     app = FastAPI()
     app.include_router(admin.router)

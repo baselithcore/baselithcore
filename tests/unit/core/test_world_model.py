@@ -6,7 +6,7 @@ Tests for predictive planning: state prediction, MCTS simulation, risk assessmen
 
 import pytest
 
-from core.world_model import (
+from baselith.core.world_model import (
     Action,
     MCTSSimulator,
     RiskAssessor,
@@ -15,8 +15,8 @@ from core.world_model import (
     State,
     StatePredictor,
 )
-from core.world_model.simulation import MCTSConfig, MCTSNode
-from core.world_model.types import ActionPath, ActionType
+from baselith.core.world_model.simulation import MCTSConfig, MCTSNode
+from baselith.core.world_model.types import ActionPath, ActionType
 
 # ============================================================================
 # State Tests

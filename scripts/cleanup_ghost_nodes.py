@@ -2,12 +2,12 @@ import logging
 import os
 import sys
 
-from core.observability.logging import get_logger
+from baselith.core.observability.logging import get_logger
 
 # Add project root to sys.path
 sys.path.append(os.getcwd())
 
-from core.graph import graph_db
+from baselith.core.graph import graph_db
 
 logging.basicConfig(level=logging.INFO)
 logger = get_logger("cleanup")

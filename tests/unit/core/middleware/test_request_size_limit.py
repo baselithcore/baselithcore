@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.middleware.security_headers import (
+from baselith.core.middleware.security_headers import (
     RequestSizeLimitMiddleware,
     clear_request_size_overrides,
     register_request_size_override,

@@ -21,7 +21,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.agents import CodingAgent
+from baselith.plugins.coding_agent import CodingAgent
 
 
 async def demo_generate_code(agent: CodingAgent) -> None:

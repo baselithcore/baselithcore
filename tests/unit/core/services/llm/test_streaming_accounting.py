@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.services.llm.service import LLMService
+from baselith.core.services.llm.service import LLMService
 
 PROMPT_ESTIMATE = 100
 
@@ -39,7 +39,7 @@ class _Tracer:
 
 
 def _service():
-    with patch("core.services.llm.service.get_llm_config") as mock_config:
+    with patch("baselith.core.services.llm.service.get_llm_config") as mock_config:
         mock_config.return_value = Mock(
             provider="ollama",
             model="m",
@@ -53,13 +53,13 @@ def _service():
 async def _run_stream(service, span):
     reported: list[tuple[int, str]] = []
     with (
-        patch("core.observability.get_tracer", return_value=_Tracer(span)),
+        patch("baselith.core.observability.get_tracer", return_value=_Tracer(span)),
         patch(
-            "core.services.llm._streaming.report_tokens_to_middleware",
+            "baselith.core.services.llm._streaming.report_tokens_to_middleware",
             side_effect=lambda tokens, model="": reported.append((tokens, model)),
         ),
         patch(
-            "core.services.llm._streaming.estimate_tokens_async",
+            "baselith.core.services.llm._streaming.estimate_tokens_async",
             new=_fixed_estimate,
         ),
     ):
@@ -92,7 +92,7 @@ class TestStreamTokenAccounting:
 
     async def test_exact_usage_from_a_sink_beats_the_estimate(self):
         """A provider that meters the stream must not be second-guessed."""
-        from core.services.llm.usage import Usage
+        from baselith.core.services.llm.usage import Usage
 
         service = _service()
         captured: list[dict] = []

@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from core.utils.concurrency import drain_async_iterator
+from baselith.core.utils.concurrency import drain_async_iterator
 
 
 async def _tokens(*items: str) -> AsyncIterator[str]:

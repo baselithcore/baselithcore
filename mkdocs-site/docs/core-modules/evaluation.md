@@ -3,7 +3,7 @@ title: Evaluation
 description: LLM response quality evaluation via RAG metrics
 ---
 
-**Module**: `core/evaluation/`
+**Module**: `baselith/core/evaluation/`
 
 The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailored for Retrieval-Augmented Generation (RAG) metrics. It integrates with the event system to enable automated continuous optimization of agentic performance.
 
@@ -12,14 +12,22 @@ The Evaluation module provides LLM-as-a-Judge capabilities, specifically tailore
 ## Module Structure
 
 ```text
-core/evaluation/               # the evaluation toolkit
+baselith/core/evaluation/               # the evaluation toolkit
 ├── __init__.py                # Public exports
 ├── base.py                    # BaseLLMEvaluator, JUDGE_UNAVAILABLE, judge_unavailable
 ├── protocols.py               # Evaluator protocol, EvaluationResult, QualityLevel
 ├── judges.py                  # Relevance/Coherence/Faithfulness/CompositeEvaluator
 ├── consensus.py               # ConsensusEvaluator (same question, several judges)
 ├── metrics.py                 # DeepEval metric wrappers (gated on EvaluationConfig)
-├── service.py                 # event-driven EvaluationService (FLOW_COMPLETED listener)
+├── service.py                 # online EvaluationService (sampled FLOW_COMPLETED listener)
+├── online_sampling.py         # OnlineSampler: deterministic run-id hash sampling
+├── online_checks.py           # cheap deterministic checks (no LLM)
+├── online_metrics.py          # mas_eval_online_* recording, intent label cap
+├── online_monitor.py          # QualityMonitor: rolling windows + hysteresis
+├── online_fleet.py            # FleetQualityMonitor: Redis-shared windows, one elected announcer
+├── online_alerts.py           # TransitionAnnouncer: log, event bus, webhooks
+├── online_store.py            # OnlineEvalStore protocol, in-memory store
+├── online_store_postgres.py   # PostgresOnlineEvalStore (migration 013)
 ├── prompt_eval.py             # PromptEvaluator / EvalCase
 ├── bake_off.py                # run_bake_off multi-model comparison
 ├── trajectory.py              # trajectory-aware case evaluation
@@ -32,14 +40,11 @@ core/evaluation/               # the evaluation toolkit
 └── data/golden_qa.json        # bundled golden QA set
 ```
 
-!!! warning "`core.services.evaluation` is deprecated"
-    The former `core/services/evaluation/` DeepEval wrapper — a second class
-    named `EvaluationService` that nothing in the runtime used — is retired.
-    The package is now a deprecation shim (announced in 0.40.0, removed in
-    0.41.0): its `EvaluationService` subclasses the event-driven
-    `core.evaluation.EvaluationService` and keeps `evaluate_rag_response()`
-    backed by the metric evaluators below. See
-    [Services › Evaluation Service](services.md#evaluation-service).
+!!! warning "`baselith.core.services.evaluation` is removed"
+    The former `baselith/core/services/evaluation/` DeepEval wrapper, a second class
+    named `EvaluationService` that nothing in the runtime used, was deprecated
+    in 0.40.0 and is removed in 1.0. Use `baselith.core.evaluation.EvaluationService`
+    and the metric evaluators below.
 
 `metrics.py` holds `FaithfulnessEvaluator` and `AnswerRelevancyEvaluator`,
 thin wrappers around DeepEval's metrics (threshold default `0.7`, judge model
@@ -71,7 +76,7 @@ as an unfaithful answer.
 
 The RAG metrics are `FaithfulnessEvaluator` (how well the answer is grounded
 in the retrieved context) and `AnswerRelevancyEvaluator` (how relevant it is to
-the query), in `core/evaluation/metrics.py`. Build a fresh evaluator per
+the query), in `baselith/core/evaluation/metrics.py`. Build a fresh evaluator per
 concurrent measurement: a DeepEval metric stores its score and reason on the
 instance.
 
@@ -84,7 +89,7 @@ pip install "baselith-core[evaluation]"   # deepeval; also set EVAL_ENABLED=true
 ```python
 import asyncio
 
-from core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
+from baselith.core.evaluation.metrics import AnswerRelevancyEvaluator, FaithfulnessEvaluator
 
 query = "How does the caching work?"
 answer = "The system uses a Redis-based cache with TTL."
@@ -103,35 +108,192 @@ print(f"Faithfulness: {faithfulness:.2f}  Relevancy: {relevancy:.2f}")
 
 ---
 
-## Integration with Optimization Loop
+## Online evaluation
 
-The class that closes the loop is the **event-driven**
-`core.evaluation.service.EvaluationService` (exported from `core.evaluation`).
-It subscribes to `FLOW_COMPLETED`, judges
-each successful flow in a background task, and emits the verdict:
+`baselith.core.evaluation.EvaluationService` evaluates **production traffic**:
+it subscribes to `FLOW_COMPLETED` and scores a deterministic sample of the
+successful flows off the request path. It is off unless both `EVAL_ENABLED`
+and `EVAL_ONLINE_ENABLED` are true; then the app lifespan starts it at boot
+(through the lazy registry, so a plugin that requires the `evaluation`
+resource gets the same instance) and stops it on shutdown, cancelling its
+workers. Settings are read when `start()` runs, never at import.
 
 ```python
-from core.evaluation import EvaluationService
+from baselith.core.config.evaluation import EvaluationConfig
+from baselith.core.evaluation import EvaluationService, InMemoryOnlineEvalStore
 
-service = EvaluationService()   # evaluator defaults to CompositeEvaluator()
-service.start()                 # subscribes; a no-op unless EVAL_ENABLED=true
-# ...
-service.stop()                  # unsubscribes from FLOW_COMPLETED, flips the flag
+service = EvaluationService(
+    config=EvaluationConfig(enabled=True, online_sample_rate=0.1, online_judge_rate=0.01),
+    store=InMemoryOnlineEvalStore(),
+)
+service.start()             # subscribes; spawns the workers on the running loop
+print(await service.online_summary())  # rates, queue depth, windows, scope
+await service.shutdown()    # unsubscribes and cancels the workers
 ```
 
-**Event flow**: `FLOW_COMPLETED` → `EvaluationService` → `EVALUATION_STARTED` → judge → `EVALUATION_COMPLETED` (or `EVALUATION_FAILED`) → `OptimizationLoop` → `auto_tune()` → `OPTIMIZATION_COMPLETED`
+### The pipeline
 
-- Flows are skipped when `success` is false, the intent is missing or starts
-  with `evaluation`, or the payload has no `query`/`response`.
-- Concurrency is bounded by `max_concurrent` (default `8`, a semaphore bound
-  to the running loop) so a burst of completed flows cannot fan out into
-  unbounded LLM-judge calls.
-- The `EVALUATION_COMPLETED` payload carries `intent`, `score`, `quality`,
-  `feedback`, `aspects`, `should_refine`, `metadata`, plus the evaluated
-  `response` and the originating `run_id` for the learning subsystems.
+1. **Sampling.** A flow is sampled when a stable hash of its `run_id` falls
+   below `EVAL_ONLINE_SAMPLE_RATE` (default `0.05`), overridable per intent
+   with `EVAL_ONLINE_INTENT_SAMPLE_RATES` (JSON). The decision is
+   reproducible — the same run is in or out on every replica, and raising the
+   rate only adds runs. Failed flows, flows without an intent and intents
+   starting with `evaluation` are never evaluated; a run without an id is
+   sampled at the rate with a random key.
+2. **Backpressure.** Sampled flows go to a bounded queue
+   (`EVAL_ONLINE_QUEUE_SIZE`, default 256) drained by `EVAL_ONLINE_WORKERS`
+   workers (default 2). When it is full the sample is dropped and counted in
+   `mas_eval_online_dropped_total{reason="queue_full"}`: the event handler
+   never waits, so evaluation can never slow a request.
+3. **Deterministic checks** (`online_checks.py`, no LLM) run on every sampled
+   flow. Each failed check multiplies the score by its factor:
 
-This allows the framework to detect when an agent's performance drops below a
-quality threshold and trigger automatic prompt evolution.
+    | Flag | Factor | Fails when |
+    | --- | --- | --- |
+    | `empty` | 0.0 | the answer is blank |
+    | `guard_blocked` | 0.0 | moderation or the groundedness rail replaced it |
+    | `refusal` | 0.25 | it *opens* with a refusal phrase |
+    | `too_short` | 0.5 | it is shorter than `EVAL_ONLINE_MIN_ANSWER_CHARS` (20) |
+    | `ungrounded` | 0.5 | the groundedness rail scored it below 0.5 |
+
+    Latency, spend (`cost_usd`, `tokens`) and guard redaction counts are kept
+    as signals, not scored: a slow or redacted answer is not necessarily worse.
+4. **LLM judge (opt-in).** `EVAL_ONLINE_JUDGE_RATE` (default `0.0`, off) is the
+   share of *all* flows also scored by the judge (`CompositeEvaluator`, built
+   on first use), capped at the sample rate: judged runs are always a subset of
+   sampled ones. A judged flow emits `EVALUATION_STARTED` and
+   `EVALUATION_COMPLETED` (or `EVALUATION_FAILED`) exactly as before — with
+   `tenant_id` and `source: "judge"` added — so the optimization loop and the
+   learning subsystems keep consuming it.
+5. **Metrics.** Every verdict feeds the `mas_eval_online_*` metrics, labelled by
+   intent and source (`checks` / `judge`). Intents are capped at
+   `EVAL_ONLINE_MAX_INTENTS` (50) distinct label values; later ones report as
+   `other`. See [Observability › Online evaluation metrics](observability-module.md#online-evaluation-metrics).
+6. **Quality monitor** (below) and **store** (below).
+
+### What `FLOW_COMPLETED` carries
+
+The orchestrator emits the success event **after** the output guard, so
+`response` is the text the user received and `guardrails` holds the guard's
+verdicts (redaction counts, moderation, groundedness). The payload also carries
+`run_id`, `tenant_id` (the ambient tenant: subscribers run outside the request),
+`duration_ms`, `cost_usd` and `tokens`. Streamed answers emit the event too,
+with `streamed: true`, once the stream completes; an abandoned stream emits
+nothing.
+
+### Rolling quality monitor
+
+`QualityMonitor` keeps, per intent and source, a window of the last
+`EVAL_ONLINE_WINDOW` (50) scores and a trailing reference of up to
+`EVAL_ONLINE_REFERENCE_WINDOW` (500) scores before it. Once the window holds
+`EVAL_ONLINE_MIN_SAMPLES` (20) scores, the series is **degraded** when the
+windowed mean falls below `EVAL_ONLINE_QUALITY_FLOOR` (unset by default) or
+more than `EVAL_ONLINE_DEGRADATION_THRESHOLD` (0.15) below the reference mean.
+A degradation logs a warning, emits `EVALUATION_DEGRADED`
+(`intent`, `source`, `state`, `window_mean`, `reference_mean`, `floor`,
+`samples`, `reason` = `below_floor` / `below_reference`, and `scope` =
+`fleet` / `worker`), is delivered to webhook subscribers and sets
+`mas_eval_online_degraded{intent,source}` to 1.
+
+Hysteresis keeps it from flapping: a degraded series recovers (emitting
+`EVALUATION_RECOVERED`, gauge back to 0) only once the windowed mean is
+`EVAL_ONLINE_RECOVERY_MARGIN` (0.05) *inside* both boundaries, at least
+`EVAL_ONLINE_MIN_SAMPLES` scores must arrive between two state changes, and the
+reference mean is frozen while degraded, so a long incident cannot drag the
+reference down until it looks normal. The decision is
+`QualityMonitor.assess()`, a pure function of a series' scores and state, so
+the per-process monitor and the fleet monitor below apply the same rules.
+
+### Fleet-wide monitoring (`online_fleet.py`) {#fleet-monitoring}
+
+With several workers (`WEB_CONCURRENCY`, or replicas) a per-process monitor
+sees only the share of the traffic its worker sampled, and every worker that
+crosses a threshold announces it. When `CACHE_BACKEND=redis` and
+`EVAL_ONLINE_FLEET` is on (the default), `EvaluationService` builds a
+`FleetQualityMonitor` on the cache Redis instead:
+
+- **Every worker records.** Each score is pushed onto its series' Redis list
+  (`<CACHE_REDIS_PREFIX>:eval_online:scores:…`, newest first, trimmed to
+  window + reference) and counted on the series' state hash, in one pipelined
+  round trip from the evaluation worker — never from the request path.
+- **One worker decides.** Every `EVAL_ONLINE_FLEET_INTERVAL_SECONDS` (15) each
+  worker ticks. The one holding the `eval_online_monitor`
+  [`DistributedLock`](resilience.md) lease (taken non-blocking, renewed every
+  tick, expiring after three missed ticks) reads every series, applies
+  `assess()` to the fleet window and announces each transition **once**; when
+  it dies, another worker takes the lease within three ticks and inherits the
+  shared state, including a degraded series' frozen reference.
+- **Transitions are compare-and-set.** A Lua script writes a state change only
+  if the series is still in the state it was decided from, and only the writer
+  that applied it announces — so two workers that briefly both believe they
+  lead (a lease lapsing under a paused holder) cannot announce it twice.
+- **Every worker mirrors the gauge** from the shared state on each tick, so
+  `mas_eval_online_degraded` is the fleet's verdict on every scrape target and
+  survives a change of leader.
+
+Series keys expire after seven days without a score. Redis failures count in
+`mas_eval_online_failures_total{stage="fleet"}` and never reach a request;
+while Redis is unreachable nothing is announced — no worker falls back to
+announcing its own share, which would bring back one event per worker. In
+fleet mode each worker still keeps its in-process series, but only to answer
+the summary while Redis is away. Without Redis as the cache backend, or with
+`EVAL_ONLINE_FLEET=false`, each worker monitors and announces its own traffic
+(`scope: "worker"`).
+
+### Routing degradations to operators (`online_alerts.py`) {#routing-degradations}
+
+`TransitionAnnouncer` sends each transition down every channel the framework
+has for it:
+
+| Channel | What arrives | Who sees it |
+| --- | --- | --- |
+| Log | `online_eval_degraded` (warning) / `online_eval_recovered` (info) | log pipeline |
+| Event bus | `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED` | subscribers in the announcing process |
+| Webhooks | event types `evaluation.degraded` / `evaluation.recovered` | endpoints of `EVAL_ONLINE_WEBHOOK_TENANT` (default `default`) subscribed to them, when `WEBHOOKS_ENABLED` |
+| Prometheus | `mas_eval_online_degraded` | the `AnswerQualityDegraded` alert rules shipped in `deploy/` |
+
+The webhook payload is the event payload above. Delivery (signing, retries,
+dead-lettering — see [Webhooks](webhooks.md)) runs as a background task, so a
+slow subscriber never holds up the announcement; a failed emission counts as
+`stage="webhook"`. The alert rules and a Grafana row are described in
+[Observability › Alerting on answer quality](../advanced/observability.md#alerting-on-answer-quality).
+A quality degradation is not routed into the regulatory incident subsystem
+(`baselith.core.incidents`), which records reportable incidents.
+
+### Result store (opt-in)
+
+`EVAL_ONLINE_STORE` selects where verdicts are persisted: `none` (default),
+`memory` (`InMemoryOnlineEvalStore`, bounded by
+`EVAL_ONLINE_STORE_MAX_RECORDS`, oldest evicted) or `postgres`
+(`PostgresOnlineEvalStore`, table `online_eval_results` from migration
+`013_online_eval_results`, tenant-scoped under row-level security). One record
+per verdict — the checks always, the judge when the flow was judged — holding
+score, quality, aspects, flags, signals, intent, run id, tenant and timestamp.
+The query and response text are **not** stored unless
+`EVAL_ONLINE_STORE_RAW_TEXT=true`, and then only after
+`baselith.core.observability.redaction.redact_text` masked e-mail addresses and
+credentials, cut to 4 000 characters. A retention sweep deletes records older
+than `EVAL_ONLINE_RETENTION_DAYS` (30; `0` keeps them) every hour; the Postgres
+sweep runs as the `system` maintenance identity.
+
+### Read API
+
+With `EVAL_ONLINE_ENABLED`, the `api_routers` plugin mounts
+`GET /v1/evaluation/online/summary` behind the admin Basic Auth: the sample and
+judge rates, the queue depth and the per-intent window statistics (503 while
+the service is not running). `scope` says whose traffic the windows cover:
+`fleet` when the fleet monitor is on and Redis answered (every worker's
+sampled traffic, read from the shared windows), `worker` otherwise (the share
+the serving worker sampled). The rates and the queue depth are always the
+serving worker's.
+
+### Event flow
+
+`FLOW_COMPLETED` → `EvaluationService` (sample → checks → optional judge) →
+`EVALUATION_COMPLETED` (judged flows) → `OptimizationLoop` → `auto_tune()` →
+`OPTIMIZATION_COMPLETED`; and `EVALUATION_DEGRADED` / `EVALUATION_RECOVERED`
+(plus the `evaluation.degraded` / `evaluation.recovered` webhooks) from the
+monitor — once per fleet when the fleet monitor is on.
 
 ---
 
@@ -146,8 +308,8 @@ adds an opt-in judge pass over cases that already passed the deterministic
 checks:
 
 ```python
-from core.evaluation.judges import CompositeEvaluator
-from core.evaluation.regression_runner import run_regression_async
+from baselith.core.evaluation.judges import CompositeEvaluator
+from baselith.core.evaluation.regression_runner import run_regression_async
 
 report = await run_regression_async(
     cases, recorded, judge=CompositeEvaluator(), judge_min_score=0.7
@@ -179,7 +341,7 @@ Deterministically failed cases are not judged (no wasted LLM calls).
     `report.judge_errors`.
 
 ```python
-from core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
+from baselith.core.evaluation.base import JUDGE_UNAVAILABLE, judge_unavailable
 
 outcome = await judge.evaluate(answer, question)
 judge_unavailable(outcome)           # True -> no judgement was made
@@ -209,7 +371,7 @@ report = await run_regression_async(
 ```
 
 Every `(case, sample)` pair is flattened into **one** bounded fan-out via
-`core.utils.concurrency.bounded_gather`, so `judge_concurrency` caps the total
+`baselith.core.utils.concurrency.bounded_gather`, so `judge_concurrency` caps the total
 number of judge calls in flight across the whole suite — not per case — no
 matter how many samples or cases the run has.
 
@@ -218,7 +380,7 @@ matter how many samples or cases the run has.
 The `PromptEvaluator` runs a suite of `EvalCase` objects against a prompt and produces an aggregated report.
 
 ```python
-from core.evaluation.prompt_eval import EvalCase, PromptEvaluator
+from baselith.core.evaluation.prompt_eval import EvalCase, PromptEvaluator
 
 cases = [
     EvalCase(
@@ -267,13 +429,13 @@ print(report_str)
 
 Model choice decided by vibes is the portability anti-pattern: the routing
 policy deserves the same evidence discipline as any other change.
-`run_bake_off` (`core/evaluation/bake_off.py`, exported from
-`core.evaluation`) runs a single `EvalCase` suite against every candidate
+`run_bake_off` (`baselith/core/evaluation/bake_off.py`, exported from
+`baselith.core.evaluation`) runs a single `EvalCase` suite against every candidate
 model — one `PromptEvaluator` per model, the **system prompt held constant**
 — and returns a ranked comparison matrix:
 
 ```python
-from core.evaluation import run_bake_off
+from baselith.core.evaluation import run_bake_off
 
 result = await run_bake_off(
     system_prompt="You are a research assistant...",
@@ -292,14 +454,14 @@ Models run **sequentially** (per-model case concurrency via
 `BakeOffResult.rows` holds one `ModelRunReport` per model (`model`,
 `report`, optional `cost_usd`); the cost column is filled only when a
 `cost_estimator` (`(model, report) -> USD`, typically an adapter over
-`core.models.pricing`) is supplied. The matrix is ready to feed a
+`baselith.core.models.pricing`) is supplied. The matrix is ready to feed a
 routing-policy decision — see [Models](models.md).
 
 ---
 
 ## Trajectory-aware evaluation
 
-`core/evaluation/trajectory.py` adds a second evaluator that scores a
+`baselith/core/evaluation/trajectory.py` adds a second evaluator that scores a
 run not only on its final answer but on the *sequence of tool calls*
 the agent made to get there. It is provider-agnostic and pure: it
 takes a `TrajectoryCase`, the captured run output and trajectory, and
@@ -333,7 +495,7 @@ An ungrounded answer raises the `reference_fact_ungrounded` violation.
 ### Example
 
 ```python
-from core.evaluation.trajectory import TrajectoryEvaluator, TrajectoryCase
+from baselith.core.evaluation.trajectory import TrajectoryEvaluator, TrajectoryCase
 
 case: TrajectoryCase = {
     "case_id": "search_then_summarize",
@@ -380,7 +542,7 @@ assert not result.passed  # 0.07 > 0.05
 
 ## Regression runner (CI integration)
 
-`core/evaluation/regression_runner.py` turns the trajectory evaluator
+`baselith/core/evaluation/regression_runner.py` turns the trajectory evaluator
 into a deterministic CI job. Cases are YAML files; the runs graded against
 them come from two places — a [replayed scenario](#replayed-scenarios) driven
 through the real agent loop, or a hand-written recording in a JSON capture
@@ -407,7 +569,7 @@ the build when the pass rate dips below the configured gate.
 
 ```python
 from pathlib import Path
-from core.evaluation.regression_runner import (
+from baselith.core.evaluation.regression_runner import (
     load_cases, load_recorded_runs, run_regression,
 )
 
@@ -466,7 +628,7 @@ go red for a change to the agent, to prompt assembly, to the router, to tool
 schemas or to output parsing. Only an edited YAML file or a bug in the
 evaluator could fail it. That is a floor, not a guard.
 
-`core/evaluation/replay.py` closes the gap without putting an API key in CI. A
+`baselith/core/evaluation/replay.py` closes the gap without putting an API key in CI. A
 **scenario** carries the provider's half of a conversation plus the tools the
 agent had; replaying it drives the *real* loop — real prompt assembly, real
 tool dispatch with its gates and
@@ -529,7 +691,7 @@ loop actually passed, and that recording *is* the graded trajectory.
 ```python
 from pathlib import Path
 
-from core.evaluation.replay import load_scenarios, replay_scenario
+from baselith.core.evaluation.replay import load_scenarios, replay_scenario
 
 scenarios = load_scenarios(Path("evals/scenarios"))
 run = await replay_scenario(scenarios[0])   # a RecordedRun, ready to grade
@@ -549,7 +711,7 @@ run = await replay_scenario(scenarios[0])   # a RecordedRun, ready to grade
     Model quality stays the [LLM-as-judge](#llm-as-judge-gate-opt-in) pass's
     job: credentials, a schedule, and a median over samples.
 
-Neither `replay` nor `cassette` is re-exported from `core.evaluation`; import
+Neither `replay` nor `cassette` is re-exported from `baselith.core.evaluation`; import
 them from their own modules, as above.
 
 ### What the replay gate actually catches {#what-replay-catches}
@@ -581,7 +743,7 @@ deleting the fixture in the same change.
 
 ### Cassettes: the shared replay machinery {#cassettes}
 
-`core/evaluation/cassette.py` is what plays a provider script through the
+`baselith/core/evaluation/cassette.py` is what plays a provider script through the
 `LLMService` surface the agent loop calls. It used to live in
 `tests/golden/cassette.py` and moved because `core` cannot import from the test
 tree and both consumers need the same machinery: the
@@ -616,7 +778,7 @@ optional:
 
 The durable checkpoint store already persists everything a regression
 recording needs — query, final answer, and the ordered tool trajectory.
-`core/evaluation/promotion.py` exploits that: `promote_run` converts a
+`baselith/core/evaluation/promotion.py` exploits that: `promote_run` converts a
 **completed** checkpoint into the exact JSON shape `load_recorded_runs`
 replays, so real production behavior becomes a deterministic CI fixture. A
 promoted run lands under `evals/runs/`, so it is exactly that — a fixture. It
@@ -626,7 +788,7 @@ rejects a case served by both.
 
 ```python
 from pathlib import Path
-from core.evaluation.promotion import promote_run
+from baselith.core.evaluation.promotion import promote_run
 
 result = await promote_run(
     store,                                   # any CheckpointStore
@@ -679,8 +841,8 @@ borderline cases: one grade is a sample of one. `ConsensusEvaluator` runs the
 **same** question past several independent judges and aggregates the panel.
 
 ```python
-from core.evaluation import ConsensusEvaluator
-from core.evaluation.judges import RelevanceEvaluator
+from baselith.core.evaluation import ConsensusEvaluator
+from baselith.core.evaluation.judges import RelevanceEvaluator
 
 panel = ConsensusEvaluator([
     RelevanceEvaluator(llm_service=sonnet),
@@ -730,7 +892,7 @@ notice.
 evals/red_team/guardrails.yaml           # volume 1: canonical jailbreaks, extraction, PII
 evals/red_team/injection_variants.yaml   # volume 2: paraphrases, multilingual, exfil links, secrets
 scripts/run_red_team_evals.py            # the gate  (CI job: "Red-Team Gate")
-core/evaluation/red_team.py              # loader + runner + report
+baselith/core/evaluation/red_team.py              # loader + runner + report
 ```
 
 Every case that failed when a volume was added is a guardrail gap, not a
@@ -778,14 +940,14 @@ python scripts/run_red_team_evals.py --report red-team-report.json
 
 ## Bias examination (group fairness)
 
-`core/evaluation/fairness.py` computes the standard group-fairness quantities
+`baselith/core/evaluation/fairness.py` computes the standard group-fairness quantities
 over labelled outcomes — the measurement behind the AI Act Art. 10(2)(f)/(g)
 bias examination and the Art. 15 accuracy-across-groups obligation.
 `evaluate_fairness` takes aligned sequences and returns a `FairnessReport`
 holding one `GroupOutcome` per protected-attribute value:
 
 ```python
-from core.evaluation import evaluate_fairness
+from baselith.core.evaluation import evaluate_fairness
 
 report = evaluate_fairness(
     groups=["a", "a", "b", "b"],

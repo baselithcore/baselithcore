@@ -5,8 +5,8 @@ Two directions, because a distribution can be wrong in both:
 * every official plugin must arrive with the manifest and README the loader
   and the marketplace read, the sandbox image recipe must arrive with the
   module that builds from it, and
-* the in-repo FIXTURE plugins must not arrive at all. ``plugins/example-plugin``
-  (the authoring-guide scaffold) and ``plugins/test-project`` (the tree the
+* the in-repo FIXTURE plugins must not arrive at all. ``baselith/plugins/example-plugin``
+  (the authoring-guide scaffold) and ``baselith/plugins/test-project`` (the tree the
   plugin CLI tests scaffold against) were swept into the wheel by
   ``include = ["plugins*"]``, so every install carried a loadable plugin that
   exists only to be asserted on. ``[tool.setuptools.packages.find] exclude``
@@ -22,9 +22,9 @@ way an install will use it:
   plugin missing one fails its integrity check on every ``pip install``.
 * the Alembic migrations must be locatable inside the package and load into a
   single-head revision graph, with every revision the repository has. Before
-  they moved into ``core/db/migrations`` they were not in the wheel at all.
+  they moved into ``baselith/core/db/migrations`` they were not in the wheel at all.
 * every ``baselith init`` starter must arrive, file for file, under
-  ``core/cli/scaffold_templates``. ``templates/`` is outside every package,
+  ``baselith/core/cli/scaffold_templates``. ``templates/`` is outside every package,
   so a ``pip install`` used to offer only the built-in ``minimal`` template;
   ``build_support/scaffold_templates.py`` copies them in at build time.
 
@@ -46,18 +46,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = REPO_ROOT / "dist"
 PLUGIN_FILES = (
-    "plugins/api_routers/manifest.yaml",
-    "plugins/api_routers/README.md",
-    "plugins/browser_agent/manifest.yaml",
-    "plugins/browser_agent/README.md",
-    "plugins/coding_agent/manifest.yaml",
-    "plugins/coding_agent/README.md",
-    "plugins/document_sources/manifest.yaml",
-    "plugins/document_sources/README.md",
-    "plugins/web_scraper/manifest.yaml",
-    "plugins/web_scraper/README.md",
+    "baselith/plugins/api_routers/manifest.yaml",
+    "baselith/plugins/api_routers/README.md",
+    "baselith/plugins/browser_agent/manifest.yaml",
+    "baselith/plugins/browser_agent/README.md",
+    "baselith/plugins/coding_agent/manifest.yaml",
+    "baselith/plugins/coding_agent/README.md",
+    "baselith/plugins/document_sources/manifest.yaml",
+    "baselith/plugins/document_sources/README.md",
+    "baselith/plugins/web_scraper/manifest.yaml",
+    "baselith/plugins/web_scraper/README.md",
 )
-# The sandbox image recipe. ``core/services/sandbox/docker_factory.py`` builds
+# The sandbox image recipe. ``baselith/core/services/sandbox/docker_factory.py`` builds
 # ``agent-sandbox:latest`` from these at first use and FAILS CLOSED when they
 # are absent, so a wheel that omits them costs a pip-installed deployment the
 # Docker sandbox provider — or, with ``SANDBOX_ALLOW_UNHARDENED_BASE``, swaps
@@ -67,12 +67,12 @@ PLUGIN_FILES = (
 # below, in the other direction. They shipped in neither artifact until the
 # entry was added.
 SANDBOX_FILES = (
-    "core/services/sandbox/Dockerfile.sandbox",
-    "core/services/sandbox/requirements.sandbox.txt",
+    "baselith/core/services/sandbox/Dockerfile.sandbox",
+    "baselith/core/services/sandbox/requirements.sandbox.txt",
 )
-# The Alembic environment. ``core.db.migration_config`` resolves it through
+# The Alembic environment. ``baselith.core.db.migration_config`` resolves it through
 # the package; without it no installed deployment can create its schema.
-MIGRATIONS_LOCATION = "core/db/migrations"
+MIGRATIONS_LOCATION = "baselith/core/db/migrations"
 MIGRATION_FILES = (f"{MIGRATIONS_LOCATION}/env.py",)
 #: Every member both artifacts must carry.
 REQUIRED_FILES = PLUGIN_FILES + SANDBOX_FILES + MIGRATION_FILES
@@ -80,10 +80,10 @@ REQUIRED_FILES = PLUGIN_FILES + SANDBOX_FILES + MIGRATION_FILES
 # fixtures (installing from it re-runs the backend, which applies the same
 # `exclude`). The wheel is what `pip install baselith-core` unpacks verbatim.
 FORBIDDEN_WHEEL_PREFIXES = (
-    "plugins/example-plugin/",
-    "plugins/test-project/",
+    "baselith/plugins/example-plugin/",
+    "baselith/plugins/test-project/",
 )
-# Source maps. The baselithbot dashboard builds with `sourcemap: 'hidden'`,
+# Source maps. A plugin dashboard builds with `sourcemap: 'hidden'`,
 # which still writes .map files — they are for uploading to an error tracker,
 # not for shipping. In the wheel they would roughly triple the packaged
 # dashboard and expose its original TypeScript sources, and because `hidden`
@@ -188,7 +188,7 @@ def _declared_hash(manifest: Path) -> str | None:
 def check_installed_plugins(root: Path, *, label: str) -> list[str]:
     """Verify every signed plugin in an installed tree against its manifest.
 
-    The hasher is the ``core/plugins/integrity.py`` shipped in that same tree,
+    The hasher is the ``baselith/core/plugins/integrity.py`` shipped in that same tree,
     loaded by file path, so the check exercises exactly what the installed
     loader will run.
 
@@ -199,15 +199,17 @@ def check_installed_plugins(root: Path, *, label: str) -> list[str]:
     Returns:
         One message per plugin whose installed copy does not verify.
     """
-    integrity_path = root / "core" / "plugins" / "integrity.py"
+    integrity_path = root / "baselith" / "core" / "plugins" / "integrity.py"
     spec = importlib.util.spec_from_file_location("_shipped_integrity", integrity_path)
     if spec is None or spec.loader is None or not integrity_path.is_file():
-        return [f"{label}: core/plugins/integrity.py is missing"]
+        return [f"{label}: baselith/core/plugins/integrity.py is missing"]
     integrity = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(integrity)
 
     violations: list[str] = []
-    for plugin_dir in sorted(p for p in (root / "plugins").glob("*") if p.is_dir()):
+    for plugin_dir in sorted(
+        p for p in (root / "baselith" / "plugins").glob("*") if p.is_dir()
+    ):
         manifest = next(
             (plugin_dir / n for n in _MANIFEST_NAMES if (plugin_dir / n).is_file()),
             None,
@@ -250,7 +252,7 @@ def check_installed_migrations(
     if not (location / "env.py").is_file():
         return [
             f"{label}: {MIGRATIONS_LOCATION} is not shipped — restore its "
-            "`core.db` entry under [tool.setuptools.package-data]."
+            "`baselith.core.db` entry under [tool.setuptools.package-data]."
         ]
     violations = [
         f"{label}: missing migration {MIGRATIONS_LOCATION}/versions/{name}"
@@ -294,7 +296,7 @@ def check_installed_scaffold_templates(
     names: tuple[str, ...],
     *,
     label: str,
-    target: str = "core/cli/scaffold_templates",
+    target: str = "baselith/core/cli/scaffold_templates",
 ) -> list[str]:
     """Verify every ``baselith init`` starter is installed file for file.
 

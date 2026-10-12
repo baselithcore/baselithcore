@@ -80,17 +80,17 @@ The remaining extras cover narrower capabilities:
 
 | Extra          | Enables                                                                 |
 | -------------- | ----------------------------------------------------------------------- |
-| `tokenizer`    | Exact `tiktoken` token counting in `core/utils/tokens.py` (a character-class heuristic is used without it) |
-| `evaluation`   | `deepeval` LLM-as-judge metrics in `core/evaluation/`                    |
-| `sandbox`      | Docker-backed code sandbox in `core/services/sandbox/`                   |
+| `tokenizer`    | Exact `tiktoken` token counting in `baselith/core/utils/tokens.py` (a character-class heuristic is used without it) |
+| `evaluation`   | `deepeval` LLM-as-judge metrics in `baselith/core/evaluation/`                    |
+| `sandbox`      | Docker-backed code sandbox in `baselith/core/services/sandbox/`                   |
 | `memory`       | Supermemory long-term memory backend                                     |
 | `qdrant`       | Qdrant vector store backend (`VECTORSTORE_PROVIDER=qdrant`, the default). Not needed when using `pgvector` — the PostgreSQL backend has no extra Python dependency |
 | `computer_use` | Screen capture and input control (`mss`, `pyautogui`, `Pillow`)          |
-| `pii`          | Presidio NER-based PII redaction engine (`BASELITH_PII_ENGINE=presidio`); the regex redaction in `core/guardrails/` needs no extra |
+| `pii`          | Presidio NER-based PII redaction engine (`BASELITH_PII_ENGINE=presidio`); the regex redaction in `baselith/core/guardrails/` needs no extra |
 | `bedrock`      | Anthropic provider served through AWS Bedrock (`anthropic[bedrock]`, `LLM_ANTHROPIC_BACKEND=bedrock`) |
 | `vertex`       | Anthropic provider served through Google Vertex AI (`anthropic[vertex]`, `LLM_ANTHROPIC_BACKEND=vertex`) |
 | `load`         | Locust load-testing harness (`tests/load/locustfile.py`)                 |
-| `plugin-compat` | `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`, `sse-starlette`. Core dependencies until 0.41, used by nothing in `core/` or the official plugins. A plugin that imports one should declare it itself; this extra restores the old surface in the meantime |
+| `plugin-compat` | `defusedxml`, `email-validator`, `markdown-it-py`, `networkx`, `sse-starlette`. Core dependencies until 0.41, used by nothing in `baselith/core/` or the official plugins. A plugin that imports one should declare it itself; this extra restores the old surface in the meantime |
 
 Every one of these is imported behind a guard: without the extra the feature reports itself unavailable instead of failing at import time.
 

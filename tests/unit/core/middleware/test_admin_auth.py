@@ -1,4 +1,4 @@
-"""Tests for the race-free admin Basic-auth sequence (core.middleware._admin_auth)."""
+"""Tests for the race-free admin Basic-auth sequence (baselith.core.middleware._admin_auth)."""
 
 import asyncio
 import threading
@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from core.middleware import _admin_auth
-from core.middleware._admin_auth import (
+from baselith.core.middleware import _admin_auth
+from baselith.core.middleware._admin_auth import (
     KDF_MAX_CONCURRENCY,
     authenticate_admin_basic,
     client_bucket,
 )
-from core.middleware.security import SecurityManager
+from baselith.core.middleware.security import SecurityManager
 
 
 class TestClientBucket:
@@ -35,7 +35,7 @@ class TestClientBucket:
 
 
 def _manager(mock_security_config) -> SecurityManager:
-    with patch("core.middleware.rate_limiter.create_redis_client") as factory:
+    with patch("baselith.core.middleware.rate_limiter.create_redis_client") as factory:
         factory.return_value = None  # in-memory lockout fallback
         manager = SecurityManager(mock_security_config)
     manager.rate_limiter._redis = None
@@ -46,7 +46,9 @@ def _manager(mock_security_config) -> SecurityManager:
 def manager(mock_security_config):
     mock_security_config.admin_user = "admin"
     m = _manager(mock_security_config)
-    with patch("core.middleware.security.get_security_manager", return_value=m):
+    with patch(
+        "baselith.core.middleware.security.get_security_manager", return_value=m
+    ):
         yield m
 
 
@@ -112,22 +114,30 @@ class TestAuthenticateAdminBasic:
 class TestInMemoryLockoutFallback:
     @pytest.mark.asyncio
     async def test_failures_age_out_of_the_window(self, manager):
-        with patch("core.middleware._admin_lockout.time.time", return_value=1000.0):
+        with patch(
+            "baselith.core.middleware._admin_lockout.time.time", return_value=1000.0
+        ):
             for _ in range(manager._LOCKOUT_MAX_FAILURES - 1):
                 await manager.record_admin_failure("203.0.113.5")
         later = 1000.0 + manager._LOCKOUT_WINDOW_SECONDS + 1
-        with patch("core.middleware._admin_lockout.time.time", return_value=later):
+        with patch(
+            "baselith.core.middleware._admin_lockout.time.time", return_value=later
+        ):
             await manager.record_admin_failure("203.0.113.5")
             assert manager._lockout_fallback["203.0.113.5"][0] == 1
             await manager.check_admin_lockout("203.0.113.5")  # not locked
 
     @pytest.mark.asyncio
     async def test_expired_lock_is_not_rearmed_by_one_typo(self, manager):
-        with patch("core.middleware._admin_lockout.time.time", return_value=1000.0):
+        with patch(
+            "baselith.core.middleware._admin_lockout.time.time", return_value=1000.0
+        ):
             for _ in range(manager._LOCKOUT_MAX_FAILURES):
                 await manager.record_admin_failure("203.0.113.5")
         after = 1000.0 + manager._LOCKOUT_DURATION_SECONDS + 1
-        with patch("core.middleware._admin_lockout.time.time", return_value=after):
+        with patch(
+            "baselith.core.middleware._admin_lockout.time.time", return_value=after
+        ):
             await manager.record_admin_failure("203.0.113.5")
             await manager.check_admin_lockout("203.0.113.5")  # must not raise
 

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 # Get plugins directory path
-PLUGINS_DIR = Path(__file__).parent.parent.parent / "plugins"
+PLUGINS_DIR = Path(__file__).parent.parent.parent / "baselith" / "plugins"
 
 
 class TestPluginRegistry:
@@ -20,7 +20,7 @@ class TestPluginRegistry:
 
     def test_registry_initialization(self):
         """Registry initializes with empty collections."""
-        from core.plugins import PluginRegistry
+        from baselith.core.plugins import PluginRegistry
 
         registry = PluginRegistry()
 
@@ -31,7 +31,7 @@ class TestPluginRegistry:
     @pytest.mark.asyncio
     async def test_register_plugin(self):
         """Registry can register a plugin."""
-        from core.plugins import Plugin, PluginMetadata, PluginRegistry
+        from baselith.core.plugins import Plugin, PluginMetadata, PluginRegistry
 
         registry = PluginRegistry()
 
@@ -61,7 +61,7 @@ class TestPluginRegistry:
     @pytest.mark.asyncio
     async def test_register_duplicate_raises(self):
         """Registry raises error on duplicate plugin registration."""
-        from core.plugins import Plugin, PluginMetadata, PluginRegistry
+        from baselith.core.plugins import Plugin, PluginMetadata, PluginRegistry
 
         registry = PluginRegistry()
 
@@ -97,13 +97,13 @@ class TestPluginDiscovery:
     @pytest.fixture
     def registry(self):
         """Create a fresh registry."""
-        from core.plugins import PluginRegistry
+        from baselith.core.plugins import PluginRegistry
 
         return PluginRegistry()
 
     def test_discover_plugins_in_directory(self, registry):
         """Plugin loader discovers plugins in the plugins directory."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -122,7 +122,7 @@ class TestPluginDiscovery:
 
     def test_discover_handles_missing_directory(self, registry):
         """Plugin loader handles missing directory gracefully."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         non_existent = Path("/non/existent/path")
 
@@ -137,14 +137,14 @@ class TestPluginLoading:
     @pytest.fixture
     def registry(self):
         """Create a fresh registry for each test."""
-        from core.plugins import PluginRegistry
+        from baselith.core.plugins import PluginRegistry
 
         return PluginRegistry()
 
     @pytest.mark.asyncio
     async def test_load_all_plugins(self, registry):
         """All plugins in directory load without errors."""
-        from core.plugins import PluginLoader
+        from baselith.core.plugins import PluginLoader
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -163,7 +163,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_loaded_plugins_have_valid_metadata(self):
         """All loaded plugins have valid metadata."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -180,7 +180,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_list_plugins_returns_metadata(self):
         """list_plugins returns plugin metadata dictionaries."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")
@@ -199,7 +199,7 @@ class TestPluginIntegration:
     @pytest.mark.asyncio
     async def test_plugin_can_be_unregistered(self):
         """Plugins can be unregistered from registry."""
-        from core.plugins import PluginLoader, PluginRegistry
+        from baselith.core.plugins import PluginLoader, PluginRegistry
 
         if not PLUGINS_DIR.exists():
             pytest.skip("plugins directory not found")

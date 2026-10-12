@@ -112,7 +112,7 @@ def migrate_plugin(plugin_dir: Path):
     # Also remove the PluginMetadata import if it exists
     new_lines_no_import = []
     for line in new_lines:
-        if "from core.plugins import" in line and "PluginMetadata" in line:
+        if "from baselith.core.plugins import" in line and "PluginMetadata" in line:
             line = (
                 line.replace(", PluginMetadata", "")
                 .replace("PluginMetadata, ", "")
