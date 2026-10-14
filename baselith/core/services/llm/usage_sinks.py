@@ -73,7 +73,7 @@ class UsageReport:
     tenant_id: str | None = None
 
 
-UsageSink = Callable[[UsageReport], "None | Awaitable[None]"]
+UsageSink = Callable[[UsageReport], "Awaitable[None] | None"]
 _usage_sinks: list[UsageSink] = []
 #: Strong references to the async sinks still running. The event loop holds
 #: tasks only weakly, so without this a ledger write can be collected

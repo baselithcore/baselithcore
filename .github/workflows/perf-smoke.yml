@@ -66,6 +66,9 @@ jobs:
       DB_PASSWORD: password
       REDIS_URL: redis://localhost:6379/0
       BASELITH_ALLOW_UNBOUND_JWT: "true"
+      # Production startup refuses an unvalidated Host header; Locust talks
+      # to the backend over loopback, so those are the names to accept.
+      TRUSTED_HOSTS: '["127.0.0.1","localhost"]'
       BASELITH_API_KEY: perf-smoke-key
       API_KEYS_USER: '["perf-smoke-key"]'
       BASELITH_PERF_SKIP_CHAT: "true"

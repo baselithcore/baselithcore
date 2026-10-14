@@ -232,7 +232,11 @@ RULES: tuple[TargetedRule, ...] = (
     TargetedRule(
         "container_app_paths",
         _DEPLOY,
-        re.compile(r"(?<=/app/)(core|plugins)\b(?=[/\s\"':]|$)", re.M),
+        # A line carrying the keep pragma names a user-owned mount on purpose.
+        re.compile(
+            r"(?<=/app/)(core|plugins)\b(?=[/\s\"':]|$)(?![^\n]*ns-migrate: keep)",
+            re.M,
+        ),
         r"baselith/\1",
     ),
 )

@@ -33,7 +33,7 @@ services:
       # Bundled core plugins live in baselith/plugins; external/local plugins
       # added by `baselith plugin add ... --docker` live in plugins/.
       - ./baselith/plugins:/app/baselith/plugins
-      - ./plugins:/app/plugins
+      - ./plugins:/app/plugins # ns-migrate: keep
       - ./configs:/app/configs
       - ./documents:/app/documents
       - ./data:/app/data
