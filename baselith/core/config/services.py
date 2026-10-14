@@ -365,7 +365,7 @@ class LLMConfig(AliasedSettings):
         validation_alias=AliasChoices("LLM_OPENAI_REASONING_EFFORT"),
         description=(
             "Default reasoning_effort for every OpenAI request (none, low, "
-            "medium, high); empty sends nothing. Non-reasoning fallbacks reject it."
+            "medium, high); empty sends nothing. Skipped for gpt-3/gpt-4 models."
         ),
     )
 

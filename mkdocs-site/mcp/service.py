@@ -1,20 +1,22 @@
 import re
 import tomllib as toml_loader
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from baselith.core.observability.logging import get_logger
 
+from .ranking import Index, Match, diversify, fuse
 from .sections import (
     Section,
-    enclosing_section,
     estimate_tokens,
     find_section,
     parse_sections,
     preamble_end,
     span_with_children,
 )
+from .semantic import SemanticIndex
 
 logger = get_logger(__name__)
 
@@ -85,7 +87,7 @@ class _Doc:
 class DocsService:
     """Service to handle Docs site (Zensical) parsing and searching."""
 
-    def __init__(self, root_dir: str):
+    def __init__(self, root_dir: str, semantic: SemanticIndex | None = None):
         self.root_dir = Path(root_dir)
         self.config_path = self.root_dir / "zensical.toml"
         self.docs_dir = self.root_dir / "docs"
@@ -98,6 +100,11 @@ class DocsService:
         # Bumped whenever a page is re-read, added or dropped, so callers that
         # cache derived artefacts can tell when theirs went stale.
         self._revision = 0
+        # The search index and the revision it was built at.
+        self._index: Index | None = None
+        self._index_revision = -1
+        # Optional embedding half of the search (see semantic.py).
+        self._semantic = semantic
 
     @property
     def revision(self) -> int:
@@ -122,6 +129,9 @@ class DocsService:
             self._load(page["path"], title=page["title"], indexed=True)
 
         indexed = sum(1 for doc in self._docs.values() if doc.indexed)
+        # Built now rather than on the first search, which would otherwise pay
+        # for tokenizing the whole corpus.
+        self._current_index([doc for doc in self._docs.values() if doc.indexed])
         logger.info(
             f"DocsService initialized with {len(self._pages)} pages (indexed {indexed})"
         )
@@ -325,27 +335,25 @@ class DocsService:
     # Search
     # -------------------------------------------------------------------------
 
-    def _hit(self, doc: _Doc, query_lower: str, score: int) -> dict[str, Any]:
+    def _hit(self, match: Match) -> dict[str, Any]:
         """Build one search result, pinned to the section the match sits in."""
-        idx = doc.content_lower.find(query_lower)
-        if idx == -1:
-            idx = 0
-
-        start = max(0, idx - _SNIPPET_BEFORE)
-        end = min(len(doc.content), idx + _SNIPPET_AFTER)
+        unit = match.unit
+        doc = self._docs[unit.path]
+        start = max(unit.start, match.focus - _SNIPPET_BEFORE)
+        end = min(unit.end, match.focus + _SNIPPET_AFTER)
         snippet = doc.content[start:end].strip()
-        if start > 0:
+        if start > unit.start:
             snippet = f"...{snippet}"
-        if end < len(doc.content):
+        if end < unit.end:
             snippet = f"{snippet}..."
 
         hit: dict[str, Any] = {
             "title": doc.title,
             "path": doc.path,
-            "snippet": snippet.replace("\n", " "),
-            "score": score,
+            "snippet": " ".join(snippet.split()),
+            "score": match.score,
         }
-        section = enclosing_section(doc.sections, idx)
+        section = unit.section
         if section is not None:
             # The heading is the whole point: it is what get_doc_section takes,
             # so a hit can be read in full without pulling the page.
@@ -354,25 +362,14 @@ class DocsService:
             hit["section_tokens"] = section.tokens(doc.content)
         return hit
 
-    def _rank(self, query: str, docs: list[_Doc]) -> list[dict[str, Any]]:
-        """Score the given pages against the query, best first, untruncated."""
-        query_lower = query.lower()
-        results = []
-
-        for doc in docs:
-            score = 0
-            if query_lower in doc.title_lower:
-                score += 100
-
-            occurrences = doc.content_lower.count(query_lower)
-            if occurrences > 0:
-                score += min(50, occurrences * 5)
-
-            if score > 0:
-                results.append(self._hit(doc, query_lower, score))
-
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results
+    def _current_index(self, docs: list[_Doc]) -> Index:
+        """The ranking index, rebuilt only when a page changed since the last one."""
+        if self._index is None or self._index_revision != self._revision:
+            self._index = Index(docs)
+            self._index_revision = self._revision
+            if self._semantic is not None:
+                self._semantic.refresh(self._index.units)
+        return self._index
 
     async def search(
         self,
@@ -380,18 +377,30 @@ class DocsService:
         section: str | None = None,
         limit: int = _SEARCH_LIMIT,
     ) -> list[dict[str, Any]]:
-        """Keyword search, optionally scoped to one navigation section.
+        """Ranked section search, optionally scoped to one navigation section.
+
+        Keywords (BM25) and, when configured, meaning (multilingual
+        embeddings) each rank the sections; the two lists are fused by rank.
 
         The scope is applied to the corpus *before* ranking. Filtering the
         global top hits instead — as this used to — returned nothing at all
         whenever a section's best hit was not also a top hit site-wide.
         """
         docs = self._refresh_all()
+        index = self._current_index(docs)
+        allowed: Callable[[str], bool] | None = None
         if section:
             needle = section.lower()
-            docs = [doc for doc in docs if needle in doc.title_lower]
+            scope = {doc.path for doc in docs if needle in doc.title_lower}
+            allowed = scope.__contains__
         limit = max(1, min(limit, _MAX_SEARCH_LIMIT))
-        return self._rank(query, docs)[:limit]
+        lexical = index.rank(query, allowed)
+        semantic = (
+            await self._semantic.rank(query, index.units, allowed)
+            if self._semantic is not None
+            else []
+        )
+        return [self._hit(m) for m in diversify(fuse(lexical, semantic), limit)]
 
     def find_related_pages(self, path: str) -> list[dict[str, Any]]:
         """Find pages related to the target path using keyword overlap analysis."""

@@ -480,7 +480,7 @@ LLM_VLLM_ENDPOINTS=                  # several vLLM servers, comma-separated; ro
 LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
 LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
-LLM_OPENAI_REASONING_EFFORT=none       # Default reasoning_effort on every OpenAI request (empty = not sent)
+LLM_OPENAI_REASONING_EFFORT=none       # Default reasoning_effort on OpenAI requests (empty = not sent; skipped for gpt-3/gpt-4)
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)

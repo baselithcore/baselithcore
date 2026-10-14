@@ -124,6 +124,11 @@ families and wrong here, and it billed **four times** the published rate, on
 the term that dominates an agent loop (whose prefix is cached by design) and on
 the number the tenant budget gate aborts against.
 
+A model missing from the table is priced at `UNKNOWN_PRICE`, deliberately
+high, so a tenant budget gate aborts an agent loop on it rather than under-charging.
+`gpt-6-luna` ($0.10 input / $0.50 output / $0.01 cached input) was added for
+that reason.
+
 `claude-mythos-5-1` deliberately keeps the derived rate: its cache-read price
 was left open at launch and is not published. Over-charging closes a budget
 early, which an operator sees and can raise; under-charging overspends a cap

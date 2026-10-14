@@ -105,6 +105,13 @@ Both `generate_response` and `generate_response_stream` accept optional
 their system prompt or sampling parameters no longer collide on a stale cached
 answer.
 
+On the OpenAI provider, reasoning families (o-series, gpt-5 and later) reject
+any `temperature` but the default 1, so a different value is dropped from the
+request rather than failing it; other models, including unknown ones behind a
+compatible endpoint, keep theirs. The `LLM_OPENAI_REASONING_EFFORT` default is
+sent on the text, streaming and message API paths, but never to gpt-3, gpt-4 or
+chatgpt models, which answer 400 to the field.
+
 When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
 fills it on every path — text, streaming, structured and the message API —
 via `baselith.core.services.llm.model_capabilities.configured_max_tokens`. The setting

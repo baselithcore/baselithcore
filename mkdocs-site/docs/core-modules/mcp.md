@@ -1514,6 +1514,28 @@ Manually add the following configuration to your MCP client (STDIO transport):
 !!! note
     Replace `/path/to/baselith-core` with the absolute path to your local repository.
 
+#### Launching from a hardened stdio client
+
+A client that applies the framework's own stdio launch policy — an agent built
+on `baselith.core.mcp.MCPClient`, for instance — cannot use the form above: the
+policy strips `PYTHONPATH` from a server's environment and refuses any `-m`
+module that is not on `MCP_STDIO_ALLOWED_MODULES`. Start the server by script
+path instead, which needs neither:
+
+```bash
+/path/to/python -I /path/to/baselith-core/mkdocs-site/mcp/main.py
+```
+
+and allow its directory on the client side:
+
+```bash
+MCP_STDIO_ALLOWED_DIRS=/path/to/baselith-core/mkdocs-site/mcp
+```
+
+`-I` (isolated mode) is accepted by the policy and keeps the interpreter from
+reading `PYTHON*` variables or the user site directory; the script puts the
+docs package and the repository root on its own path.
+
 ### Available Tools
 
 | Tool | What it does |
@@ -1528,7 +1550,47 @@ Manually add the following configuration to your MCP client (STDIO transport):
 
 The intended path is `search_docs` then `get_doc_section`: a hit carries the
 `anchor` the section tool takes, so an answer is read at section granularity
-rather than by pulling the page around it. Pages here run to twenty thousand
+rather than by pulling the page around it.
+
+`search_docs` ranks sections, not pages, with BM25: each query term counts on
+its own and is weighted by how rare it is, a section matching more of the terms
+ranks higher, words in a heading or the page title weigh more than body text,
+and an exact phrase earns a bonus. Identifiers match whole and by their parts
+(`register_token_sink` and `token sink` find the same section), plurals fold
+onto the singular, and one page contributes at most two hits. The index is
+rebuilt whenever a page changes on disk.
+
+#### Questions in other languages: the semantic half
+
+Keywords cannot cross a language, and the corpus is in English. When the
+framework's embedding service is configured as `remote`
+(`BASELITH_EMBEDDING_URL`, by default serving the multilingual `BAAI/bge-m3`),
+the server also ranks sections by meaning and merges the two rankings by
+Reciprocal Rank Fusion: "come firmo un plugin?" lands on the section about
+plugin signing, and English synonyms keyword search misses are caught too.
+A section both rankings agree on beats one either ranks alone.
+
+| Setting | Effect |
+|---------|--------|
+| `BASELITH_EMBEDDING_*` | The embedding service the server calls; only the `remote` backend is used (no model is loaded in-process) |
+| `DOCS_MCP_SEMANTIC=off` | Keywords only |
+| `DOCS_MCP_CACHE_DIR` | Where section vectors are cached (default `~/.cache/baselith-docs-mcp`) |
+
+Section vectors are computed in the background after start-up — a few minutes
+for the whole site on a CPU model server — and cached on disk keyed by the
+text they embed, so a restart re-embeds only the sections that changed. An
+exclusive file lock makes several server processes started together compute
+the corpus once. Until the vectors exist, and whenever the model server fails
+or takes over five seconds, search answers from keywords alone. A search that
+finds nothing returns a `hint` telling the model to retry with English
+keywords.
+
+A hardened stdio client passes none of its environment to the server, so the
+embedding settings must be let through explicitly:
+
+```bash
+MCP_STDIO_ENV_PASSTHROUGH=BASELITH_EMBEDDING_*
+``` Pages here run to twenty thousand
 tokens, and a section is a few hundred — which is why `get_doc_page` answers
 an oversized page with its outline until asked twice.
 

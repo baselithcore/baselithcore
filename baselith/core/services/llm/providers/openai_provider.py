@@ -204,7 +204,7 @@ class OpenAIProvider:
             # Cross-provider hints ("effort", "allow_refusal", ...) and the
             # renamed token cap are handled by the shaper; Chat Completions
             # rejects unknown kwargs, so nothing else may pass through.
-            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort)
+            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort, model)
 
             system_prompt = kwargs.get("system", "")
             if json_mode:
@@ -453,7 +453,7 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         try:
-            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort)
+            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort, model)
 
             system_prompt = kwargs.get("system", "")
             messages = []

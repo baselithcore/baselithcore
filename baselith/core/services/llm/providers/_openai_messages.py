@@ -28,7 +28,10 @@ from baselith.core.services.llm.providers._openai_mapping import (
     to_openai_tool_choice,
     to_openai_tools,
 )
-from baselith.core.services.llm.providers._openai_request import token_cap
+from baselith.core.services.llm.providers._openai_request import (
+    apply_reasoning_defaults,
+    token_cap,
+)
 from baselith.core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -51,12 +54,14 @@ def build_request(
     tools: list[LLMToolSpec] | None,
     system: str | None,
     kwargs: dict[str, Any],
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """Shape the Chat Completions request for one message-API turn.
 
     Shared by the buffered and the streamed turn so the two cannot send
     different requests for the same conversation. Pops ``tool_choice`` and
-    ``response_format`` from *kwargs*.
+    ``response_format`` from *kwargs*. *reasoning_effort* is the provider-level
+    default; a ``reasoning_effort`` in *kwargs* wins.
     """
     tool_choice: ToolChoice | None = kwargs.pop("tool_choice", None)
     response_format: ResponseFormat | None = kwargs.pop("response_format", None)
@@ -79,7 +84,9 @@ def build_request(
         )
     if response_format is not None:
         request_kwargs["response_format"] = response_format_kwarg(response_format)
-    return request_kwargs
+    return apply_reasoning_defaults(
+        request_kwargs, model, kwargs.get("reasoning_effort") or reasoning_effort
+    )
 
 
 async def generate_messages(
@@ -110,7 +117,12 @@ async def generate_messages(
     client = provider._ensure_client()
     try:
         request_kwargs = build_request(
-            messages, model, tools=tools, system=system, kwargs=kwargs
+            messages,
+            model,
+            tools=tools,
+            system=system,
+            kwargs=kwargs,
+            reasoning_effort=getattr(provider, "_reasoning_effort", None),
         )
 
         response = await client.chat.completions.create(**request_kwargs)

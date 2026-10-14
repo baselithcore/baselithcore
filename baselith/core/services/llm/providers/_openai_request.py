@@ -17,12 +17,14 @@ test without a client.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from baselith.core.services.llm.usage import Usage
 
 __all__ = [
     "RESERVED_KWARGS",
+    "apply_reasoning_defaults",
     "extract_usage",
     "refusal_of",
     "request_kwargs",
@@ -65,8 +67,41 @@ def token_cap(kwargs: dict[str, Any]) -> int:
     return _coerce_int(kwargs.get("max_completion_tokens", kwargs.get("max_tokens")))
 
 
+#: Families that predate reasoning models; Chat Completions answers 400
+#: ("Unrecognized request argument") when sent ``reasoning_effort``.
+_NON_REASONING = re.compile(r"^(ft:)?(gpt-[34]|chatgpt)", re.IGNORECASE)
+
+#: Reasoning families; they answer 400 to any ``temperature`` but the default 1.
+#: Matched positively so an unknown model behind a compatible endpoint keeps
+#: the temperature its caller chose.
+_REASONING = re.compile(r"^(ft:)?(o\d|gpt-[5-9])", re.IGNORECASE)
+
+
+def apply_reasoning_defaults(
+    request: dict[str, Any], model: str, reasoning_effort: str | None
+) -> dict[str, Any]:
+    """Fit *request* to what *model* accepts, in place.
+
+    Args:
+        request: The Chat Completions request being built.
+        model: Target model id.
+        reasoning_effort: Effort to send; skipped for non-reasoning families.
+
+    Returns:
+        dict: *request*, with ``reasoning_effort`` set where the model takes it
+        and a non-default ``temperature`` dropped for reasoning models.
+    """
+    if reasoning_effort and not _NON_REASONING.match(model):
+        request.setdefault("reasoning_effort", reasoning_effort)
+    if _REASONING.match(model) and request.get("temperature", 1) != 1:
+        del request["temperature"]
+    return request
+
+
 def request_kwargs(
-    kwargs: dict[str, Any], reasoning_effort: str | None = None
+    kwargs: dict[str, Any],
+    reasoning_effort: str | None = None,
+    model: str = "",
 ) -> dict[str, Any]:
     """Forwardable kwargs, with the output cap under its current name.
 
@@ -74,7 +109,9 @@ def request_kwargs(
         kwargs: Caller kwargs.
         reasoning_effort: Provider-level default for the ``reasoning_effort``
             request field (``none``/``low``/...). A caller-supplied
-            ``reasoning_effort`` wins; ``None`` sends nothing.
+            ``reasoning_effort`` wins; ``None`` sends nothing. Not applied to
+            non-reasoning families (gpt-3/gpt-4/chatgpt).
+        model: Target model id, used to skip the default where it is rejected.
 
     Returns:
         dict: Everything safe to pass to ``chat.completions.create``, with
@@ -85,9 +122,9 @@ def request_kwargs(
     cap = token_cap(kwargs)
     if cap > 0:
         out["max_completion_tokens"] = cap
-    if reasoning_effort and "reasoning_effort" not in out:
-        out["reasoning_effort"] = reasoning_effort
-    return out
+    if "reasoning_effort" in out:
+        reasoning_effort = None  # the caller's own value goes through as given
+    return apply_reasoning_defaults(out, model, reasoning_effort)
 
 
 def extract_usage(response: Any) -> tuple[Usage, int]:
