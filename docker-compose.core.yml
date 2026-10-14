@@ -30,7 +30,10 @@ services:
       BASELITH_RERANK_BACKEND: ${BASELITH_RERANK_BACKEND:-remote}
       BASELITH_RERANK_URL: ${BASELITH_RERANK_URL:-http://tei-rerank:80}
     volumes:
+      # Bundled core plugins live in baselith/plugins; external/local plugins
+      # added by `baselith plugin add ... --docker` live in plugins/.
       - ./baselith/plugins:/app/baselith/plugins
+      - ./plugins:/app/plugins
       - ./configs:/app/configs
       - ./documents:/app/documents
       - ./data:/app/data
