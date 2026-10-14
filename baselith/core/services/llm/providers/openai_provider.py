@@ -100,6 +100,7 @@ class OpenAIProvider:
         request_timeout: float = 120.0,
         connect_timeout: float = 5.0,
         base_url: str | None = None,
+        reasoning_effort: str | None = None,
     ):
         """
         Initialize the OpenAI provider.
@@ -111,6 +112,7 @@ class OpenAIProvider:
             base_url: Optional custom endpoint for OpenAI-compatible servers
                 (Azure OpenAI via gateway, vLLM, LiteLLM, OpenRouter, ...).
                 ``None`` keeps the SDK default (api.openai.com).
+            reasoning_effort: Default ``reasoning_effort`` for every request.
         """
         if not api_key:
             raise LLMProviderError("OpenAI API key is required")
@@ -128,6 +130,7 @@ class OpenAIProvider:
         self._request_timeout = request_timeout
         self._connect_timeout = connect_timeout
         self._base_url = base_url
+        self._reasoning_effort = reasoning_effort
         self.client: Any = None
 
     def _ensure_client(self) -> Any:
@@ -201,7 +204,7 @@ class OpenAIProvider:
             # Cross-provider hints ("effort", "allow_refusal", ...) and the
             # renamed token cap are handled by the shaper; Chat Completions
             # rejects unknown kwargs, so nothing else may pass through.
-            request_kwargs = _forwardable_kwargs(kwargs)
+            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort)
 
             system_prompt = kwargs.get("system", "")
             if json_mode:
@@ -450,7 +453,7 @@ class OpenAIProvider:
         """
         client = self._ensure_client()
         try:
-            request_kwargs = _forwardable_kwargs(kwargs)
+            request_kwargs = _forwardable_kwargs(kwargs, self._reasoning_effort)
 
             system_prompt = kwargs.get("system", "")
             messages = []

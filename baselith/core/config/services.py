@@ -360,6 +360,15 @@ class LLMConfig(AliasedSettings):
         "for providers that support it (off keeps previous behaviour).",
     )
 
+    openai_reasoning_effort: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_OPENAI_REASONING_EFFORT"),
+        description=(
+            "Default reasoning_effort for every OpenAI request (none, low, "
+            "medium, high); empty sends nothing. Non-reasoning fallbacks reject it."
+        ),
+    )
+
     # == Response Caching ==
     # Exact-match, in-process response cache. The semantic (similarity) tier
     # is separate: SEMANTIC_CACHE_ENABLED (baselith.core.config.cache).

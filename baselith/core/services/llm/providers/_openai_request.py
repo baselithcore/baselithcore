@@ -65,11 +65,16 @@ def token_cap(kwargs: dict[str, Any]) -> int:
     return _coerce_int(kwargs.get("max_completion_tokens", kwargs.get("max_tokens")))
 
 
-def request_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+def request_kwargs(
+    kwargs: dict[str, Any], reasoning_effort: str | None = None
+) -> dict[str, Any]:
     """Forwardable kwargs, with the output cap under its current name.
 
     Args:
         kwargs: Caller kwargs.
+        reasoning_effort: Provider-level default for the ``reasoning_effort``
+            request field (``none``/``low``/...). A caller-supplied
+            ``reasoning_effort`` wins; ``None`` sends nothing.
 
     Returns:
         dict: Everything safe to pass to ``chat.completions.create``, with
@@ -80,6 +85,8 @@ def request_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     cap = token_cap(kwargs)
     if cap > 0:
         out["max_completion_tokens"] = cap
+    if reasoning_effort and "reasoning_effort" not in out:
+        out["reasoning_effort"] = reasoning_effort
     return out
 
 

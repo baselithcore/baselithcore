@@ -252,7 +252,8 @@ the check you run after changing a local service.
 
 `setup docker-core` is the narrower one: it prepares `.env` and
 `configs/.env.docker.core`, the env file the Docker Compose runtime reads, and
-stops there.
+stops there. Its LLM defaults are `LLM_MODEL=gpt-6-luna` with
+`LLM_OPENAI_REASONING_EFFORT=none`.
 
 The generated Docker Core profile also pins the document-ingestion defaults
 used by the runtime image: `VECTORSTORE_EMBEDDING_MODEL=BAAI/bge-m3`,

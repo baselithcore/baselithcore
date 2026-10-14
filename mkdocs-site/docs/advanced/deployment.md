@@ -1363,7 +1363,8 @@ GRAPH_DB_URL=redis://falkordb:6379
 
 # LLM
 LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-6-luna
+LLM_OPENAI_REASONING_EFFORT=none
 LLM_OPENAI_API_KEY=${OPENAI_API_KEY:-}
 # Per-run token cap that stops runaway agent loops. Aliases: COST_CONTROL_ENABLED /
 # LLM_BUDGET_ENABLED and AGENT_MAX_TOKENS / LLM_BUDGET_MAX_TOKENS. The default is

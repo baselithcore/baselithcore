@@ -285,7 +285,7 @@ other providers and `LLM_STREAM_AGENT_TEXT=false` keep the buffered turn. See
 **Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
 fall through an ordered chain of `provider:model` stages when the primary
 provider fails or its circuit breaker is open — e.g.
-`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
+`LLM_FALLBACK_CHAIN=openai:gpt-6-luna,ollama:llama3.2` (empty disables
 fallback, the default). Each stage is a cached `LLMService` clone with the
 provider's dedicated credentials (`baselith.core.services.llm.fallback_runtime`, whose
 shared machinery lives in `_fallback_support`); a clone never recurses into its
@@ -738,7 +738,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **The endpoint is required.** There is no default: vLLM's `:8000` is also
   where this backend listens, so a guessed `localhost:8000` would call the
   framework itself. `LLM_API_BASE` is honoured only when `vllm` is the default
-  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,vllm:qwen3-8b`)
+  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-6-luna,vllm:qwen3-8b`)
   reads `LLM_VLLM_API_BASE`.
 - **Only the dedicated key is ever sent.** `LLM_VLLM_API_KEY` (or
   `VLLM_API_KEY`, the variable the server itself reads); `LLM_API_KEY` is
