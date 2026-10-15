@@ -976,10 +976,10 @@ Declared in `baselith.core.config.vectorstore`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `BASELITH_QDRANT_API_KEY` :material-key:<br>also accepts `QDRANT_API_KEY` | `SecretStr \| None` | *empty* | API key for managed/remote Qdrant (unset for local) |
 | `EMBEDDING_CACHE_TTL` | `int` | `7 * 24 * 3600` | Embedding cache TTL in seconds (default 7 days) |
 | `INDEX_BATCH_SIZE` | `int` | `32` | Bulk-ingestion batching + bounded delete fan-out (see indexing service): docs per index() call, and max concurrent vector-store delete round-trips. |
 | `INDEX_MAX_CONCURRENCY` | `int` | `8` |  |
-| `QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | API key for managed/remote Qdrant (unset for local) |
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |

@@ -1,5 +1,5 @@
 name: document-sources
-version: 0.2.0
+version: 0.2.1
 description: Filesystem, web, OCR (MinerU/Tesseract) and document ingestion sources
   for indexing workflows
 author: Baselith
@@ -35,5 +35,5 @@ permissions:
   secrets: []
   filesystem:
   - '*'
-integrity_sha256: 2e961fedc57c4b723cdcb9923d9ba7f610848baf1bbd8d14221b965b0c4dd7c2
+integrity_sha256: b60b06faebbc8d9c9f59e24e3c070db328668b3e4811c81cfa82446ea2ff8367
 hash_surface_version: 5

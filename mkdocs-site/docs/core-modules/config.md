@@ -462,7 +462,14 @@ print(vs.host)                 # "localhost"  (VECTORSTORE_HOST / VECTORSTORE_QD
 print(vs.port)                 # 6333         (VECTORSTORE_PORT)
 print(vs.embedding_model)      # "BAAI/bge-m3"
 print(vs.embedding_dim)        # 1024         (VECTORSTORE_EMBEDDING_DIM)
+print(vs.qdrant_api_key)       # SecretStr | None (BASELITH_QDRANT_API_KEY / QDRANT_API_KEY)
 ```
+
+`qdrant_api_key` binds from `BASELITH_QDRANT_API_KEY` — the name the Helm chart
+puts in the release Secret and the inference settings read — and from the
+unprefixed `QDRANT_API_KEY`; the prefixed name wins when both are set. A
+release with its own Qdrant (`qdrant.enabled`) therefore authenticates the
+vector store and the inference client with the same key.
 
 **`.env` Variables**:
 

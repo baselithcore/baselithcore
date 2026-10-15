@@ -188,6 +188,9 @@ safe_output = output.filtered_output
     via `render_history_context`. A poisoned document, memory or earlier turn
     therefore reaches the model as quoted data, never as an instruction. See
     [Orchestration › Untrusted-output envelope](../core-modules/orchestration.md#untrusted-output-envelope).
+    Queries are embedded with the index's own model
+    (`VectorStoreConfig.embedding_model`), through the remote embedding server
+    when one is configured.
 
 ---
 
