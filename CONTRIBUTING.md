@@ -256,6 +256,14 @@ use it only for a change an operator has to act on; a behaviour change ships
 in a minor with an Upgrade Notes entry instead (see the
 [versioning policy](mkdocs-site/docs/advanced/versioning-and-deprecation.md#before-10-behaviour-changes-ship-in-a-minor)).
 
+Only the exact footer counts: `BREAKING CHANGE:` or `BREAKING-CHANGE:`, in
+capitals, at the start of a line, followed by a colon and a space
+([`scripts/release/parser-opts.mjs`](scripts/release/parser-opts.mjs), which
+`.releaserc` extends). The parser's default also took lower case and a missing
+colon, so a body line that merely began with those two words cut a major
+release. Prose like that is now ignored. Even so, re-wrap a body so no line
+starts with them; the old rule is what most other tools still apply.
+
 **Holding a release back.** To land a commit on `main` without cutting a
 release, put `[no release]` in the message of the commit that reaches `main`
 (the merge commit, for a merged pull request). Only the release job is
