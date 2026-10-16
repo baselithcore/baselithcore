@@ -487,6 +487,7 @@ LLM_VLLM_API_BASE=                   # vLLM server (http://gpu-host:8000/v1); no
 LLM_VLLM_ENDPOINTS=                  # several vLLM servers, comma-separated; routed by model
 LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
 LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
+LLM_VLLM_ENABLE_THINKING=            # false = no reasoning before the answer on every vLLM request (unset = server default)
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
 LLM_OPENAI_REASONING_EFFORT=none       # Default reasoning_effort on OpenAI requests (empty = not sent; skipped for gpt-3/gpt-4)
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)

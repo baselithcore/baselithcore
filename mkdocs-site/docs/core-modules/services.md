@@ -1381,6 +1381,20 @@ applied tier is recorded on the LLM span as
 `gen_ai.baselith.thinking_effort`, and the response cache key includes the
 effort so tiers never share cached answers.
 
+#### vLLM: thinking on or off for the deployment
+
+A thinking model served by vLLM (Qwen3) reasons before it answers unless the
+chat template is told not to. `LLM_VLLM_ENABLE_THINKING=false` makes the vLLM
+provider send `chat_template_kwargs.enable_thinking=false` on every request
+(plain generation, structured output, the message-history path that carries tool
+calls, and both streams): the model answers directly, which is faster and
+cheaper. `true` forces it on, and unset (the default) sends nothing, so the
+server's own default stands. A call that sets `chat_template_kwargs.enable_thinking`
+itself keeps its choice, and JSON mode still turns thinking off, because a
+reasoning block forced inside a constrained JSON object garbles the reply. The
+message-history and structured request builders forward `extra_body`, which is
+how this reaches the server.
+
 ---
 
 ## VectorStore Service

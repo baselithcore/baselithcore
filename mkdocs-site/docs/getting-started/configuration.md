@@ -54,6 +54,14 @@ are masked in logs, tracebacks and error reporting.
 A variable that resembles a setting without matching one binds nothing and is
 silently ignored; `baselith config env` reports those.
 
+## Thinking-mode settings for models served by vLLM
+
+Declared in `baselith.core.config._llm_vllm`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `LLM_VLLM_ENABLE_THINKING` | `bool \| None` | *empty* | Whether a thinking model served by vLLM (Qwen3) reasons before it answers, sent as chat_template_kwargs.enable_thinking on every request. false is faster and cheaper; true forces it on. Unset leaves the server's own default. A call that sets enable_thinking itself keeps its choice. |
+
 ## General Application Configuration
 
 Declared in `baselith.core.config.app`.
@@ -1061,4 +1069,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-720 settings documented.
+721 settings documented.

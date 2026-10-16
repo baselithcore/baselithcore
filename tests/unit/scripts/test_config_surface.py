@@ -48,6 +48,52 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+#: A settings class split across modules, the shape a config takes once it
+#: outgrows the 500-line cap: only the top of the chain names
+#: ``BaseSettings``, while the fields live two links further down.
+CHAIN_BASE_MODULE = '''"""Gizmo email settings."""
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+
+class GizmoEmailSettings(BaseSettings):
+    smtp_host: str | None = Field(default=None, alias="GIZMO_SMTP_HOST")
+'''
+
+CHAIN_MIDDLE_MODULE = '''"""Gizmo operator settings."""
+
+from pydantic import Field
+
+from baselith.plugins.gizmo._email import GizmoEmailSettings
+
+
+class GizmoOperatorSettings(GizmoEmailSettings):
+    pin_length: int = Field(default=6, alias="GIZMO_PIN_LENGTH")
+'''
+
+CHAIN_LEAF_MODULE = '''"""Gizmo configuration."""
+
+from pydantic import Field
+
+from baselith.plugins.gizmo._operator import GizmoOperatorSettings
+
+
+class GizmoConfig(GizmoOperatorSettings):
+    bootstrap_email: str | None = Field(default=None, alias="GIZMO_BOOTSTRAP_EMAIL")
+'''
+
+
+@pytest.fixture
+def chained_repo(tmp_path: Path) -> Path:
+    plugin = tmp_path / "baselith" / "plugins" / "gizmo"
+    plugin.mkdir(parents=True)
+    (plugin / "_email.py").write_text(CHAIN_BASE_MODULE)
+    (plugin / "_operator.py").write_text(CHAIN_MIDDLE_MODULE)
+    (plugin / "config.py").write_text(CHAIN_LEAF_MODULE)
+    return tmp_path
+
+
 class TestIterSettings:
     """Field declarations become one entry per binding."""
 
@@ -55,6 +101,21 @@ class TestIterSettings:
         names = {setting.env for setting in iter_settings(repo)}
 
         assert "WIDGET_HOST" in names
+
+    def test_subclass_of_a_subclass_is_still_a_settings_class(self, chained_repo):
+        """Only the top of the chain names ``BaseSettings``; fields sit below.
+
+        Matching a literal base hid every field of ``LLMConfig`` once its vLLM
+        settings moved into a base class to keep ``services.py`` under the
+        500-line cap: the class no longer named ``AliasedSettings`` directly.
+        The environment binds them either way, so the gate has to follow the
+        chain across modules.
+        """
+        names = {setting.env for setting in iter_settings(chained_repo)}
+
+        assert "GIZMO_SMTP_HOST" in names  # direct subclass, always worked
+        assert "GIZMO_PIN_LENGTH" in names  # one link down
+        assert "GIZMO_BOOTSTRAP_EMAIL" in names  # two links down
 
     def test_alias_choices_keep_the_prefixed_name_first(self, repo):
         setting = next(s for s in iter_settings(repo) if s.env == "WIDGET_API_KEY")

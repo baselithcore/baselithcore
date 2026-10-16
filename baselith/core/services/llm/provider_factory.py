@@ -85,6 +85,7 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
             native_tools=getattr(config, "vllm_native_tools", True),
+            enable_thinking=getattr(config, "vllm_enable_thinking", None),
         )
     elif config.provider == "huggingface":
         from baselith.core.services.llm.providers.huggingface_provider import (

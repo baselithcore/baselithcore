@@ -77,6 +77,9 @@ def build_request(
     cap = token_cap(kwargs)
     if cap:
         request_kwargs["max_completion_tokens"] = cap
+    if kwargs.get("extra_body"):
+        # Server-specific request fields (vLLM ``chat_template_kwargs``, ``top_k``).
+        request_kwargs["extra_body"] = kwargs["extra_body"]
     if tools:
         request_kwargs["tools"] = to_openai_tools(tools)
         request_kwargs["tool_choice"] = to_openai_tool_choice(

@@ -110,6 +110,27 @@ def _thinking_off_for_json(kwargs: dict[str, Any]) -> dict[str, Any]:
     return {**kwargs, "extra_body": extra_body}
 
 
+def _with_default_thinking(
+    kwargs: dict[str, Any], enabled: bool | None
+) -> dict[str, Any]:
+    """*kwargs* with the deployment's default for the chat template's thinking.
+
+    ``LLM_VLLM_ENABLE_THINKING`` decides whether a thinking template (Qwen3) opens
+    ``<think>`` for every request this provider sends. ``None`` sends nothing, so the
+    server's own default stands. A caller that set ``enable_thinking`` itself keeps its
+    choice, and any other ``extra_body`` is merged, never replaced or mutated.
+    """
+    if enabled is None:
+        return kwargs
+    extra_body = dict(kwargs.get("extra_body") or {})
+    template = dict(extra_body.get("chat_template_kwargs") or {})
+    if "enable_thinking" in template:
+        return kwargs
+    template["enable_thinking"] = enabled
+    extra_body["chat_template_kwargs"] = template
+    return {**kwargs, "extra_body": extra_body}
+
+
 def _reasoning_of(delta: Any) -> str | None:
     """The reasoning a parsing server streams in its own delta field."""
     for name in ("reasoning_content", "reasoning"):
@@ -156,6 +177,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         connect_timeout: float = 5.0,
         native_tools: bool = True,
         endpoints: list[str] | None = None,
+        enable_thinking: bool | None = None,
     ):
         """
         Initialize the vLLM provider.
@@ -173,6 +195,10 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
             endpoints: Every server, in priority order (``LLM_VLLM_ENDPOINTS``);
                 calls are routed among them by model. ``api_base`` joins the
                 list when it is not already on it.
+            enable_thinking: Default for the chat template's ``enable_thinking`` on
+                every request (``False`` stops a Qwen3 model from reasoning before
+                it answers). ``None`` leaves the server's default; a caller's own
+                ``chat_template_kwargs.enable_thinking`` always wins.
 
         Raises:
             LLMProviderError: When no endpoint is configured.
@@ -201,6 +227,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         # Instance attribute on purpose: the capability depends on how this
         # particular server was launched, not on the class.
         self.supports_native_tools = native_tools
+        self._enable_thinking = enable_thinking
 
     def _routing_key(self) -> str | None:
         """The key catalog probes send; none for a keyless server."""
@@ -227,6 +254,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         """
         if json_mode:
             kwargs = _thinking_off_for_json(kwargs)
+        kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         with self._routed(await self._endpoint_for(model)):
             text, tokens = await _generate(self, prompt, model, json_mode, **kwargs)
         return strip_reasoning(text), tokens
@@ -255,6 +283,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         Returns:
             LLMResult: text and/or tool calls with token usage.
         """
+        kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         with self._routed(await self._endpoint_for(model)):
             result: LLMResult = await _generate_structured(
                 self,
@@ -290,6 +319,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         Returns:
             LLMResult: text and/or tool calls, plus the replayable assistant turn.
         """
+        kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         with self._routed(await self._endpoint_for(model)):
             result: LLMResult = await _generate_messages(
                 self, messages, model, tools=tools, system=system, **kwargs
@@ -329,6 +359,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
 
         # Held as a client, not a context variable: see ``generate_stream``.
         client = self._client_for(await self._endpoint_for(model))
+        kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         from baselith.core.config.services import get_llm_config
 
         live = can_stream_live(model, get_llm_config().vllm_live_stream_models)
@@ -360,6 +391,7 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         # Resolved up front and held as a client, not a context variable: an
         # async generator may be resumed (or closed) from another context.
         client = self._client_for(await self._endpoint_for(model))
+        kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         try:
             system_prompt = kwargs.get("system", "")
             messages: list[dict[str, str]] = []
