@@ -185,7 +185,6 @@ async def drive(
 
     turns = validate_history(history)
     service = agent._service()
-    specs = agent._tool_specs()
     response_format = agent._response_format()
     system = system_prompt_for(agent.system_prompt, bool(agent._tools))
     context = gate_context(agent)
@@ -212,6 +211,8 @@ async def drive(
         # outside an orchestrated request); raises when the cap is hit.
         # A replayed turn ticks it too: the resumed pass walks the same loop.
         enforce_iteration(context)
+        # Per round trip: a tool may reveal deferred tools for the next call.
+        specs = agent._tool_specs()
         streamed = False
         result: LLMResult | None = None
         model_call = _turn_call(
