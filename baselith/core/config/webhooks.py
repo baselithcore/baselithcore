@@ -45,6 +45,29 @@ class WebhookConfig(AliasedSettings):
         default=1.0, alias="WEBHOOK_RETRY_BACKOFF_SECONDS", ge=0
     )
 
+    # Transactional outbox: ``WebhookService.publish`` queues the event in a
+    # durable table (in the caller's transaction when it passes a cursor) and a
+    # relay in every API process delivers it, so an event survives a crash
+    # between the business commit and the delivery. At-least-once: receivers
+    # deduplicate on the envelope ``id``. Only durable with WEBHOOK_STORE=postgres
+    # (migration 016); with "memory" it queues in-process and survives nothing.
+    outbox_enabled: bool = Field(default=False, alias="WEBHOOK_OUTBOX_ENABLED")
+    # Seconds between polls when the outbox is empty.
+    outbox_poll_seconds: float = Field(
+        default=2.0, alias="WEBHOOK_OUTBOX_POLL_SECONDS", gt=0
+    )
+    # Rows claimed per poll.
+    outbox_batch_size: int = Field(default=50, alias="WEBHOOK_OUTBOX_BATCH_SIZE", ge=1)
+    # How long a relay owns a claimed row. Keep it above one event's worst-case
+    # delivery time (max attempts x timeout + backoff across its endpoints).
+    outbox_lease_seconds: float = Field(
+        default=120.0, alias="WEBHOOK_OUTBOX_LEASE_SECONDS", gt=0
+    )
+    # Dispatch attempts before a row is parked as dead for an operator.
+    outbox_max_attempts: int = Field(
+        default=8, alias="WEBHOOK_OUTBOX_MAX_ATTEMPTS", ge=1
+    )
+
     # Signature freshness window enforced by verify_signature (seconds).
     signature_tolerance_seconds: int = Field(
         default=300, alias="WEBHOOK_SIGNATURE_TOLERANCE_SECONDS", ge=0

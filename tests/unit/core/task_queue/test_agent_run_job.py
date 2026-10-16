@@ -33,7 +33,7 @@ class _Webhooks:
     def __init__(self) -> None:
         self.emitted: list[tuple[str, dict]] = []
 
-    async def emit(self, event_type, data, *, tenant_id="default"):
+    async def publish(self, event_type, data, *, tenant_id="default"):
         self.emitted.append((event_type, data))
         return []
 
@@ -90,7 +90,7 @@ class TestRunAgentTask:
             raise ConnectionError("webhook store down")
 
         monkeypatch.setattr(job_module, "_handle_chat", fake_chat)
-        monkeypatch.setattr(webhooks, "emit", broken_emit)
+        monkeypatch.setattr(webhooks, "publish", broken_emit)
 
         result = job_module.run_agent_task("hello")
         assert result["answer"] == "the answer"

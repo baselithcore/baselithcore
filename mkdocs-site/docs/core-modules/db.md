@@ -187,8 +187,9 @@ ordinary query error naming it, instead of an opaque permission error on a
 and `webhook_deliveries`, which migration `011_webhooks` creates with the
 system-tenant escape already in the predicate, `online_eval_results`
 (online evaluation verdicts, migration `013_online_eval_results`) and
-`mcp_tasks` (durable MCP task handles, migration `015_mcp_tasks`), born the
-same way. See
+`mcp_tasks` (durable MCP task handles, migration `015_mcp_tasks`) and
+`webhook_outbox` (the webhook transactional outbox, migration
+`016_webhook_outbox`), born the same way. See
 [Multi-Tenancy](../advanced/multi-tenancy.md#defense-in-depth-row-level-security)
 for the two-role deployment that makes those policies effective.
 
@@ -650,6 +651,7 @@ Checked with `EXPLAIN (ANALYZE, BUFFERS)` against a seeded
 | Document rollup (`… AND sources IS NOT NULL`) | `idx_chat_feedback_tenant_sources` (partial) |
 | Interactions by session | `idx_interactions_tenant_session_ts` |
 | Webhook deliveries per tenant | `ix_webhook_deliveries_tenant_created` |
+| Webhook outbox claim (due `pending` rows, oldest first) | `ix_webhook_outbox_due` (partial, migration 016) |
 | Webhook retention sweep (`created_at < ?`, all tenants) | `ix_webhook_deliveries_created_at` (migration 012; before it the sweep read the whole composite index) |
 | Online-evaluation retention sweep (`created_at < ?`, all tenants) | `ix_online_eval_results_created_at` (migration 013) |
 | MCP task-handle prune (`tenant_id = ? AND expires_at <= ?`) | `ix_mcp_tasks_tenant_expires` (migration 015) |

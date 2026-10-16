@@ -643,7 +643,9 @@ outage surfaces as `503`, never a hang.
 
 Polls the TaskTracker record for a submitted run: `404` for an unknown task
 id, `503` when the tracker is unreachable. The job itself emits terminal
-`agent.completed` / `agent.failed` webhooks, so subscribers need not poll —
+`agent.completed` / `agent.failed` webhooks (queued through the transactional
+outbox when `WEBHOOK_OUTBOX_ENABLED`, so a crash does not lose them), so
+subscribers need not poll —
 see [Task Queue › Async Agent Runs](../core-modules/task-queue.md#async-agent-runs-agentasync).
 
 ---

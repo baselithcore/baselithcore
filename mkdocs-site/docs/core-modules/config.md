@@ -83,7 +83,8 @@ store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
-under [Webhooks › Configuration](webhooks.md#configuration). The
+and the `WEBHOOK_OUTBOX_*` transactional-outbox settings under
+[Webhooks › Configuration](webhooks.md#configuration). The
 `PLUGIN_UPDATE_*`, `CORE_UPDATE_REPO` and `SYSTEM_UPGRADE_GUIDE_URL` settings
 read by `get_plugin_update_config()` are listed under
 [Plugin Updates › Configuration](plugin-updates.md#configuration).

@@ -331,7 +331,10 @@ Lifecycle on the worker:
    `{task_id, error}` before the exception is re-raised on the **last**
    failed attempt (RQ then records the failed job and the
    [dead-letter machinery](#dead-letter-queue-dlq) applies). A webhook outage
-   never fails a finished run.
+   never fails a finished run. The event goes through `WebhookService.publish`, so
+   with `WEBHOOK_OUTBOX_ENABLED` it is queued in the
+   [transactional outbox](webhooks.md#transactional-outbox-webhook_outbox_enabled)
+   and a worker killed right after the run still has it delivered.
 4. Failure is terminal only when RQ will not run the job again. The run is
    enqueued with the default retry policy (`TASK_QUEUE_DEFAULT_RETRY_COUNT`,
    `3`), so an attempt that raises while the job still has `retries_left`

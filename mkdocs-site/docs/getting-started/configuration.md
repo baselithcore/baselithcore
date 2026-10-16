@@ -1013,6 +1013,11 @@ Declared in `baselith.core.config.webhooks`.
 | `WEBHOOK_MAX_ATTEMPTS` | `int` | `4` | Delivery attempts before a webhook is dead-lettered (1 = no retry). |
 | `WEBHOOK_MAX_CONNECTIONS` | `int` | `20` | Upper bound on concurrent outbound sockets across all deliveries, so a burst of events to many endpoints cannot open an unbounded number of connections from the process. |
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT` | `int` | `50` | Cap registrations per tenant to bound fan-out and memory. |
+| `WEBHOOK_OUTBOX_BATCH_SIZE` | `int` | `50` | Rows claimed per poll. |
+| `WEBHOOK_OUTBOX_ENABLED` | `bool` | `False` | Transactional outbox: `WebhookService.publish` queues the event in a durable table (in the caller's transaction when it passes a cursor) and a relay in every API process delivers it, so an event survives a crash between the business commit and the delivery. At-least-once: receivers deduplicate on the envelope `id`. Only durable with WEBHOOK_STORE=postgres (migration 016); with "memory" it queues in-process and survives nothing. |
+| `WEBHOOK_OUTBOX_LEASE_SECONDS` | `float` | `120.0` | How long a relay owns a claimed row. Keep it above one event's worst-case delivery time (max attempts x timeout + backoff across its endpoints). |
+| `WEBHOOK_OUTBOX_MAX_ATTEMPTS` | `int` | `8` | Dispatch attempts before a row is parked as dead for an operator. |
+| `WEBHOOK_OUTBOX_POLL_SECONDS` | `float` | `2.0` | Seconds between polls when the outbox is empty. |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS` | `float` | `1.0` | Base backoff (seconds); exponential with jitter between attempts. |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `int` | `300` | Signature freshness window enforced by verify_signature (seconds). |
 | `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
@@ -1056,4 +1061,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-715 settings documented.
+720 settings documented.
