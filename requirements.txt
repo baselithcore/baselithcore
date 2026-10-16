@@ -22,11 +22,10 @@
 # at build time, so these cannot move to an opt-in install.
 
 # --- Section 1: base runtime (mirror of [project].dependencies) -------------
-# <3.9.4: CVE-2024-23334 (path traversal), CVE-2024-30251 (multipart DoS)
-aiohttp>=3.9.4
 alembic>=1.13.0
 anthropic>=0.18.0,<1.0
 argcomplete>=3.2.0
+argon2-cffi>=23.1.0
 # >=50.0.0: CVE-2026-69247 (GHSA-g6cj-pr64-35w5) — Bleichenbacher oracle in
 # PKCS#7 EnvelopedData decryption, affects 44.0.0–49.0.0, fixed in 50.0.0.
 cryptography>=50.0.0

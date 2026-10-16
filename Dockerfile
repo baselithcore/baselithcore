@@ -692,6 +692,10 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 # immediately instead of queueing work until the client or the proxy times
 # out — a fast, explicit "over capacity" the HPA and the proxy can act on,
 # where unbounded queueing shows up as latency collapse across every request.
+# --ws-max-size (UVICORN_WS_MAX_SIZE, 1 MiB): cap on one WebSocket message.
+# uvicorn's own default is 16 MiB, parsed in memory before the chat handler's
+# query-length check runs; the JSON body cap (MAX_REQUEST_SIZE_BYTES) never
+# sees a WebSocket frame.
 # The `${VAR:+...}` form adds the flag only when the variable is set, so an
 # unset value passes nothing rather than an empty argument.
-CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75} ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency $UVICORN_LIMIT_CONCURRENCY}"]
+CMD ["sh", "-c", "exec uvicorn backend:app --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --no-server-header --forwarded-allow-ips ${FORWARDED_ALLOW_IPS:-127.0.0.1} --timeout-graceful-shutdown ${GRACEFUL_SHUTDOWN_TIMEOUT:-30} --timeout-keep-alive ${UVICORN_KEEP_ALIVE:-75} --ws-max-size ${UVICORN_WS_MAX_SIZE:-1048576} ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency $UVICORN_LIMIT_CONCURRENCY}"]

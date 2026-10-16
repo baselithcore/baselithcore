@@ -50,7 +50,7 @@ baselith/core/middleware/
 │                          #   (re-exports RateLimiter + the two ASGI middlewares)
 ├── rate_limiter.py        # RateLimiter (Redis Lua sliding-window + fallback)
 ├── _admin_lockout.py      # AdminLockoutMixin (admin Basic-auth lockout state)
-├── _admin_credentials.py  # PBKDF2 admin-password check + verified-credential cache
+├── _admin_credentials.py  # Argon2id / PBKDF2 admin-password check + verified-credential cache
 ├── _security_env.py       # Environment helpers for the security middleware
 ├── security_headers.py    # RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 ├── _security_metrics.py   # SECURITY_EVENTS Prometheus counter (shared)
@@ -764,7 +764,8 @@ For the HTTP Basic Auth admin surface, the module exposes module-level helpers
 backed by `SecurityManager`:
 
 - `verify_admin_password(candidate)` — compares against `ADMIN_PASS` or, when
-  set, a PBKDF2-SHA256 `ADMIN_PASS_HASHED` digest (constant-time compare).
+  set, an Argon2id or PBKDF2-SHA256 `ADMIN_PASS_HASHED` digest (chosen by
+  its prefix; constant-time compare).
 - `verify_admin_password_async(candidate)` — same check, but offloads the
   PBKDF2 derivation to a worker thread (inside a bounded slot pool, skipped
   for a credential verified within the cache TTL) so a slow hash never

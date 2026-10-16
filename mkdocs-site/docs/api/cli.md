@@ -1042,6 +1042,7 @@ and the container's own command, so the three entry points behave alike:
 | `timeout_graceful_shutdown` | `$GRACEFUL_SHUTDOWN_TIMEOUT`, default 30s | Bounds the drain so a Ctrl-C or `SIGTERM` with open streams still runs lifespan cleanup before the supervisor kills the process. |
 | `timeout_keep_alive` | `$UVICORN_KEEP_ALIVE`, default 75s | uvicorn's own 5s is shorter than the upstream idle timeout of every common proxy (nginx, ALB, Envoy: 60s), so the proxy reuses sockets the app already closed and surfaces sporadic `502`s. Keep the app side longer than the proxy side. |
 | `limit_concurrency` | `$UVICORN_LIMIT_CONCURRENCY`, unset by default | Load shedding: above this many concurrent connections uvicorn answers `503` at once instead of queueing until something times out. Only passed when the variable is set, so the default stays uvicorn's (no limit). |
+| `ws_max_size` | `$UVICORN_WS_MAX_SIZE`, default 1 MiB | Largest single WebSocket message. uvicorn's own 16 MiB default is parsed in memory by the chat socket before its query-length check runs, and the HTTP body cap never sees a WebSocket frame. |
 
 With `--workers` above one (and no `--reload`), `run` also splits the CPUs
 between the workers' math thread pools before it spawns them: each worker gets
