@@ -921,7 +921,9 @@ defaults, so the 85 % branch gate applies in CI exactly as it does locally.
 ### Real-backend integration run
 
 The `integration_test` job (`Integration Tests`) runs `tests/integration/` plus
-`tests/core/skill_evolution/test_store_postgres.py` on Python 3.12 against real
+the real-database modules that live elsewhere, among them
+`tests/core/skill_evolution/test_store_postgres.py` and the process-kill chaos
+test `tests/chaos/test_durable_process_kill.py`, on Python 3.12 against real
 service containers — `pgvector/pgvector:0.8.1-pg16`, `redis:7-alpine` and
 `qdrant/qdrant:v1.19.1`, each pinned by digest — after applying the packaged
 migrations with `python -m baselith.core.db.migrate`. It runs beside `python_test`, and
@@ -1112,8 +1114,10 @@ never a capacity number for your hardware.
 ## Chaos / Resilience Testing
 
 Fault-injection tests (`tests/chaos/`, marked `chaos`) verify the framework
-**degrades gracefully** by exercising the real resilience primitives — they are
-part of the normal suite, no external infrastructure required:
+**degrades gracefully** by exercising the real resilience primitives. These
+are part of the normal suite and need no external infrastructure (the
+process-kill test [below](#process-death-during-a-durable-run) is the
+exception):
 
 | Scenario | Asserts |
 | -------- | ------- |
@@ -1129,3 +1133,42 @@ pytest -m chaos
 # Skip them
 pytest -m "not chaos"
 ```
+
+### Process death during a durable run
+
+`tests/chaos/test_durable_process_kill.py` (marked `chaos` and `integration`)
+is the one chaos module that needs a real PostgreSQL. It starts a durable
+two-step run in a child process (`tests/chaos/_durable_worker.py`) through
+`init_checkpoint` and `CheckpointManager.run_step` on `PostgresCheckpointStore`,
+with a 3-second lease. Each step's side effect inserts a row tagged with the
+process id. The test then `SIGKILL`s the child while it is inside step 2 and
+holds the lease, and asserts against the database that:
+
+- the dead owner's lease still refuses a claim (`CheckpointLeaseHeldError`);
+- once it expires, a second process resumes the run, replays step 1 from the
+  checkpoint without repeating its side effect (exactly one row), and runs
+  step 2;
+- an owner frozen with `SIGSTOP` that wakes up after another executor took the
+  run over cannot run its next side effect or land a write
+  (`CheckpointConflictError`), and a save or lease renewal under its stale
+  identity is refused as well;
+- `resume_interrupted_runs` skips the abandoned run while the lease is live
+  and resumes it after the lease expires.
+
+Each case works in its own throwaway schema and takes a few seconds. Without
+`BASELITH_TEST_REAL_DB=1` the module skips. The `integration_test` job runs it
+with `BASELITH_TEST_INTEGRATION_STRICT=1`, which turns a missing database into
+a failure. To run it locally:
+
+```bash
+docker run -d --rm --name chaos-pg -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=baselith -p 55433:5432 pgvector/pgvector:0.8.1-pg16
+BASELITH_TEST_REAL_DB=1 BASELITH_TEST_INTEGRATION_STRICT=1 \
+  DB_HOST=localhost DB_PORT=55433 DB_NAME=baselith DB_USER=postgres \
+  DB_PASSWORD=postgres DB_SSL_MODE=disable \
+  python -m pytest tests/chaos/test_durable_process_kill.py --no-cov
+docker stop chaos-pg
+```
+
+The child processes are POSIX processes driven by signals, so the module needs
+a POSIX host (Linux or macOS).
