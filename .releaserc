@@ -18,7 +18,14 @@
         ]
       }
     ],
-    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "parserOpts": {
+          "commentChar": "Claude-Session:"
+        }
+      }
+    ],
     [
       "@semantic-release/exec",
       {

@@ -66,8 +66,12 @@ docker run -d --name "$CONTAINER" \
   "$PG_IMAGE" >/dev/null
 
 echo "    waiting for postgres..."
+# The image's entrypoint first runs a temporary server on the unix socket
+# only, then restarts it for good. A socket-level pg_isready passes during
+# that first phase and the restore then lands on a server about to go down;
+# the TCP probe only answers once the final server is up.
 for _ in $(seq 1 30); do
-  if docker exec "$CONTAINER" pg_isready -U drill >/dev/null 2>&1; then break; fi
+  if docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U drill >/dev/null 2>&1; then break; fi
   sleep 1
 done
 

@@ -633,15 +633,15 @@ exclude_lines = [
 # surviving mutant says no test would notice if the regex stopped matching.
 # Deliberately narrow: three modules and the unit tests that own them, so the
 # run fits its nightly budget. mutmut copies `source_paths` into ./mutants and
-# mutates only the files `only_mutate` names; the rest of baselith/core/ is copied as is
+# mutates only the files `only_mutate` names; the rest of baselith/ is copied as is
 # so the tests import a complete package.
-source_paths = ["core"]
+source_paths = ["baselith"]
 only_mutate = [
   "baselith/core/observability/redaction.py",
   "baselith/core/security/secrets.py",
   "baselith/core/guardrails/input_guard.py",
 ]
-also_copy = ["pytest.ini", "baselith"]
+also_copy = ["pytest.ini"]
 # pytest.ini's addopts carry the repository-wide --cov-fail-under gate, which a
 # three-module test selection can never meet: it would fail every run, mutant
 # or not. Random order is off so a mutant's verdict does not depend on a seed.
