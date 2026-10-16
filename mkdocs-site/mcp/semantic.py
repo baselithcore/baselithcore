@@ -24,7 +24,6 @@ The layer is optional and never in the way:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import os
 import re
@@ -280,8 +279,6 @@ def _save(path: Path, vectors: dict[str, np.ndarray]) -> None:
     )
     tmp = path.with_suffix(".tmp.npz")
     np.savez(tmp, keys=keys, vectors=matrix.astype(np.float32))
-    with contextlib.suppress(OSError):
-        os.chmod(tmp, 0o644)
     os.replace(tmp, path)
 
 

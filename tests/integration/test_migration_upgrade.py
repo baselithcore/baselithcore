@@ -149,6 +149,15 @@ SEEDS: dict[str, dict[str, Any]] = {
             "created_at": 1.0,
         },
     },
+    "webhook_outbox": {
+        "key": "id",
+        "row": {
+            "id": MARKER,
+            "event_type": "t",
+            "next_attempt_at": 1.0,
+            "created_at": 1.0,
+        },
+    },
     "mcp_tasks": {
         "key": "task_id",
         "row": {
