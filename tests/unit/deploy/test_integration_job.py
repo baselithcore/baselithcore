@@ -22,6 +22,7 @@ OUTSIDE_INTEGRATION = (
     "tests/unit/core/orchestration/test_checkpoint_store_contract.py",
     "tests/unit/core/orchestration/test_checkpoint_lease_clock.py",
     "tests/unit/mcp/test_mcp_task_durability.py",
+    "tests/chaos/test_durable_process_kill.py",
 )
 
 #: Real-database modules the ``tests/integration`` argument already covers.

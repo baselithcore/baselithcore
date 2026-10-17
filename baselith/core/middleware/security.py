@@ -20,7 +20,7 @@ from baselith.core.context import set_user_context as _set_user_ctx
 from baselith.core.middleware._admin_auth import client_bucket
 from baselith.core.middleware._admin_credentials import (
     VerifiedCredentialCache,
-    verify_pbkdf2_sha256,
+    verify_admin_hash,
 )
 from baselith.core.middleware._admin_lockout import AdminLockoutMixin
 from baselith.core.middleware._security_metrics import SECURITY_EVENTS
@@ -367,9 +367,10 @@ class SecurityManager(AdminLockoutMixin):
     def verify_admin_password(self, candidate: str) -> bool:
         """
         Verify admin password.
-        Uses PBKDF2-SHA256 if ADMIN_PASS_HASHED is set, otherwise plaintext.
+        Uses Argon2id or PBKDF2-SHA256 (by the hash's own prefix) if
+        ADMIN_PASS_HASHED is set, otherwise plaintext.
 
-        Successful PBKDF2 verifications are memoized for a short TTL (see
+        Successful hash verifications are memoized for a short TTL (see
         :class:`VerifiedCredentialCache`) so a burst of identical requests
         (metrics scrapes, admin polls) does not re-run the KDF each time. Only
         successes are cached, so this can never turn a wrong password into an
@@ -378,7 +379,7 @@ class SecurityManager(AdminLockoutMixin):
         if self.config.admin_pass_hashed:
             if self._cred_cache.is_fresh(candidate):
                 return True
-            ok = verify_pbkdf2_sha256(
+            ok = verify_admin_hash(
                 self.config.admin_pass_hashed.get_secret_value(), candidate
             )
             if ok:

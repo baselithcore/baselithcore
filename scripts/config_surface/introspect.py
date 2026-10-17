@@ -70,14 +70,41 @@ class Setting:
         return (self.env, *self.alternatives)
 
 
-#: Bases that make a class a settings class. ``AliasedSettings`` is
-#: ``BaseSettings`` with a constructor that accepts aliased fields by name.
-_SETTINGS_BASES = frozenset({"BaseSettings", "AliasedSettings"})
+def _settings_class_names(repo_root: Path) -> frozenset[str]:
+    """Every class in the repo that reaches ``BaseSettings`` through its bases.
+
+    Matching a literal ``BaseSettings`` base misses a subclass of a subclass,
+    and that is not a corner case: a settings module split into mixins to stay
+    under the 500-line cap declares its fields on classes two or three links
+    down the chain. Those bind the environment exactly like a direct subclass,
+    so the graph is resolved across files before any file is scanned.
+    """
+    bases: dict[str, list[str]] = {}
+    for file in _iter_python_files(repo_root, SETTINGS_ROOTS):
+        try:
+            tree = ast.parse(file.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                bases[node.name] = [
+                    base.id for base in node.bases if isinstance(base, ast.Name)
+                ]
+
+    def reaches(name: str, seen: frozenset[str]) -> bool:
+        if name == "BaseSettings":
+            return True
+        if name in seen or name not in bases:
+            return False  # cycle, or a base defined outside the scanned roots
+        return any(reaches(base, seen | {name}) for base in bases[name])
+
+    return frozenset(name for name in bases if reaches(name, frozenset()))
 
 
-def _is_settings_class(node: ast.ClassDef) -> bool:
+def _is_settings_class(node: ast.ClassDef, known: frozenset[str]) -> bool:
     return any(
-        isinstance(base, ast.Name) and base.id in _SETTINGS_BASES for base in node.bases
+        isinstance(base, ast.Name) and (base.id == "BaseSettings" or base.id in known)
+        for base in node.bases
     )
 
 
@@ -190,7 +217,7 @@ def _section_title(tree: ast.Module, module: str) -> str:
     return (title[:1].upper() + title[1:]) if title else module
 
 
-def _settings_in(path: Path, module: str) -> list[Setting]:
+def _settings_in(path: Path, module: str, known: frozenset[str]) -> list[Setting]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
     except (OSError, SyntaxError):
@@ -199,7 +226,7 @@ def _settings_in(path: Path, module: str) -> list[Setting]:
     source_lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     found: list[Setting] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef) or not _is_settings_class(node):
+        if not isinstance(node, ast.ClassDef) or not _is_settings_class(node, known):
             continue
         prefix = _env_prefix(node)
         for stmt in node.body:
@@ -251,11 +278,12 @@ def iter_settings(repo_root: Path) -> list[Setting]:
     """Every settings field declared in the repository, deduplicated by name."""
     settings: list[Setting] = []
     seen: set[tuple[str, str]] = set()
+    known = _settings_class_names(repo_root)
     for file in _iter_python_files(repo_root, SETTINGS_ROOTS):
         module = (
             file.relative_to(repo_root).with_suffix("").as_posix().replace("/", ".")
         )
-        for setting in _settings_in(file, module):
+        for setting in _settings_in(file, module, known):
             key = (setting.class_name, setting.env)
             if key in seen:
                 continue

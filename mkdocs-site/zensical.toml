@@ -49,6 +49,7 @@ nav = [
       { "Overview"            = "architecture/overview.md" },
       { "Request Flow"        = "architecture/request-flow.md" },
       { "Agentic Patterns" = "architecture/agentic-patterns.md" },
+      { "Plugin Layout"       = "architecture/plugin-layout.md" },
   ]},
 
   { "Core Modules" = [

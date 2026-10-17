@@ -64,3 +64,24 @@ def test_shutdown_drain_is_bounded_by_the_dockerfile_variable() -> None:
 
     docker_cmd = (BACKEND.parent / "Dockerfile").read_text(encoding="utf-8")
     assert "GRACEFUL_SHUTDOWN_TIMEOUT" in docker_cmd
+
+
+def test_websocket_message_size_is_capped_like_the_dockerfile() -> None:
+    """uvicorn's own 16 MiB frame limit is parsed in memory by the chat socket.
+
+    ``MAX_REQUEST_SIZE_BYTES`` never sees a WebSocket frame, so every entry
+    point must pass the same explicit, smaller cap (1 MiB by default).
+    """
+    node = _kwargs().get("ws_max_size")
+    assert node is not None, "ws_max_size not passed"
+    dumped = ast.dump(node)
+    assert "UVICORN_WS_MAX_SIZE" in dumped
+    assert "'1048576'" in dumped, f"default must stay 1 MiB: {dumped}"
+
+    docker_cmd = (BACKEND.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert "--ws-max-size ${UVICORN_WS_MAX_SIZE:-1048576}" in docker_cmd
+
+    run_cmd = (
+        BACKEND.parent / "baselith" / "core" / "cli" / "commands" / "run.py"
+    ).read_text(encoding="utf-8")
+    assert '"ws_max_size": int(os.getenv("UVICORN_WS_MAX_SIZE", "1048576"))' in run_cmd

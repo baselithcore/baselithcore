@@ -7,7 +7,7 @@ from typing import Any
 
 from baselith.core.plugins import Plugin
 
-from .tracker import GoalTracker
+from .tracking.tracker import GoalTracker
 
 
 class GoalsPlugin(Plugin):

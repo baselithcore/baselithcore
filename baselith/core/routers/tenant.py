@@ -4,7 +4,7 @@ import sys
 
 from baselith.core.utils.optional_import import optional_router
 
-_tenant, router = optional_router("baselith.plugins.api_routers.tenant")
+_tenant, router = optional_router("baselith.plugins.api_routers.routes.tenant")
 if _tenant is not None:
     # Register self as the plugin module for runtime compatibility
     sys.modules[__name__] = _tenant

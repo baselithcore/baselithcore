@@ -49,7 +49,7 @@ same_origin = {"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}
 cross_site = {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}
 
 with patch(
-    "baselith.plugins.api_routers.status.get_indexing_service", return_value=_Indexing()
+    "baselith.plugins.api_routers.routes.status.get_indexing_service", return_value=_Indexing()
 ), patch("baselith.core.services.bootstrap.get_indexing_service", return_value=_Indexing()):
     page = client.get("/admin", auth=auth)
     results = {

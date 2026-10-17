@@ -4,8 +4,8 @@ Official BaselithCore plugin for scraping and crawling web content.
 
 ## Features
 
-- **Dual-mode Fetching**: Fast HTTP (httpx) or JavaScript rendering (Playwright)
-- **7 Modular Extractors**: Text, Links, Images, Metadata, Schema.org, CSS Selectors
+- **Three fetchers**: Fast HTTP (httpx), JavaScript rendering (Playwright), or anti-bot HTTP with a real Chrome TLS fingerprint ([Scrapling](https://github.com/D4Vinci/Scrapling), optional)
+- **Modular Extractors**: Text, Links, Images, Metadata, Schema.org, CSS Selectors, Markdown (through Scrapling, for language models)
 - **Middleware Chain**: Rate limiting, Caching, Retry, Logging
 - **Recursive Crawler**: BFS with depth/page limits and robots.txt support
 - **Storage Backends**: Memory, Filesystem
@@ -13,7 +13,7 @@ Official BaselithCore plugin for scraping and crawling web content.
 
 ## Compatibility
 
-Legacy imports from `baselith.core.scraper.*` are temporarily preserved through module-level shims during the migration away from the core.
+Legacy imports from `baselith.core.scraper.*` keep working: the core package is the plugin package under another name, and the modules that moved into `engine/` (`crawler`, `scraper`, `protocols`, `_http_pool`) stay importable at their old path through `baselith.core.plugins.compat_aliases`. New code imports from `baselith.plugins.web_scraper`.
 
 ## Quick Start
 
@@ -271,23 +271,29 @@ class MyMiddleware(BaseMiddleware):
 - `httpx` - HTTP client
 - `beautifulsoup4` - HTML parsing
 - `playwright` (optional) - JavaScript rendering
+- `scrapling[fetchers]==0.4.15` + `markdownify` (optional) - anti-bot HTTP fetching and the `markdown` extractor
 
 ## Module Structure
 
 ```text
-baselith/core/scraper/
-├── __init__.py          # Public API
-├── config.py            # Pydantic configuration
+baselith/plugins/web_scraper/
+├── __init__.py          # Public API (re-exports; legacy paths aliased)
+├── plugin.py            # WebScraperPlugin
+├── manifest.yaml
 ├── models.py            # Data classes
-├── protocols.py         # Abstract interfaces
-├── scraper.py           # Main Scraper facade
-├── crawler.py           # CrawlEngine
 ├── tools.py             # Agent tools
 ├── utils.py             # Utilities
+├── engine/
+│   ├── scraper.py       # Main Scraper facade
+│   ├── crawler.py       # CrawlEngine
+│   ├── protocols.py     # Abstract interfaces
+│   └── http_pool.py     # Shared httpx client for auxiliary fetches
 ├── fetchers/
 │   ├── base.py          # BaseFetcher
 │   ├── httpx_fetcher.py # HTTP fetcher
-│   └── playwright_fetcher.py  # JS fetcher
+│   ├── playwright_fetcher.py  # JS fetcher
+│   ├── scrapling_fetcher.py   # Anti-bot HTTP fetcher (Scrapling transport)
+│   └── _curl.py         # Its pinned, bounded curl_cffi GET
 ├── extractors/
 │   ├── base.py          # BaseExtractor, Registry
 │   ├── text.py          # TextExtractor
@@ -295,6 +301,7 @@ baselith/core/scraper/
 │   ├── images.py        # ImageExtractor
 │   ├── metadata.py      # MetadataExtractor
 │   ├── schema_org.py    # SchemaOrgExtractor
+│   ├── markdown.py      # MarkdownExtractor (Scrapling)
 │   └── css_selector.py  # CssSelectorExtractor
 ├── middleware/
 │   ├── base.py          # MiddlewareChain
@@ -307,6 +314,9 @@ baselith/core/scraper/
     ├── memory.py        # MemoryStorage
     └── filesystem.py    # FilesystemStorage
 ```
+
+The configuration model (`ScraperConfig`) lives in the framework core:
+`baselith.core.config.scraper`.
 
 ## Lifecycle and safety notes
 

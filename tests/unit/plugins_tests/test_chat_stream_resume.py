@@ -16,7 +16,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.chat as chat_module
+import baselith.plugins.api_routers.routes.chat as chat_module
 from baselith.core.auth.types import AuthUser
 from baselith.core.orchestration.checkpoint_errors import CheckpointLeaseHeldError
 from baselith.core.services.chat.stream_session import ChatStream

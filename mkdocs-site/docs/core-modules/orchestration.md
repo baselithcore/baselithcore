@@ -269,6 +269,12 @@ the shared prompt constants (`RAG_SYSTEM_PROMPT`, `RAG_NOT_FOUND_MESSAGE`,
 `build_rag_user_prompt` in `handlers/rag.py`), so the two paths cannot drift;
 generation then streams tokens via `LLMService.generate_response_stream`.
 
+`StandardRagHandler` embeds the query with the model that built the index:
+`VectorStoreConfig.embedding_model` (`BAAI/bge-m3` by default), unless its chat
+config names an `embedder_model`. That goes through `get_embedder`, so the
+remote embedding server (`BASELITH_EMBEDDING_BACKEND=remote`) serves the query
+side too; the handler never falls back to a fixed local model.
+
 Both handlers build the user prompt with
 `build_rag_user_prompt(context_text, query, history="")`, passing
 `context.get("history_text", "")` — the prior turns the chat service loads for

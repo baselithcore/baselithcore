@@ -13,6 +13,9 @@ Current services:
 * **Prompt sync** (``BASELITH_PROMPT_SYNC=postgres``) — durable prompt
   catalog: write-through Postgres backend + per-replica refresh loop, so
   runtime label promotion reaches every replica.
+* **Webhook outbox relay** (``WEBHOOKS_ENABLED`` + ``WEBHOOK_OUTBOX_ENABLED``) —
+  delivers the events ``WebhookService.publish`` queued, so a crash between a
+  commit and its delivery does not lose the event.
 * **Updates** — periodic check for newer releases. The core-release notice
   is **on by default** (``CORE_UPDATE_REPO`` defaults to the public core
   repository; set it empty to turn it off). The plugin check is opt-in via
@@ -91,8 +94,25 @@ async def start_runtime_services(app: Any) -> None:
     except Exception as exc:
         logger.warning("plugin_updates_start_failed: %s", exc)
 
+    await _start_webhook_outbox(app)
     await _start_online_evaluation(app)
     await _write_update_boot_report()
+
+
+async def _start_webhook_outbox(app: Any) -> None:
+    """Start the webhook outbox relay when webhooks and the outbox are both on."""
+    try:
+        from baselith.core.config.webhooks import get_webhook_config
+
+        config = get_webhook_config()
+        if not (config.enabled and config.outbox_enabled):
+            return
+        from baselith.core.webhooks.service import get_webhook_service
+
+        app.state.webhook_outbox_relay = get_webhook_service().build_relay()
+        await app.state.webhook_outbox_relay.start()
+    except Exception as exc:
+        logger.warning("webhook_outbox_start_failed: %s", exc)
 
 
 async def _start_online_evaluation(app: Any) -> None:
@@ -155,6 +175,13 @@ async def stop_runtime_services(app: Any) -> None:
             await bridge.stop()
         except Exception as exc:
             logger.warning("run_events_bridge_stop_failed: %s", exc)
+
+    relay = getattr(app.state, "webhook_outbox_relay", None)
+    if relay is not None:
+        try:
+            await relay.stop()
+        except Exception as exc:
+            logger.warning("webhook_outbox_stop_failed: %s", exc)
 
     prompt_sync = getattr(app.state, "prompt_sync", None)
     if prompt_sync is not None:

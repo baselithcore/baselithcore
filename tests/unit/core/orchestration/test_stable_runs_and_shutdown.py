@@ -206,7 +206,7 @@ class _Webhooks:
     def __init__(self) -> None:
         self.emitted: list[tuple[str, dict[str, Any]]] = []
 
-    async def emit(self, event: str, data: dict[str, Any], **_: Any) -> list[Any]:
+    async def publish(self, event: str, data: dict[str, Any], **_: Any) -> None:
         self.emitted.append((event, data))
         return []
 

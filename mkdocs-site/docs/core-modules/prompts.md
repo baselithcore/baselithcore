@@ -303,7 +303,7 @@ off) — which is how the admin API below decides whether writes are safe.
 ### Admin API (`/prompts`)
 
 The `api_routers` plugin mounts an operator surface for the catalog
-(`baselith/plugins/api_routers/prompts.py`), protected by the same **admin HTTP Basic
+(`baselith/plugins/api_routers/routes/prompts.py`), protected by the same **admin HTTP Basic
 Auth** as the admin dashboard. Reads always serve the local registry; the
 write endpoints refuse with **503** when no synchronizer is configured,
 because a promotion that silently stays replica-local is a footgun.

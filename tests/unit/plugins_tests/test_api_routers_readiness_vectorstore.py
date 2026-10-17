@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from baselith.plugins.api_routers.status import _check_vectorstore
+from baselith.plugins.api_routers.routes.status import _check_vectorstore
 
 
 def _service(exists: AsyncMock) -> SimpleNamespace:

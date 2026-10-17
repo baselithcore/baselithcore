@@ -83,7 +83,8 @@ store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
-under [Webhooks › Configuration](webhooks.md#configuration). The
+and the `WEBHOOK_OUTBOX_*` transactional-outbox settings under
+[Webhooks › Configuration](webhooks.md#configuration). The
 `PLUGIN_UPDATE_*`, `CORE_UPDATE_REPO` and `SYSTEM_UPGRADE_GUIDE_URL` settings
 read by `get_plugin_update_config()` are listed under
 [Plugin Updates › Configuration](plugin-updates.md#configuration).
@@ -462,7 +463,14 @@ print(vs.host)                 # "localhost"  (VECTORSTORE_HOST / VECTORSTORE_QD
 print(vs.port)                 # 6333         (VECTORSTORE_PORT)
 print(vs.embedding_model)      # "BAAI/bge-m3"
 print(vs.embedding_dim)        # 1024         (VECTORSTORE_EMBEDDING_DIM)
+print(vs.qdrant_api_key)       # SecretStr | None (BASELITH_QDRANT_API_KEY / QDRANT_API_KEY)
 ```
+
+`qdrant_api_key` binds from `BASELITH_QDRANT_API_KEY` — the name the Helm chart
+puts in the release Secret and the inference settings read — and from the
+unprefixed `QDRANT_API_KEY`; the prefixed name wins when both are set. A
+release with its own Qdrant (`qdrant.enabled`) therefore authenticates the
+vector store and the inference client with the same key.
 
 **`.env` Variables**:
 
@@ -479,7 +487,9 @@ LLM_VLLM_API_BASE=                   # vLLM server (http://gpu-host:8000/v1); no
 LLM_VLLM_ENDPOINTS=                  # several vLLM servers, comma-separated; routed by model
 LLM_VLLM_API_KEY=                    # The server's --api-key (alias VLLM_API_KEY); empty = keyless
 LLM_VLLM_NATIVE_TOOLS=true           # false unless vLLM runs --enable-auto-tool-choice
+LLM_VLLM_ENABLE_THINKING=            # false = no reasoning before the answer on every vLLM request (unset = server default)
 LLM_API_KEY=sk-...                   # Alias: LLM_OPENAI_API_KEY
+LLM_OPENAI_REASONING_EFFORT=none       # Default reasoning_effort on OpenAI requests (empty = not sent; skipped for gpt-3/gpt-4)
 LLM_FALLBACK_STAGE_TIMEOUT=          # Per-stage bound for LLM_FALLBACK_CHAIN (unset = none)
 LLM_FALLBACK_TOTAL_TIMEOUT=          # Whole-chain wall clock (unset = LLM_REQUEST_TIMEOUT)
 LLM_ENABLE_NATIVE_TOOLS=true         # Native tool-calling in LLMService.generate() (default on)

@@ -2,7 +2,7 @@
 
 import pytest
 
-from baselith.plugins.api_routers import status
+from baselith.plugins.api_routers.routes import status
 
 
 class _FakeResponse:

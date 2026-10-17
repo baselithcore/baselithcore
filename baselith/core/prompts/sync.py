@@ -14,7 +14,7 @@ closes that gap without changing the registry's synchronous contract:
 Failure policy is fail-open: a broken refresh logs and retries next tick; a
 broken backend write raises (the caller must know a promotion did not
 persist). Opt-in via ``BASELITH_PROMPT_SYNC=postgres`` (wired in the app
-lifespan); the admin surface is ``baselith/plugins/api_routers/prompts.py``.
+lifespan); the admin surface is ``baselith/plugins/api_routers/routes/prompts.py``.
 """
 
 from __future__ import annotations

@@ -54,6 +54,7 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             # Custom OpenAI-compatible endpoint (Azure gateway, vLLM, LiteLLM,
             # OpenRouter). None keeps the SDK default.
             base_url=getattr(config, "api_base", None),
+            reasoning_effort=getattr(config, "openai_reasoning_effort", None),
         )
     elif config.provider == "ollama":
         from baselith.core.services.llm.providers.ollama_provider import OllamaProvider
@@ -84,6 +85,7 @@ def create_provider(config: Any) -> LLMProviderProtocol:
             request_timeout=request_timeout,
             connect_timeout=connect_timeout,
             native_tools=getattr(config, "vllm_native_tools", True),
+            enable_thinking=getattr(config, "vllm_enable_thinking", None),
         )
     elif config.provider == "huggingface":
         from baselith.core.services.llm.providers.huggingface_provider import (

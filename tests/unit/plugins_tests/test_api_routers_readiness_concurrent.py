@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from fastapi import Response
 
-from baselith.plugins.api_routers import status as status_mod
+from baselith.plugins.api_routers.routes import status as status_mod
 
 
 async def test_readiness_probes_run_concurrently() -> None:

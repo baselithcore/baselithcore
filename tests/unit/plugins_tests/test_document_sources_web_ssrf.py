@@ -13,7 +13,7 @@ import importlib
 import httpx
 import pytest
 
-from baselith.plugins.document_sources.web import WebDocumentSource
+from baselith.plugins.document_sources.sources.web import WebDocumentSource
 
 # Literal public IP: no DNS resolution involved, no real connection made.
 PUBLIC_URL = "http://93.184.216.34/"
@@ -155,7 +155,9 @@ class TestHardening:
             anyio.run(source.close)
 
     async def test_oversized_body_is_refused(self, monkeypatch) -> None:
-        web_module = importlib.import_module("baselith.plugins.document_sources.web")
+        web_module = importlib.import_module(
+            "baselith.plugins.document_sources.sources.web"
+        )
         monkeypatch.setattr(web_module, "WEB_DOCUMENTS_MAX_BODY_BYTES", 1024)
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -168,7 +170,9 @@ class TestHardening:
             await source.close()
 
     async def test_declared_oversized_body_is_refused(self, monkeypatch) -> None:
-        web_module = importlib.import_module("baselith.plugins.document_sources.web")
+        web_module = importlib.import_module(
+            "baselith.plugins.document_sources.sources.web"
+        )
         monkeypatch.setattr(web_module, "WEB_DOCUMENTS_MAX_BODY_BYTES", 1024)
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -187,7 +191,7 @@ class TestBrowserRouteGuard:
     async def test_internal_subresource_is_aborted(self) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
-        from baselith.plugins.document_sources.web_guard import ssrf_route_guard
+        from baselith.plugins.document_sources.sources.web_guard import ssrf_route_guard
 
         route = AsyncMock()
         request = MagicMock(url="http://169.254.169.254/latest/meta-data")
@@ -198,7 +202,7 @@ class TestBrowserRouteGuard:
     async def test_public_subresource_continues(self) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
-        from baselith.plugins.document_sources.web_guard import ssrf_route_guard
+        from baselith.plugins.document_sources.sources.web_guard import ssrf_route_guard
 
         route = AsyncMock()
         request = MagicMock(url=PUBLIC_URL + "app.js")
@@ -210,7 +214,9 @@ class TestBrowserRouteGuard:
 async def test_page_parsing_runs_off_the_event_loop(monkeypatch) -> None:
     import threading
 
-    web_module = importlib.import_module("baselith.plugins.document_sources.web")
+    web_module = importlib.import_module(
+        "baselith.plugins.document_sources.sources.web"
+    )
     loop_thread = threading.get_ident()
     threads: list[int] = []
 

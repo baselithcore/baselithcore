@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from baselith.plugins.document_sources import ocr_mineru
+from baselith.plugins.document_sources.readers import ocr_mineru
 
 
 @pytest.fixture

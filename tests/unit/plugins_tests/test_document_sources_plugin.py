@@ -28,7 +28,9 @@ async def test_read_item_rejects_sibling_directory_sharing_the_root_prefix(
     tmp_path,
 ) -> None:
     """``/x/docs-private`` must not pass a containment check for ``/x/docs``."""
-    from baselith.plugins.document_sources.filesystem import FilesystemDocumentSource
+    from baselith.plugins.document_sources.sources.filesystem import (
+        FilesystemDocumentSource,
+    )
 
     root = tmp_path / "docs"
     root.mkdir()
@@ -42,7 +44,9 @@ async def test_read_item_rejects_sibling_directory_sharing_the_root_prefix(
 
 
 async def test_read_item_rejects_symlink_escaping_the_root(tmp_path) -> None:
-    from baselith.plugins.document_sources.filesystem import FilesystemDocumentSource
+    from baselith.plugins.document_sources.sources.filesystem import (
+        FilesystemDocumentSource,
+    )
 
     root = tmp_path / "docs"
     root.mkdir()

@@ -741,6 +741,13 @@ pull-request-only, so the release job cannot commit here. Follows
   bake into an image.
 
 ### Added
+- **vLLM thinking can be switched off for the whole deployment.**
+  `LLM_VLLM_ENABLE_THINKING=false` sends `chat_template_kwargs.enable_thinking=false`
+  on every request to a vLLM server, so a Qwen3 model answers without reasoning first:
+  faster and cheaper. Unset keeps the server's default, and a call that sets it
+  itself keeps its choice. The messages (tool-calling loop) and structured paths now
+  forward `extra_body` too; before, only plain generation and streaming did, so a
+  vLLM-only request field never reached the server on those paths.
 
 - **Encryption at rest** — versioned AES-256-GCM field encryption
   (`core.security.encryption`) with key rotation; opt-in via `DATA_ENCRYPTION_KEYS`.

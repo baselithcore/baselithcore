@@ -213,7 +213,7 @@ def build_actor_claim(actor_client_id: str) -> dict[str, str]:
     """Build the RFC 8693 ``act`` claim for an agent client.
 
     Both members are present deliberately. Admin impersonation
-    (``baselith.plugins.auth.impersonation``) mints ``act.sub`` holding a *user* id, so
+    (``baselith.plugins.auth.accounts.impersonation``) mints ``act.sub`` holding a *user* id, so
     ``act.client_id`` is what lets a consumer tell an agent delegation from an
     impersonation without guessing.
 

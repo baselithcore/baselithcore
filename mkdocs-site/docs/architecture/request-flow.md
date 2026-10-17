@@ -5,7 +5,7 @@ description: The complete path of a request through the system
 <!-- markdownlint-disable MD046 -->
 
 This guide illustrates the path of a request from client to final response,
-using the real names from `baselith/plugins/api_routers/chat.py`,
+using the real names from `baselith/plugins/api_routers/routes/chat.py`,
 `baselith/core/services/chat/service.py` and `baselith/core/orchestration/`.
 
 ---
@@ -52,13 +52,13 @@ sequenceDiagram
 
 ### Entry Point Endpoint
 
-The chat routes live in `baselith/plugins/api_routers/chat.py`. They are mounted
+The chat routes live in `baselith/plugins/api_routers/routes/chat.py`. They are mounted
 **without** an `/api` prefix (a `/v1` alias is mounted additively) and the
 router declares `require_user` as a dependency, so every call is authenticated
 and rate-limited before the route body runs. The routes delegate to
 `chat_service` (`baselith.core.chat.chat_service`), which owns the `Orchestrator`.
 
-```python title="baselith/plugins/api_routers/chat.py (trimmed)"
+```python title="baselith/plugins/api_routers/routes/chat.py (trimmed)"
 from fastapi import APIRouter, Depends, Request, Response
 
 from baselith.core.chat import chat_service

@@ -33,8 +33,11 @@ class DocsMCPHandler:
         @server.tool(
             name="search_docs",
             description=(
-                "Search the documentation. Returns ranked hits with the "
-                "heading each match sits under, to read with get_doc_section."
+                "Search the BaselithCore framework documentation (written in "
+                "English; English keywords or an identifier work best, a question "
+                "in another language is matched by meaning). Returns ranked "
+                "sections; read one in full with get_doc_section using the hit's "
+                "path and anchor."
             ),
             category=_READ_ONLY,
             input_schema={
@@ -55,15 +58,27 @@ class DocsMCPHandler:
         )
         async def search_docs(
             query: str, section: str | None = None, limit: int = 5
-        ) -> list[dict[str, Any]]:
+        ) -> list[dict[str, Any]] | dict[str, Any]:
             """Search documentation."""
-            return await self.service.search(query, section=section, limit=limit)
+            hits = await self.service.search(query, section=section, limit=limit)
+            if hits:
+                return hits
+            # An empty list teaches a model nothing; say what to try instead.
+            return {
+                "results": [],
+                "hint": (
+                    "No section matched. The documentation is in English: retry "
+                    "with English keywords (translate the question), fewer "
+                    "words, or a module/identifier name."
+                ),
+            }
 
         @server.tool(
             name="get_doc_section",
             description=(
-                "Read one section of a page by its heading or anchor, "
-                "subsections included. Prefer this over get_doc_page."
+                "Read one section of a BaselithCore documentation page by its "
+                "heading or anchor, subsections included. Prefer this over "
+                "get_doc_page."
             ),
             category=_READ_ONLY,
             input_schema={
@@ -90,7 +105,7 @@ class DocsMCPHandler:
 
         @server.tool(
             name="get_doc_outline",
-            description="List a page's headings with their sizes, without its body",
+            description="List the headings of a BaselithCore documentation page with their sizes, without its body",
             category=_READ_ONLY,
             input_schema={
                 "type": "object",
@@ -109,8 +124,8 @@ class DocsMCPHandler:
         @server.tool(
             name="get_doc_page",
             description=(
-                "Read a whole page. Pages over the size budget return their "
-                "outline instead unless full=true."
+                "Read a whole BaselithCore documentation page. Pages over the "
+                "size budget return their outline instead unless full=true."
             ),
             category=_READ_ONLY,
             input_schema={
@@ -160,8 +175,8 @@ class DocsMCPHandler:
         @server.tool(
             name="list_docs",
             description=(
-                "List page paths with their breadcrumb titles, optionally "
-                "only one nav section"
+                "List the BaselithCore documentation pages (path and "
+                "breadcrumb title), optionally only one nav section"
             ),
             category=_READ_ONLY,
             input_schema={

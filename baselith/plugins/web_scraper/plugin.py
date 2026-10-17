@@ -11,7 +11,7 @@ class WebScraperPlugin(Plugin):
 
     async def shutdown(self) -> None:
         """Close the process-wide robots.txt client, then the plugin."""
-        from ._http_pool import close_robots_client
+        from .engine.http_pool import close_robots_client
 
         await close_robots_client()
         await super().shutdown()

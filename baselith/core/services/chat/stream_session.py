@@ -4,7 +4,7 @@ Split from :mod:`baselith.core.services.chat.service` (module size cap). With
 a ``run_id`` the stream is opened as a named, durable run through
 :func:`~baselith.core.orchestration.stream_runs.open_stream_run`, and the
 returned :class:`ChatStream` says which kind of attempt it is, so the SSE
-layer can honour ``Last-Event-ID`` (see ``baselith.plugins.api_routers.chat``).
+layer can honour ``Last-Event-ID`` (see ``baselith.plugins.api_routers.routes.chat``).
 """
 
 from __future__ import annotations

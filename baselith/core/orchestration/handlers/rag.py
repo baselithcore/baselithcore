@@ -180,9 +180,19 @@ class StandardRagHandler(BaseFlowHandler):
         """Lazy load the embedder used for query encoding."""
         if self._embedder is None:
             try:
+                from baselith.core.config import get_vectorstore_config
                 from baselith.core.nlp import LazyEmbedder, get_embedder
 
-                model_name = getattr(self.config, "embedder_model", "all-MiniLM-L6-v2")
+                # The query must be embedded by the model that built the index.
+                # ChatConfig has no ``embedder_model``, so the old literal
+                # fallback (all-MiniLM-L6-v2, 384 dims) always won: it skipped
+                # the remote embedding server, tried to download from the Hub
+                # (an error in an egress-locked cell) and could never match a
+                # 1024-dim bge-m3 index anyway.
+                model_name = (
+                    getattr(self.config, "embedder_model", None)
+                    or get_vectorstore_config().embedding_model
+                )
                 # Lazy: the model loads on the first ``await encode()``, in a
                 # worker thread, instead of blocking the event loop here.
                 self._embedder = LazyEmbedder(get_embedder, model_name)

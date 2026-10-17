@@ -71,6 +71,8 @@ async def generate_structured(
         request_kwargs: dict[str, Any] = {"model": model, "messages": messages}
         if "temperature" in kwargs:
             request_kwargs["temperature"] = kwargs["temperature"]
+        if kwargs.get("extra_body"):
+            request_kwargs["extra_body"] = kwargs["extra_body"]
         # Chat Completions moved to max_completion_tokens; the reasoning
         # models reject the old name outright.
         cap = token_cap(kwargs)

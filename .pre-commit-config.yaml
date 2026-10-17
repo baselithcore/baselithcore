@@ -209,6 +209,14 @@ repos:
         entry: python scripts/check_file_size.py
         language: system
         pass_filenames: false
+      # Every plugin root keeps the standard layout (mkdocs-site/docs/architecture/plugin-layout.md):
+      # governance files + skeleton modules only, Markdown under docs/, no tracked
+      # runtime state or keys. Ratchet-backed.
+      - id: plugin-layout
+        name: plugin-layout
+        entry: python scripts/check_plugin_layout.py
+        language: system
+        pass_filenames: false
       # Silent `except Exception: pass` ratchet — see the exception policy in
       # mkdocs-site/docs/advanced/best-practices.md.
       - id: exception-hygiene

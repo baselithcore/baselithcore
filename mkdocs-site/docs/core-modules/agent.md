@@ -112,6 +112,26 @@ in declaration order, as a `tuple[str, ...]`. It is the public counterpart of
 the private `_tools` dict that callers (and the scaffolded project) used to
 reach into.
 
+### Deferred tools
+
+An agent armed with more tools than its model handles well can advertise a
+focused set and reveal the rest on demand:
+
+```python
+agent = Agent(tools=[weather, stocks, find_tools])
+agent.defer_tools(["stocks"])          # callable, but left out of the specs sent to the model
+...
+agent.reveal_tools(["stocks"])         # from inside a tool: advertised from the next call on
+```
+
+- `defer_tools(names)` keeps those tools callable (a call by name still runs,
+  through the same chokepoint) but leaves them out of the tool specs; unknown
+  names are ignored. `tool_names` still lists every tool.
+- `reveal_tools(names)` advertises deferred tools again and returns the names
+  it newly revealed. The loop rebuilds the specs on every round trip, so a tool
+  that reveals others (a "find tools" meta-tool) changes the very next model
+  call of the same run.
+
 ## What `run()` raises
 
 | Exception | When |

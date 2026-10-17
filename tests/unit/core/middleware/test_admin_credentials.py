@@ -43,7 +43,7 @@ class TestVerifiedCredentialCache:
     dashboard polls don't re-run the KDF; wrong passwords are never cached."""
 
     _ITER = 100_000
-    _KDF = "baselith.core.middleware.security.verify_pbkdf2_sha256"
+    _KDF = "baselith.core.middleware.security.verify_admin_hash"
 
     def _encoded_hash(self, password: str) -> str:
         import os
@@ -126,3 +126,54 @@ class TestPBKDF2IterationFloor:
         manager = self._manager(mock_security_config, encoded)
         assert manager.verify_admin_password("hunter2") is True
         assert manager.verify_admin_password("wrong") is False
+
+
+class TestArgon2idAdminHash:
+    """``ADMIN_PASS_HASHED`` accepts Argon2id next to PBKDF2, with an OWASP floor."""
+
+    @staticmethod
+    def _hash(password: str, *, memory_cost: int, time_cost: int) -> str:
+        from argon2 import PasswordHasher
+
+        return PasswordHasher(
+            memory_cost=memory_cost, time_cost=time_cost, parallelism=1
+        ).hash(password)
+
+    def test_owasp_profile_verifies(self):
+        from baselith.core.middleware._admin_credentials import verify_admin_hash
+
+        encoded = self._hash("pw", memory_cost=19_456, time_cost=2)
+        assert verify_admin_hash(encoded, "pw") is True
+        assert verify_admin_hash(encoded, "wrong") is False
+
+    def test_below_owasp_floor_is_rejected_with_error(self):
+        from baselith.core.middleware._admin_credentials import verify_admin_hash
+
+        weak = self._hash("pw", memory_cost=8, time_cost=1)
+        with patch("baselith.core.middleware._admin_credentials.logger") as mock_logger:
+            assert verify_admin_hash(weak, "pw") is False
+        mock_logger.error.assert_called_once()
+
+    def test_malformed_argon2_value_is_rejected(self):
+        from baselith.core.middleware._admin_credentials import verify_admin_hash
+
+        assert verify_admin_hash("$argon2id$garbage", "pw") is False
+
+    def test_pbkdf2_value_still_dispatches_to_pbkdf2(self):
+        from baselith.core.middleware._admin_credentials import verify_admin_hash
+
+        assert verify_admin_hash(_encoded("pw", 600_000), "pw") is True
+
+    def test_unknown_scheme_is_refused(self):
+        from baselith.core.middleware._admin_credentials import verify_admin_hash
+
+        assert verify_admin_hash("md5$abc", "pw") is False
+
+    def test_security_manager_accepts_an_argon2id_hash(self):
+        encoded = self._hash("pw", memory_cost=19_456, time_cost=2)
+        config = MagicMock()
+        config.admin_pass_hashed.get_secret_value.return_value = encoded
+        config.admin_pass = None
+        manager = SecurityManager(config)
+        assert manager.verify_admin_password("pw") is True
+        assert manager.verify_admin_password("nope") is False
