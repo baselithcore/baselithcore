@@ -1912,6 +1912,18 @@ OpenAI backend constructed a fresh client per call, which leaked its httpx pool
 and inherited the SDK's 600 s default timeout. `await service.close()` closes
 both (a no-op if never used).
 
+### OpenAI request shape
+
+The OpenAI image and audio calls send the output cap as
+`max_completion_tokens`: Chat Completions answers 400 ("Use
+'max_completion_tokens' instead") to `max_tokens` on current models, which
+used to break every OpenAI vision call, the browser agent's included. The
+image path also runs the request through the same `apply_reasoning_defaults`
+shaping the [OpenAI LLM provider](#llm-service) uses, so a reasoning model
+(o-series, gpt-5 and later) gets its non-default `temperature` dropped rather
+than refusing the call; other models keep theirs. No `reasoning_effort` is
+sent on the vision path.
+
 ---
 
 ## Voice Service
