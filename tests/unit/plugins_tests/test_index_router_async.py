@@ -16,7 +16,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.index as index_module
+import baselith.plugins.api_routers.routes.index as index_module
 from baselith.core.middleware import require_admin_or_job
 from baselith.core.services.bootstrap import IndexBootstrapper
 

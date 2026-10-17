@@ -16,7 +16,7 @@ from baselith.core.orchestration.checkpoint import Checkpoint, CheckpointManager
 from baselith.core.orchestration.checkpoint_memory import InMemoryCheckpointStore
 from baselith.core.orchestration.checkpoint_scope import bind_checkpoint
 from baselith.plugins.browser_agent.agent import BrowserAgent
-from baselith.plugins.browser_agent.durable import INTERRUPTED_ERROR
+from baselith.plugins.browser_agent.agent.durable import INTERRUPTED_ERROR
 from baselith.plugins.browser_agent.types import (
     BrowserAction,
     BrowserActionType,

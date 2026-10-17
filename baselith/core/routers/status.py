@@ -7,7 +7,7 @@ from fastapi import Response
 from baselith.core.lifecycle.drain import is_draining
 from baselith.core.utils.optional_import import optional_router
 
-_status, router = optional_router("baselith.plugins.api_routers.status")
+_status, router = optional_router("baselith.plugins.api_routers.routes.status")
 if _status is not None:
     # Register self as the plugin module for runtime compatibility
     sys.modules[__name__] = _status

@@ -290,7 +290,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from baselith.plugins.api_routers.status import router as status_router
+from baselith.plugins.api_routers.routes.status import router as status_router
 
 
 @pytest.fixture

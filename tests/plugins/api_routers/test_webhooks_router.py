@@ -13,7 +13,7 @@ from baselith.core.middleware import require_user
 from baselith.core.webhooks.dispatcher import WebhookDispatcher
 from baselith.core.webhooks.service import WebhookService
 from baselith.core.webhooks.store import InMemoryWebhookStore
-from baselith.plugins.api_routers import webhooks as wh
+from baselith.plugins.api_routers.routes import webhooks as wh
 
 HOOK_URL = "https://hooks.test/receiver"
 

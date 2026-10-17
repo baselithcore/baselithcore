@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextvars
 from collections.abc import AsyncIterator
 
-from baselith.plugins.api_routers._sse import HEARTBEAT, HeartbeatSource
+from baselith.plugins.api_routers.routes._sse import HEARTBEAT, HeartbeatSource
 
 _var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "sse_test_var", default=None

@@ -86,7 +86,7 @@ class TestPaginatedHelper:
 
 class TestWebhookBounds:
     def test_payload_limits(self) -> None:
-        from baselith.plugins.api_routers.webhooks import CreateWebhookRequest
+        from baselith.plugins.api_routers.routes.webhooks import CreateWebhookRequest
 
         ok = {"url": "https://h.test/x"}
         CreateWebhookRequest(**ok)
@@ -104,7 +104,7 @@ class TestWebhookBounds:
                 CreateWebhookRequest(**payload)
 
     def test_list_endpoints_paginate(self) -> None:
-        from baselith.plugins.api_routers import webhooks
+        from baselith.plugins.api_routers.routes import webhooks
 
         app = FastAPI()
         app.include_router(webhooks.router)
@@ -143,7 +143,8 @@ class TestComplianceBounds:
             )
 
     def test_every_list_endpoint_paginates(self) -> None:
-        from baselith.plugins.api_routers import compliance, compliance_artefacts
+        from baselith.plugins.api_routers import compliance
+        from baselith.plugins.api_routers.routes import compliance_artefacts
 
         app = FastAPI()
         app.include_router(compliance.router)
@@ -171,7 +172,7 @@ class TestComplianceBounds:
 
 class TestPrompts:
     def test_list_bounds(self) -> None:
-        from baselith.plugins.api_routers.prompts import PromptVersionIn
+        from baselith.plugins.api_routers.routes.prompts import PromptVersionIn
 
         PromptVersionIn(version="1", template="t", labels=["prod"])
         for payload in (
@@ -183,10 +184,10 @@ class TestPrompts:
                 PromptVersionIn(version="1", template="t", **payload)
 
     def test_listing_is_paginated_with_total(self, monkeypatch: Any) -> None:
-        import baselith.plugins.api_routers.prompts as prompts_module
+        import baselith.plugins.api_routers.routes.prompts as prompts_module
         from baselith.core.prompts.registry import PromptRegistry
         from baselith.core.prompts.types import PromptVersion
-        from baselith.plugins.api_routers.admin import verify_credentials
+        from baselith.plugins.api_routers.routes.admin import verify_credentials
 
         registry = PromptRegistry()
         for name in ("c", "a", "b"):
@@ -218,7 +219,7 @@ class TestIdBounds:
             ChatRequest(query="q", **{field: "x" * (MAX_ID_LENGTH + 1)})
 
     def test_tenant_create_payload_is_bounded(self) -> None:
-        from baselith.plugins.api_routers.tenant import CreateTenantRequest
+        from baselith.plugins.api_routers.routes.tenant import CreateTenantRequest
 
         CreateTenantRequest(id="acme", name="Acme")
         for payload in (

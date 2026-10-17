@@ -33,15 +33,21 @@ from baselith.core.observability.agent_spans import agent_span
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.checkpoint_errors import CheckpointConflictError
 
-from . import flows
 from .compliance import mark_generated
-from .durable import coding_scope, digest, durable_ask, durable_tests
-from .harness import TestReport, build_test_script, new_run_key, parse_report, screen
 from .llm import ask_typed
 from .prompts import TEXT_SYSTEM_PROMPT, explain_prompt
+from .runner import flows
+from .runner.durable import coding_scope, digest, durable_ask, durable_tests
+from .runner.harness import (
+    TestReport,
+    build_test_script,
+    new_run_key,
+    parse_report,
+    screen,
+)
 from .types import CodeExecutionResult, CodeLanguage, CodingResult
 from .workspace import Workspace, WorkspaceResult
-from .workspace_agent import run_workspace_tests, workspace_result
+from .workspace.agent import run_workspace_tests, workspace_result
 
 logger = get_logger(__name__)
 

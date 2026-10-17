@@ -22,7 +22,9 @@ async def test_scraper_context_exit_keeps_the_shared_robots_client() -> None:
     the crawl ran with no robots rules at all)."""
     from unittest.mock import AsyncMock, patch
 
-    with patch("baselith.plugins.web_scraper._http_pool.close_robots_client") as robots:
+    with patch(
+        "baselith.plugins.web_scraper.engine.http_pool.close_robots_client"
+    ) as robots:
         async with Scraper() as scraper:
             scraper.close_fetchers = AsyncMock()  # type: ignore[method-assign]
         scraper.close_fetchers.assert_awaited_once()
@@ -33,7 +35,8 @@ async def test_plugin_shutdown_closes_the_shared_robots_client() -> None:
     from unittest.mock import AsyncMock, patch
 
     with patch(
-        "baselith.plugins.web_scraper._http_pool.close_robots_client", new=AsyncMock()
+        "baselith.plugins.web_scraper.engine.http_pool.close_robots_client",
+        new=AsyncMock(),
     ) as robots:
         await WebScraperPlugin().shutdown()
     robots.assert_awaited_once()

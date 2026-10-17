@@ -27,7 +27,7 @@ class TestWaitActionIsBounded:
     def test_clamp_wait_seconds_bounds(self) -> None:
         import math
 
-        from baselith.plugins.browser_agent.actions import (
+        from baselith.plugins.browser_agent.agent.actions import (
             MAX_WAIT_SECONDS,
             clamp_wait_seconds,
         )
@@ -44,7 +44,7 @@ class TestWaitActionIsBounded:
         from unittest.mock import AsyncMock, MagicMock
 
         import baselith.plugins.browser_agent.agent as agent_module
-        from baselith.plugins.browser_agent.actions import MAX_WAIT_SECONDS
+        from baselith.plugins.browser_agent.agent.actions import MAX_WAIT_SECONDS
         from baselith.plugins.browser_agent.types import (
             BrowserAction,
             BrowserActionType,

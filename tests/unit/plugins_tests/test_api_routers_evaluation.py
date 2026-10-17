@@ -14,8 +14,8 @@ from baselith.core.events import EventBus
 
 
 def _client(service: Any) -> TestClient:
-    from baselith.plugins.api_routers.admin import verify_credentials
-    from baselith.plugins.api_routers.evaluation import router
+    from baselith.plugins.api_routers.routes.admin import verify_credentials
+    from baselith.plugins.api_routers.routes.evaluation import router
 
     app = FastAPI()
     app.include_router(router)
@@ -82,7 +82,7 @@ async def test_summary_reports_the_fleet_when_one_is_shared() -> None:
 
 
 def test_summary_requires_admin_credentials() -> None:
-    from baselith.plugins.api_routers.evaluation import router
+    from baselith.plugins.api_routers.routes.evaluation import router
 
     app = FastAPI()
     app.include_router(router)

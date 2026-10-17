@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from baselith.plugins import document_sources
-from baselith.plugins.document_sources.registry import registered_sources
+from baselith.plugins.document_sources.sources.registry import registered_sources
 
 
 def test_builtin_sources_are_registered_by_the_package() -> None:

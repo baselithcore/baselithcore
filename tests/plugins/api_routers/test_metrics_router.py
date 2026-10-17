@@ -57,7 +57,7 @@ def two_credentials(monkeypatch, fresh_security_config):
 
 
 def _app_with_admin() -> FastAPI:
-    from baselith.plugins.api_routers import admin as admin_module
+    from baselith.plugins.api_routers.routes import admin as admin_module
 
     app = _build_app()
     app.include_router(admin_module.router)

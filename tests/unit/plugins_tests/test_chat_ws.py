@@ -17,11 +17,11 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.chat_ws as chat_ws_module
+import baselith.plugins.api_routers.routes.chat_ws as chat_ws_module
 from baselith.core.auth.types import AuthRole, AuthUser
 from baselith.core.config import SecurityConfig
 from baselith.core.middleware.security import SecurityManager
-from baselith.plugins.api_routers.chat_ws import router
+from baselith.plugins.api_routers.routes.chat_ws import router
 
 
 class _FakeChatService:

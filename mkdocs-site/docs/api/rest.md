@@ -405,7 +405,7 @@ curl -u admin:password http://localhost:8000/admin/data
 
 ## Chat
 
-Mounted by the `api_routers` plugin (`baselith/plugins/api_routers/chat.py`). The whole
+Mounted by the `api_routers` plugin (`baselith/plugins/api_routers/routes/chat.py`). The whole
 router requires authentication (`Depends(require_user)`), so both endpoints
 accept the `user`, `admin`, or `job` roles.
 
@@ -542,7 +542,7 @@ change sent the bare text `stream failed`; both SDKs accept either form.
 
 ### WebSocket Chat (`WS /v1/chat/ws`)
 
-Persistent conversational channel (`baselith/plugins/api_routers/chat_ws.py`): one
+Persistent conversational channel (`baselith/plugins/api_routers/routes/chat_ws.py`): one
 authenticated connection, many turns. SSE (`POST /chat/stream`) remains the
 one-shot streaming surface. Connect to `/v1/chat/ws`; the unprefixed
 `/chat/ws` still works but is deprecated (see
@@ -621,7 +621,7 @@ asyncio.run(chat())
 
 ### `POST /agent/async` - Async Agent Run
 
-Enqueues one agent request on the task queue (`baselith/plugins/api_routers/async_runs.py`)
+Enqueues one agent request on the task queue (`baselith/plugins/api_routers/routes/async_runs.py`)
 and returns immediately — for runs too long for a synchronous HTTP response.
 Authenticated like the chat surface.
 
@@ -772,7 +772,7 @@ curl -u metrics:"$METRICS_PASSWORD" http://localhost:8000/metrics
 ## Admin & Analytics
 
 The admin surface is HTML + analytics JSON + the dead-letter queue, protected
-by **HTTP Basic Auth** (`baselith/plugins/api_routers/admin.py`). It is only mounted
+by **HTTP Basic Auth** (`baselith/plugins/api_routers/routes/admin.py`). It is only mounted
 when feedback is enabled (`ENABLE_FEEDBACK=true`, the default). The DLQ
 endpoints under `/admin/dlq` are listed with the other
 [feature-gated routers](#feature-gated-routers).
@@ -830,7 +830,7 @@ curl -u admin:password "http://localhost:8000/admin/data?days=30&recent_limit=20
 
 ## Indexing
 
-Document indexing lifecycle (`baselith/plugins/api_routers/index.py`). The whole router
+Document indexing lifecycle (`baselith/plugins/api_routers/routes/index.py`). The whole router
 requires admin or job credentials (`require_admin_or_job`).
 
 ### `GET /index/status`
@@ -877,7 +877,7 @@ the count the old synchronous response returned as `new_files_indexed`.
 
 ## Feedback
 
-Recorded when `ENABLE_FEEDBACK` is set (`baselith/plugins/api_routers/feedback.py`).
+Recorded when `ENABLE_FEEDBACK` is set (`baselith/plugins/api_routers/routes/feedback.py`).
 
 ### `POST /feedback`
 
@@ -989,7 +989,7 @@ the card only, not the A2A JSON-RPC endpoint, so the card advertises
 
 ## Tenant Administration
 
-Multi-tenant management (`baselith/plugins/api_routers/tenant.py`), mounted under the
+Multi-tenant management (`baselith/plugins/api_routers/routes/tenant.py`), mounted under the
 `/admin/tenants` prefix and protected by **HTTP Basic Auth**
 (`verify_credentials`).
 
@@ -1003,7 +1003,7 @@ Multi-tenant management (`baselith/plugins/api_routers/tenant.py`), mounted unde
 ## Prompt Catalog Administration
 
 Durable prompt-version and label management
-(`baselith/plugins/api_routers/prompts.py`), mounted under the `/prompts` prefix and
+(`baselith/plugins/api_routers/routes/prompts.py`), mounted under the `/prompts` prefix and
 protected by **HTTP Basic Auth** (`verify_credentials`). Reads always serve
 the local registry; the write endpoints require the durable prompt-sync
 backend (`BASELITH_PROMPT_SYNC=postgres`) and answer **503** without it, so a
@@ -1023,7 +1023,7 @@ for the write-through semantics and the cross-replica refresh model.
 
 ## Console
 
-The admin console (`baselith/plugins/api_routers/console.py`) is served at `GET /console`
+The admin console (`baselith/plugins/api_routers/routes/console.py`) is served at `GET /console`
 and `GET /console/{path}`, returning `baselith/core/static/frontend/index.html`. The
 shipped console is a self-contained, dependency-free page (`index.html` +
 `console.css` + `console.js`) served same-origin under `/static/frontend/`, so

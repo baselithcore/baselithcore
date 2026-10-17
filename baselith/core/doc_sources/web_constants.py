@@ -2,6 +2,6 @@
 
 import sys
 
-import baselith.plugins.document_sources.web_constants as _web_constants
+import baselith.plugins.document_sources.sources.web_constants as _web_constants
 
 sys.modules[__name__] = _web_constants

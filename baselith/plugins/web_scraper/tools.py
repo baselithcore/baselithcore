@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .crawler import CrawlEngine
-from .scraper import Scraper
+from .engine.crawler import CrawlEngine
+from .engine.scraper import Scraper
 
 
 async def web_scrape(

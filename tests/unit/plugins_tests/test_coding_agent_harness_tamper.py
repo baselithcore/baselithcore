@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from baselith.plugins.coding_agent.harness import (
+from baselith.plugins.coding_agent.runner.harness import (
     build_test_script,
     parse_report,
     report_marker,
     screen,
     screen_texts,
 )
-from baselith.plugins.coding_agent.workspace_harness import (
+from baselith.plugins.coding_agent.workspace.harness import (
     build_workspace_script,
     stage,
 )

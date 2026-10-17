@@ -791,7 +791,7 @@ round trips per bad login and, if the process died between the two, left a
 counter with **no TTL** — a permanent lockout for that IP. The script also
 re-arms the window on any key it finds without a TTL, healing such
 leftovers. The admin router
-(`baselith/plugins/api_routers/admin.py`) wires these into its `verify_credentials`
+(`baselith/plugins/api_routers/routes/admin.py`) wires these into its `verify_credentials`
 dependency. The lockout state and checks live in `AdminLockoutMixin`
 (`baselith/core/middleware/_admin_lockout.py`), mixed into `SecurityManager` — the
 public helpers above are unchanged.

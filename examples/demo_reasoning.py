@@ -4,7 +4,7 @@ import os
 from baselith.core.services.llm.service import LLMService
 
 # Standard imports for Baselith-Core
-from baselith.plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+from baselith.plugins.reasoning_agent.agent import ReasoningAgent
 
 
 class MockLLMProvider:
