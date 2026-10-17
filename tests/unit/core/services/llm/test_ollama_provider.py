@@ -249,8 +249,34 @@ class TestOllamaProviderGenerateStream:
 
             assert len(chunks) == 3
             assert chunks[0][0] == "Hello"
-            assert chunks[1][0] == "world"
-            assert chunks[2][0] == "!"
+            # A delta keeps its whitespace: it is the word break.
+            assert chunks[1][0] == " world"
+            assert "".join(c[0] for c in chunks) == "Hello world!"
+
+    async def test_generate_stream_keeps_breaks_and_drops_only_the_leading_blank(self):
+        """Paragraph breaks survive; the blank before the first word does not."""
+        mock_client = AsyncMock()
+        mock_chunks = [
+            {"message": {"content": "\n"}},
+            {"message": {"content": "  - one"}},
+            {"message": {"content": "\n\n"}},
+            {"message": {"content": "- two"}},
+        ]
+        mock_client.chat.return_value = AsyncIterator(mock_chunks)
+
+        with patch(
+            "baselith.core.services.llm.providers.ollama_provider.ollama"
+        ) as mock_ollama:
+            mock_ollama.AsyncClient.return_value = mock_client
+            from baselith.core.services.llm.providers.ollama_provider import (
+                OllamaProvider,
+            )
+
+            provider = OllamaProvider()
+            text = "".join(
+                [c async for c, _ in provider.generate_stream("P", model="llama3.2")]
+            )
+            assert text == "- one\n\n- two"
 
     async def test_generate_stream_accumulates_tokens(self):
         """Verify generate_stream accumulates token counts."""
