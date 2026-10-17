@@ -189,12 +189,19 @@ async def test_a_callers_policy_replaces_the_scrapers_own(monkeypatch):
 # -- the real curl transport against a local server --------------------------------------
 
 
+def _header_safe(value: str) -> str:
+    """Drop line breaks so an echoed request header cannot split the response."""
+    return value.replace("\r", "").replace("\n", "")
+
+
 class _Handler(BaseHTTPRequestHandler):
     def _encoded(self, body: bytes, encoding: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Encoding", encoding)
-        self.send_header("X-Accept-Encoding", self.headers.get("Accept-Encoding", ""))
+        self.send_header(
+            "X-Accept-Encoding", _header_safe(self.headers.get("Accept-Encoding", ""))
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -213,7 +220,7 @@ class _Handler(BaseHTTPRequestHandler):
         body = PAGE if self.path != "/big" else b"x" * 50_000
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("X-Host-Seen", self.headers.get("Host", ""))
+        self.send_header("X-Host-Seen", _header_safe(self.headers.get("Host", "")))
         self.end_headers()
         self.wfile.write(body)
 
