@@ -111,6 +111,10 @@ request rather than failing it; other models, including unknown ones behind a
 compatible endpoint, keep theirs. The `LLM_OPENAI_REASONING_EFFORT` default is
 sent on the text, streaming and message API paths, but never to gpt-3, gpt-4 or
 chatgpt models, which answer 400 to the field.
+The streamed message turn (`generate_messages_stream`, the path every tool-calling
+chat uses) carries it too: a reasoning model refuses function tools on Chat
+Completions unless the effort is `none`, so a streamed turn without the default
+answers 400. A `reasoning_effort` passed by the caller wins.
 
 When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
 fills it on every path — text, streaming, structured and the message API —
@@ -1393,7 +1397,8 @@ server's own default stands. A call that sets `chat_template_kwargs.enable_think
 itself keeps its choice, and JSON mode still turns thinking off, because a
 reasoning block forced inside a constrained JSON object garbles the reply. The
 message-history and structured request builders forward `extra_body`, which is
-how this reaches the server.
+how this reaches the server. It is separate from `LLM_OPENAI_REASONING_EFFORT`,
+which is OpenAI's own parameter.
 
 ---
 

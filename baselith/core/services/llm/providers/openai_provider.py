@@ -393,7 +393,7 @@ class OpenAIProvider:
             model,
             tools=tools,
             system=system,
-            **kwargs,
+            **{"reasoning_effort": self._reasoning_effort, **kwargs},
         ):
             yield event
 

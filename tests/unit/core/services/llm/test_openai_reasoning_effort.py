@@ -115,3 +115,53 @@ def test_message_path_never_sends_effort_to_a_non_reasoning_model() -> None:
         reasoning_effort="none",
     )
     assert "reasoning_effort" not in req
+
+
+async def _streamed_request(model: str, effort: str | None, **kwargs) -> dict:
+    """The request the provider's streamed message turn sends (no network)."""
+    from types import SimpleNamespace
+
+    from baselith.core.services.llm.messages import Message
+    from baselith.core.services.llm.tool_calling import LLMToolSpec
+
+    seen: list[dict] = []
+
+    class _Empty:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def close(self) -> None:
+            return None
+
+    async def create(**request):
+        seen.append(request)
+        return _Empty()
+
+    provider = OpenAIProvider(api_key="x", reasoning_effort=effort)
+    provider.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    tool = LLMToolSpec(name="t", description="d", parameters={"type": "object"})
+    async for _ in provider.generate_messages_stream(
+        [Message.user("hi")], model, tools=[tool], **kwargs
+    ):
+        pass
+    return seen[0]
+
+
+async def test_the_streamed_turn_carries_the_default_effort_with_tools() -> None:
+    # Lith streams every turn with tools: a reasoning model answers 400 without "none".
+    assert (await _streamed_request("gpt-6-luna", "none"))["reasoning_effort"] == "none"
+
+
+async def test_the_streamed_turn_lets_the_caller_override_and_skips_old_models() -> (
+    None
+):
+    assert (await _streamed_request("gpt-6-luna", "none", reasoning_effort="low"))[
+        "reasoning_effort"
+    ] == "low"
+    assert "reasoning_effort" not in await _streamed_request("gpt-4o", "none")
+    assert "reasoning_effort" not in await _streamed_request("gpt-6-luna", None)
