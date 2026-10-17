@@ -4,8 +4,8 @@ Official BaselithCore plugin for scraping and crawling web content.
 
 ## Features
 
-- **Dual-mode Fetching**: Fast HTTP (httpx) or JavaScript rendering (Playwright)
-- **7 Modular Extractors**: Text, Links, Images, Metadata, Schema.org, CSS Selectors
+- **Three fetchers**: Fast HTTP (httpx), JavaScript rendering (Playwright), or anti-bot HTTP with a real Chrome TLS fingerprint ([Scrapling](https://github.com/D4Vinci/Scrapling), optional)
+- **Modular Extractors**: Text, Links, Images, Metadata, Schema.org, CSS Selectors, Markdown (through Scrapling, for language models)
 - **Middleware Chain**: Rate limiting, Caching, Retry, Logging
 - **Recursive Crawler**: BFS with depth/page limits and robots.txt support
 - **Storage Backends**: Memory, Filesystem
@@ -271,6 +271,7 @@ class MyMiddleware(BaseMiddleware):
 - `httpx` - HTTP client
 - `beautifulsoup4` - HTML parsing
 - `playwright` (optional) - JavaScript rendering
+- `scrapling[fetchers]==0.4.15` + `markdownify` (optional) - anti-bot HTTP fetching and the `markdown` extractor
 
 ## Module Structure
 
@@ -287,7 +288,9 @@ baselith/core/scraper/
 ├── fetchers/
 │   ├── base.py          # BaseFetcher
 │   ├── httpx_fetcher.py # HTTP fetcher
-│   └── playwright_fetcher.py  # JS fetcher
+│   ├── playwright_fetcher.py  # JS fetcher
+│   ├── scrapling_fetcher.py   # Anti-bot HTTP fetcher (Scrapling transport)
+│   └── _curl.py         # Its pinned, bounded curl_cffi GET
 ├── extractors/
 │   ├── base.py          # BaseExtractor, Registry
 │   ├── text.py          # TextExtractor
@@ -295,6 +298,7 @@ baselith/core/scraper/
 │   ├── images.py        # ImageExtractor
 │   ├── metadata.py      # MetadataExtractor
 │   ├── schema_org.py    # SchemaOrgExtractor
+│   ├── markdown.py      # MarkdownExtractor (Scrapling)
 │   └── css_selector.py  # CssSelectorExtractor
 ├── middleware/
 │   ├── base.py          # MiddlewareChain

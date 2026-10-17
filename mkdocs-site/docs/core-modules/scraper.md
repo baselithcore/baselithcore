@@ -14,7 +14,8 @@ The scraper is designed to be **resilient** and **extensible**. It handles rate 
 
 **Key Features**:
 
-- **Dual Rendering**: Static (fast) and Dynamic (JS-aware) fetchers.
+- **Three fetchers**: static (httpx, fast), anti-bot static with a real Chrome TLS fingerprint
+  (Scrapling, optional) and dynamic (Playwright, JS-aware).
 - **Middleware Chain**: Built-in support for caching, rate limiting, and logging.
 - **Pluggable Extractors**: Dedicated logic for text, links, images, metadata, and Schema.org.
 - **Concurrent Execution**: Scrape multiple URLs in parallel with controlled concurrency.
@@ -29,6 +30,7 @@ graph TD
     Scraper[Scraper Facade] --> Middleware[Middleware Chain]
     Middleware --> Httpx[HTTpx Fetcher]
     Middleware --> Playwright[Playwright Fetcher]
+    Middleware --> Scrapling[Scrapling Fetcher]
 
     Scraper --> Extractors[Extractor Registry]
     Extractors --> Text[TextExtractor]
@@ -65,7 +67,28 @@ async with Scraper() as scraper:
         "https://react-app.com",
         use_js=True
     )
+
+    # 3. A site that refuses plain HTTP clients: Chrome's TLS fingerprint, no browser,
+    #    and the main content as Markdown for a language model
+    page, data = await scraper.scrape(
+        "https://example.com", extractors=["markdown"], fetcher="scrapling"
+    )
+    print(data.markdown)
 ```
+
+### Anti-bot fetching (Scrapling)
+
+Many sites answer a plain HTTP client with 403 or a challenge page because its TLS and HTTP/2
+fingerprint is not a browser's. `ScraplingFetcher` (`fetcher="scrapling"`, or `anti_bot=True` on
+the `web_scrape` tool) fetches with a real Chrome fingerprint through `curl_cffi`, the transport
+[Scrapling](https://github.com/D4Vinci/Scrapling) uses, without starting a browser. It is optional:
+`pip install "scrapling[fetchers]==0.4.15" markdownify` (no `scrapling install`: no browser is
+downloaded); without it a fetch raises `FetchError` (501) with that hint. A page that needs
+JavaScript to pass a challenge still needs a browser.
+
+`ScraplingFetcher(policy=SsrfPolicy(...))` replaces the scraper's own SSRF policy
+(`SCRAPER_BLOCK_PRIVATE_IPS`) for that fetcher: a caller that fetches addresses a language model
+chose passes its own, so that loosening the scraper for an internal crawl never loosens it there.
 
 ### Batch Scraping
 
@@ -92,9 +115,13 @@ The scraper uses a registry of specialized extractors to structure the raw HTML.
 | `MetadataExtractor`    | `metadata`     | Page title, description, and OpenGraph tags    |
 | `SchemaOrgExtractor`   | `schema_org`   | Structured data in JSON-LD or Microdata format |
 | `CssSelectorExtractor` | `css_selector` | Custom extraction via CSS selectors            |
+| `MarkdownExtractor`    | `markdown`     | The `<body>` as Markdown through Scrapling     |
 
-All six classes are importable from `baselith.plugins.web_scraper.extractors`; the `Key`
-column is each extractor's `name` attribute.
+All seven classes are importable from `baselith.plugins.web_scraper.extractors`; the `Key`
+column is each extractor's `name` attribute. `markdown` (optional, needs `scrapling` and
+`markdownify`) drops what a reader never sees before converting — scripts, styles, CSS-hidden
+content, `hidden`, `aria-hidden="true"`, `<template>`, `<noscript>` — so hidden text cannot steer
+a model; `page_markdown(html, url, css_selector=...)` converts only the matching elements.
 
 ---
 
@@ -110,6 +137,8 @@ The scraper includes industry-standard protections against **Server-Side Request
 6. **Playwright Sub-resource Guard**: When `block_private_ips` is enabled (the default), `PlaywrightFetcher` installs a route interceptor (`_ssrf_route_guard`) on `**/*` that re-validates **every** request the rendered page issues — not just the initial navigation — through `assert_url_safe_async`. A scraped page cannot smuggle an SSRF probe through a same-origin `<img>`/`fetch`/XHR sub-resource that the one-shot pre-`goto` check would never see; any exception (including an SSRF rejection) aborts the request rather than letting it through.
 
 7. **Event-loop hygiene**: the DNS-resolving SSRF pin in `HttpxFetcher`, the pre-navigation check in `PlaywrightFetcher`, and extraction (BeautifulSoup parsing of up to 10 MB, once per extractor) all run in a worker thread. Redirect `Location` values of every relative form are joined against the current URL, and `ScrapedPage.final_url` names the host, not the pinned IP.
+
+8. **Scrapling transport**: `ScraplingFetcher` does not use Scrapling's own `AsyncFetcher`, which opens an unpinned curl session and reads the whole body. Every hop is pinned through `CURLOPT_RESOLVE` (TLS still names the real host) and the address curl actually connected to (`primary_ip`) must equal the pinned one before the body is read, so a host curl parses differently from the guard fails closed (403); an address with credentials is refused; the environment's proxy is ignored; redirects are followed by hand and re-validated; curl's own decoding is off — it asks for `gzip, deflate` only and the body is inflated step by step under the 10 MB cap (a compression bomb is refused with 413, any other encoding with 415).
 
 The underlying checks (`is_private_ip`, `check_ssrf_safe`, `get_pinned_url_for_host` in `baselith.plugins.web_scraper.utils`) now delegate to the unified `baselith.core.security.ssrf` module shared with the rest of the framework — see [Security & Encryption §SSRF Protection](security.md#ssrf-protection) for the full API and the other adopted call sites.
 
@@ -153,7 +182,7 @@ scraper = Scraper(config=config)
 ## Best Practices
 
 !!! tip "Performance"
-    Always use the static fetcher (default) unless the page explicitly requires JavaScript. Playwright is much heavier and slower.
+    Always use the static fetcher (default) unless the page explicitly requires JavaScript. Playwright is much heavier and slower. When a site refuses the static fetcher, try `fetcher="scrapling"` before Playwright: it still starts no browser.
 
 !!! warning "Robots.txt"
     While the scraper provides tools, developers are responsible for complying with a site's `robots.txt` and terms of service.

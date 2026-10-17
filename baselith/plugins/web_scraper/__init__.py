@@ -45,13 +45,20 @@ from .extractors import (
     FieldSchema,
     ImageExtractor,
     LinkExtractor,
+    MarkdownExtractor,
     MetadataExtractor,
     SchemaOrgExtractor,
     TextExtractor,
 )
 
 # Fetchers
-from .fetchers import BaseFetcher, FetchError, HttpxFetcher, PlaywrightFetcher
+from .fetchers import (
+    BaseFetcher,
+    FetchError,
+    HttpxFetcher,
+    PlaywrightFetcher,
+    ScraplingFetcher,
+)
 
 # Middleware
 from .middleware import (
@@ -110,6 +117,7 @@ __all__ = [
     "FetchError",
     "HttpxFetcher",
     "PlaywrightFetcher",
+    "ScraplingFetcher",
     # Extractors
     "BaseExtractor",
     "ExtractorRegistry",
@@ -119,6 +127,7 @@ __all__ = [
     "MetadataExtractor",
     "SchemaOrgExtractor",
     "CssSelectorExtractor",
+    "MarkdownExtractor",
     "ExtractionSchema",
     "FieldSchema",
     # Middleware

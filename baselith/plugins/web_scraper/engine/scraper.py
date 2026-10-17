@@ -19,11 +19,12 @@ from ..extractors import (
     CssSelectorExtractor,
     ImageExtractor,
     LinkExtractor,
+    MarkdownExtractor,
     MetadataExtractor,
     SchemaOrgExtractor,
     TextExtractor,
 )
-from ..fetchers import HttpxFetcher, PlaywrightFetcher
+from ..fetchers import HttpxFetcher, PlaywrightFetcher, ScraplingFetcher
 from ..middleware import (
     CacheMiddleware,
     LoggingMiddleware,
@@ -57,6 +58,7 @@ class Scraper:
         "metadata": MetadataExtractor,
         "schema_org": SchemaOrgExtractor,
         "css_selector": CssSelectorExtractor,
+        "markdown": MarkdownExtractor,
     }
 
     def __init__(
@@ -79,6 +81,7 @@ class Scraper:
         # Initialize fetchers
         self._httpx_fetcher: HttpxFetcher | None = None
         self._playwright_fetcher: PlaywrightFetcher | None = None
+        self._scrapling_fetcher: ScraplingFetcher | None = None
 
         # Build middleware chain
         self.middleware = MiddlewareChain()
@@ -97,15 +100,22 @@ class Scraper:
         # Initialize extractors
         self._extractors: dict[str, object] = {}
 
-    async def _get_fetcher(self, use_js: bool = False):
+    async def _get_fetcher(self, use_js: bool = False, fetcher: str | None = None):
         """Get or create the appropriate fetcher.
 
         Args:
             use_js: Whether to use JavaScript rendering.
+            fetcher: ``"scrapling"`` for the anti-bot HTTP fetcher (a real browser's TLS
+                fingerprint, see :class:`ScraplingFetcher`); None picks by ``use_js`` and the
+                configured default.
 
         Returns:
             Fetcher instance.
         """
+        if fetcher == "scrapling" and not use_js:
+            if self._scrapling_fetcher is None:
+                self._scrapling_fetcher = ScraplingFetcher(self.config)
+            return self._scrapling_fetcher
         if use_js or self.config.default_fetcher == "playwright":
             if self._playwright_fetcher is None:
                 self._playwright_fetcher = PlaywrightFetcher(self.config)
@@ -135,6 +145,7 @@ class Scraper:
         url: str,
         extractors: list[str] | None = None,
         use_js: bool = False,
+        fetcher: str | None = None,
     ) -> tuple[ScrapedPage, ExtractedData]:
         """Scrape a single URL.
 
@@ -142,6 +153,8 @@ class Scraper:
             url: The URL to scrape.
             extractors: List of extractor names to use.
             use_js: Whether to use JavaScript rendering.
+            fetcher: ``"scrapling"`` to fetch with a real browser's TLS fingerprint
+                (sites that refuse plain HTTP clients); ignored when ``use_js`` is set.
 
         Returns:
             Tuple of (ScrapedPage, ExtractedData).
@@ -157,7 +170,7 @@ class Scraper:
                 return cached, data
 
         # Fetch the page
-        fetcher = await self._get_fetcher(use_js)
+        chosen = await self._get_fetcher(use_js, fetcher)
 
         # Apply middleware
         processed_url = await self.middleware.process_request(url)
@@ -173,7 +186,7 @@ class Scraper:
             return page, ExtractedData()
 
         # Fetch
-        page = await fetcher.fetch(processed_url)
+        page = await chosen.fetch(processed_url)
 
         # Process response through middleware
         page = await self.middleware.process_response(url, page)
@@ -236,6 +249,8 @@ class Scraper:
                     data.schema_org = result
                 elif name == "css_selector":
                     data.custom.update(result if result else {})
+                elif name == "markdown":
+                    data.markdown = result
             except Exception:
                 # Log but continue with other extractors
                 pass  # nosec B110
@@ -276,9 +291,14 @@ class Scraper:
         :meth:`close` it leaves the process-wide robots.txt client open for
         every other scraper. Each fetcher is closed even if the other fails.
         """
-        fetchers = (self._httpx_fetcher, self._playwright_fetcher)
+        fetchers = (
+            self._httpx_fetcher,
+            self._playwright_fetcher,
+            self._scrapling_fetcher,
+        )
         self._httpx_fetcher = None
         self._playwright_fetcher = None
+        self._scrapling_fetcher = None
         for fetcher in fetchers:
             if fetcher is None:
                 continue

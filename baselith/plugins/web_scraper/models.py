@@ -89,6 +89,8 @@ class ExtractedData:
     metadata: PageMetadata | None = None
     schema_org: list[dict[str, Any]] = field(default_factory=list)
     custom: dict[str, Any] = field(default_factory=dict)
+    #: The main content as Markdown (the ``markdown`` extractor, through Scrapling).
+    markdown: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -113,6 +115,7 @@ class ExtractedData:
             ),
             "schema_org": self.schema_org,
             "custom": self.custom,
+            "markdown": self.markdown,
         }
 
 

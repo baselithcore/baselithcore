@@ -17,6 +17,7 @@ async def web_scrape(
     url: str,
     extract: list[str] | None = None,
     use_javascript: bool = False,
+    anti_bot: bool = False,
 ) -> dict[str, Any]:
     """Scrape a single web page and extract data.
 
@@ -25,8 +26,11 @@ async def web_scrape(
     Args:
         url: The URL to scrape.
         extract: Types of data to extract. Options: 'text', 'links', 'images',
-                 'metadata', 'schema_org'. Default: ['text', 'links', 'metadata'].
+                 'metadata', 'schema_org', 'markdown' (the main content as Markdown,
+                 through Scrapling). Default: ['text', 'links', 'metadata'].
         use_javascript: Whether to render JavaScript (slower but needed for SPAs).
+        anti_bot: Fetch with a real browser's TLS fingerprint (Scrapling), for sites
+                  that refuse plain HTTP clients. Ignored when use_javascript is set.
 
     Returns:
         Dictionary containing:
@@ -39,6 +43,7 @@ async def web_scrape(
         - images: List of extracted images (if 'images' in extract)
         - metadata: Page metadata (if 'metadata' in extract)
         - schema_org: Structured data (if 'schema_org' in extract)
+        - markdown: The main content as Markdown (if 'markdown' in extract)
     """
     extract = extract or ["text", "links", "metadata"]
 
@@ -47,6 +52,7 @@ async def web_scrape(
             url=url,
             extractors=extract,
             use_js=use_javascript,
+            fetcher="scrapling" if anti_bot else None,
         )
 
     result: dict[str, Any] = {
@@ -84,6 +90,9 @@ async def web_scrape(
 
     if "schema_org" in extract:
         result["schema_org"] = data.schema_org[:10]  # Limit to 10 schemas
+
+    if "markdown" in extract:
+        result["markdown"] = data.markdown
 
     return result
 
