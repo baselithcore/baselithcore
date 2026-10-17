@@ -13,7 +13,7 @@ Official BaselithCore plugin for scraping and crawling web content.
 
 ## Compatibility
 
-Legacy imports from `baselith.core.scraper.*` are temporarily preserved through module-level shims during the migration away from the core.
+Legacy imports from `baselith.core.scraper.*` keep working: the core package is the plugin package under another name, and the modules that moved into `engine/` (`crawler`, `scraper`, `protocols`, `_http_pool`) stay importable at their old path through `baselith.core.plugins.compat_aliases`. New code imports from `baselith.plugins.web_scraper`.
 
 ## Quick Start
 
@@ -276,15 +276,18 @@ class MyMiddleware(BaseMiddleware):
 ## Module Structure
 
 ```text
-baselith/core/scraper/
-├── __init__.py          # Public API
-├── config.py            # Pydantic configuration
+baselith/plugins/web_scraper/
+├── __init__.py          # Public API (re-exports; legacy paths aliased)
+├── plugin.py            # WebScraperPlugin
+├── manifest.yaml
 ├── models.py            # Data classes
-├── protocols.py         # Abstract interfaces
-├── scraper.py           # Main Scraper facade
-├── crawler.py           # CrawlEngine
 ├── tools.py             # Agent tools
 ├── utils.py             # Utilities
+├── engine/
+│   ├── scraper.py       # Main Scraper facade
+│   ├── crawler.py       # CrawlEngine
+│   ├── protocols.py     # Abstract interfaces
+│   └── http_pool.py     # Shared httpx client for auxiliary fetches
 ├── fetchers/
 │   ├── base.py          # BaseFetcher
 │   ├── httpx_fetcher.py # HTTP fetcher
@@ -311,6 +314,9 @@ baselith/core/scraper/
     ├── memory.py        # MemoryStorage
     └── filesystem.py    # FilesystemStorage
 ```
+
+The configuration model (`ScraperConfig`) lives in the framework core:
+`baselith.core.config.scraper`.
 
 ## Lifecycle and safety notes
 
