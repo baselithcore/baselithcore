@@ -774,6 +774,12 @@ pull-request-only, so the release job cannot commit here. Follows
 - Raised the project test-coverage gate.
 
 ### Fixed
+- **vLLM streams stay live with thinking switched off.** With
+  `LLM_VLLM_ENABLE_THINKING=false` the vLLM provider's stream filter still waited
+  for a `</think>` that a thinking-off reply never sends, so every streamed answer
+  from a model not listed in `LLM_VLLM_LIVE_STREAM_MODELS` arrived in one piece at
+  the end. A request that turns thinking off now releases text as soon as it is
+  clear no `<think>` opens it, on both stream paths.
 
 - `scripts/restore-db.sh` now restores gzipped (`.sql.gz`) backups.
 

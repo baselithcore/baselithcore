@@ -131,6 +131,17 @@ def _with_default_thinking(
     return {**kwargs, "extra_body": extra_body}
 
 
+def _thinking_off(kwargs: dict[str, Any]) -> bool:
+    """Whether the request turns the template's thinking off.
+
+    The template then closes the reasoning block in the prompt itself, so the
+    completion opens straight with the answer: a stream filter that waits for
+    a ``</think>`` would hold the whole answer back to the end.
+    """
+    template = (kwargs.get("extra_body") or {}).get("chat_template_kwargs") or {}
+    return template.get("enable_thinking") is False
+
+
 def _reasoning_of(delta: Any) -> str | None:
     """The reasoning a parsing server streams in its own delta field."""
     for name in ("reasoning_content", "reasoning"):
@@ -362,7 +373,9 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
         kwargs = _with_default_thinking(kwargs, self._enable_thinking)
         from baselith.core.config.services import get_llm_config
 
-        live = can_stream_live(model, get_llm_config().vllm_live_stream_models)
+        live = _thinking_off(kwargs) or can_stream_live(
+            model, get_llm_config().vllm_live_stream_models
+        )
         async for event in stream_messages(
             client,
             messages,
@@ -405,7 +418,12 @@ class VLLMProvider(VLLMRoutingMixin, OpenAIProvider):
                 stream_options={"include_usage": True},
                 **request_kwargs(kwargs),
             )
-            guard = ReasoningStreamFilter()
+            from baselith.core.config.services import get_llm_config
+
+            guard = ReasoningStreamFilter(
+                eager=_thinking_off(kwargs)
+                or can_stream_live(model, get_llm_config().vllm_live_stream_models)
+            )
             tokens = estimate_tokens(prompt)
             billed: int | None = None
             async for chunk in stream:

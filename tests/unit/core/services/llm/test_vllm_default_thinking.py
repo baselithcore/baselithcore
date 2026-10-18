@@ -171,3 +171,64 @@ class TestConfigAndFactory:
         )
         provider = create_provider(config)
         assert provider._enable_thinking is False
+
+
+def _stream_of(*pieces: str):
+    async def _chunks():
+        for piece in pieces:
+            chunk = MagicMock()
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = piece
+            chunk.choices[0].delta.reasoning_content = None
+            chunk.choices[0].delta.reasoning = None
+            chunk.choices[0].delta.tool_calls = None
+            chunk.choices[0].finish_reason = None
+            chunk.usage = None
+            yield chunk
+
+    return _chunks()
+
+
+@pytest.mark.asyncio
+class TestStreamingStaysLiveWithThinkingOff:
+    """With thinking off the template closes the reasoning block itself, so the
+    answer must stream as it comes, not wait for a ``</think>`` that never
+    arrives (the whole reply used to land at once, at the end)."""
+
+    async def _texts(self, enable_thinking, method: str) -> list[str]:
+        from baselith.core.services.llm.messages import Message
+
+        client = AsyncMock()
+        client.chat.completions.create.return_value = _stream_of(
+            "Ciao", " dal", " modello."
+        )
+        provider = VLLMProvider(
+            api_base="http://gpu:8000", enable_thinking=enable_thinking
+        )
+        texts: list[str] = []
+        with patch(_SDK) as sdk:
+            sdk.AsyncOpenAI.return_value = client
+            if method == "generate_stream":
+                async for text, _tokens in provider.generate_stream("hi", "qwen"):
+                    if text:
+                        texts.append(text)
+            else:
+                async for event in provider.generate_messages_stream(
+                    [Message.user("hi")], "qwen"
+                ):
+                    text = getattr(event, "text", None)
+                    if text:
+                        texts.append(text)
+        return texts
+
+    @pytest.mark.parametrize("method", ["generate_stream", "generate_messages_stream"])
+    async def test_thinking_off_streams_piece_by_piece(self, method):
+        texts = await self._texts(False, method)
+        assert "".join(texts) == "Ciao dal modello."
+        assert len(texts) == 3
+
+    @pytest.mark.parametrize("method", ["generate_stream", "generate_messages_stream"])
+    async def test_server_default_still_holds_for_inline_reasoning(self, method):
+        texts = await self._texts(None, method)
+        assert "".join(texts) == "Ciao dal modello."
+        assert len(texts) == 1

@@ -1400,6 +1400,14 @@ message-history and structured request builders forward `extra_body`, which is
 how this reaches the server. It is separate from `LLM_OPENAI_REASONING_EFFORT`,
 which is OpenAI's own parameter.
 
+Streaming follows the same switch. A thinking model's reply can open with
+reasoning the server did not parse out, so the vLLM stream normally holds text
+back until a `</think>` shows where the answer starts (unless the model is listed
+in `LLM_VLLM_LIVE_STREAM_MODELS`). A request with thinking off cannot carry such a
+block — the template closes it in the prompt — so its stream releases text as
+soon as it is clear no `<think>` opens it, instead of holding the whole answer to
+the end.
+
 ---
 
 ## VectorStore Service
