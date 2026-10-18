@@ -110,10 +110,12 @@ class VectorStoreConfig(AliasedSettings):
 
     # Managed/remote Qdrant: API key + TLS. Both unset for the loopback
     # compose default; a remote instance without them would send unauthenticated
-    # plaintext traffic.
+    # plaintext traffic. ``BASELITH_QDRANT_API_KEY`` is the name the Helm chart
+    # and the core inference settings use for the same key; without it a cell's
+    # own Qdrant answered every memory search with 401.
     qdrant_api_key: SecretStr | None = Field(
         default=None,
-        alias="QDRANT_API_KEY",
+        validation_alias=AliasChoices("BASELITH_QDRANT_API_KEY", "QDRANT_API_KEY"),
         description="API key for managed/remote Qdrant (unset for local)",
     )
     qdrant_https: bool = Field(

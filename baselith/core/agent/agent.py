@@ -41,7 +41,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -208,6 +208,8 @@ class Agent[OutputT]:
         self._loop_limits = loop_limits
         self._tool_ledger = tool_ledger
         self._tools: dict[str, ToolDefinition] = collect_tools(tools)
+        #: Tools kept callable but out of the specs the model is sent (see ``defer_tools``).
+        self._deferred: set[str] = set()
 
     # -- internals ---------------------------------------------------------
 
@@ -228,9 +230,29 @@ class Agent[OutputT]:
         """
         return tuple(self._tools)
 
+    def defer_tools(self, names: Iterable[str]) -> None:
+        """Keep ``names`` callable but leave them out of the specs sent to the model.
+
+        For an agent armed with more tools than a model handles well: the host
+        advertises a focused set and reveals the rest on demand (a call to a
+        deferred tool still runs, through the same chokepoint). Unknown names
+        are ignored.
+        """
+        self._deferred.update(n for n in names if n in self._tools)
+
+    def reveal_tools(self, names: Iterable[str]) -> tuple[str, ...]:
+        """Advertise deferred tools from the next model call on; the names newly shown."""
+        shown = tuple(dict.fromkeys(n for n in names if n in self._deferred))
+        self._deferred.difference_update(shown)
+        return shown
+
     def _tool_specs(self) -> list[LLMToolSpec] | None:
-        """Tool definitions for the model, annotated with their category."""
-        return build_tool_specs(self._tools)
+        """Tool definitions for the model (deferred ones left out), with their category."""
+        if not self._deferred:
+            return build_tool_specs(self._tools)
+        return build_tool_specs(
+            {n: d for n, d in self._tools.items() if n not in self._deferred}
+        )
 
     def _response_format(self) -> ResponseFormat | None:
         if self.output_type is None or not issubclass(self.output_type, BaseModel):

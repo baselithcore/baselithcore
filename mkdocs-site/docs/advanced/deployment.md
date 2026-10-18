@@ -732,6 +732,7 @@ uvicorn backend:app --host "$HOST" --port "$PORT" \
     --forwarded-allow-ips "${FORWARDED_ALLOW_IPS:-127.0.0.1}" \
     --timeout-graceful-shutdown "${GRACEFUL_SHUTDOWN_TIMEOUT:-30}" \
     --timeout-keep-alive "${UVICORN_KEEP_ALIVE:-75}" \
+    --ws-max-size "${UVICORN_WS_MAX_SIZE:-1048576}" \
     ${UVICORN_LIMIT_CONCURRENCY:+--limit-concurrency "$UVICORN_LIMIT_CONCURRENCY"}
 ```
 
@@ -785,6 +786,11 @@ variables, so the three entry points behave alike behind one proxy.
   as latency collapse across every request. Size it from a load test against
   a single replica; the `${VAR:+...}` form passes the flag only when the
   variable is set, so leaving it unset keeps uvicorn's default (no limit).
+
+- **`--ws-max-size`** (`UVICORN_WS_MAX_SIZE`, default 1048576) — the largest
+  single WebSocket message. Uvicorn's own default is 16 MiB, and the chat
+  socket parses a frame in memory before its query-length check runs; the
+  HTTP body cap (`MAX_REQUEST_SIZE_BYTES`) never sees a WebSocket frame.
 
 !!! tip "Worker processes (`WEB_CONCURRENCY`)"
     Size `WEB_CONCURRENCY` to roughly the number of CPU cores available to the
@@ -1363,7 +1369,8 @@ GRAPH_DB_URL=redis://falkordb:6379
 
 # LLM
 LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-6-luna
+LLM_OPENAI_REASONING_EFFORT=none
 LLM_OPENAI_API_KEY=${OPENAI_API_KEY:-}
 # Per-run token cap that stops runaway agent loops. Aliases: COST_CONTROL_ENABLED /
 # LLM_BUDGET_ENABLED and AGENT_MAX_TOKENS / LLM_BUDGET_MAX_TOKENS. The default is

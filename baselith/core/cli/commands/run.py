@@ -153,6 +153,8 @@ def run_server(
             # optional load-shedding (503 above N concurrent connections
             # instead of queueing; unset = uvicorn's default, no limit).
             "timeout_keep_alive": int(os.getenv("UVICORN_KEEP_ALIVE", "75")),
+            # Cap on one WebSocket message (uvicorn defaults to 16 MiB).
+            "ws_max_size": int(os.getenv("UVICORN_WS_MAX_SIZE", "1048576")),
         }
         limit_concurrency = os.getenv("UVICORN_LIMIT_CONCURRENCY", "").strip()
         if limit_concurrency:

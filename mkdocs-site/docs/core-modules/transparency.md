@@ -80,7 +80,7 @@ model provider at logit level.
 
 ## First-party wiring
 
-The framework's own chat surface (`baselith/plugins/api_routers/chat.py`) applies these
+The framework's own chat surface (`baselith/plugins/api_routers/routes/chat.py`) applies these
 primitives when `TRANSPARENCY_ENABLED` is set:
 
 * `POST /chat` — adds the disclosure to `metadata.ai_disclosure`, sets

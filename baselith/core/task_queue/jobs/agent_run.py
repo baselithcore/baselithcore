@@ -105,9 +105,14 @@ async def notify_resumed_run(spec: dict[str, Any], result: dict[str, Any]) -> No
 
 
 async def _emit(event: str, data: dict[str, Any]) -> None:
-    """Best-effort webhook: a webhook outage never fails a finished run."""
+    """Best-effort webhook: a webhook outage never fails a finished run.
+
+    ``publish`` rides the transactional outbox when ``WEBHOOK_OUTBOX_ENABLED``
+    is on, so a worker killed right after the run finished still has its
+    terminal event delivered; otherwise it is the plain in-process emit.
+    """
     try:
-        await _get_webhooks().emit(event, data)
+        await _get_webhooks().publish(event, data)
     except Exception as exc:
         logger.warning("agent_run_webhook_failed event=%s error=%s", event, exc)
 

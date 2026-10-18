@@ -18,9 +18,9 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 import baselith.core.chat as chat_package
-import baselith.plugins.api_routers.approvals as approvals_module
-import baselith.plugins.api_routers.runs as runs_module
-import baselith.plugins.api_routers.webhooks as webhooks_module
+import baselith.plugins.api_routers.routes.approvals as approvals_module
+import baselith.plugins.api_routers.routes.runs as runs_module
+import baselith.plugins.api_routers.routes.webhooks as webhooks_module
 from baselith.core.auth.types import AuthRole, AuthUser
 from baselith.core.config.webhooks import WebhookConfig
 from baselith.core.context import set_tenant_context
@@ -34,8 +34,8 @@ from baselith.core.webhooks.dispatcher import WebhookDispatcher
 from baselith.core.webhooks.service import WebhookService
 from baselith.core.webhooks.store import InMemoryWebhookStore
 from baselith.core.webhooks.types import WebhookDelivery
-from baselith.plugins.api_routers.admin import verify_credentials
-from baselith.plugins.api_routers.tenant import router as tenant_router
+from baselith.plugins.api_routers.routes.admin import verify_credentials
+from baselith.plugins.api_routers.routes.tenant import router as tenant_router
 from tests.unit.plugins_tests._wire_helpers import (
     WireSpy,
     assert_problem_documented,

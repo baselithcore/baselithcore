@@ -15,6 +15,8 @@ functions warn on call; ``WebhookSSRFError`` is the same class as
 """
 
 from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.outbox import InMemoryOutbox, OutboxEntry, OutboxStore
+from baselith.core.webhooks.relay import OutboxRelay
 from baselith.core.webhooks.service import WebhookService, get_webhook_service
 from baselith.core.webhooks.signing import (
     SIGNATURE_HEADER,
@@ -39,7 +41,11 @@ from baselith.core.webhooks.types import (
 __all__ = [
     "SIGNATURE_HEADER",
     "DeliveryStatus",
+    "InMemoryOutbox",
     "InMemoryWebhookStore",
+    "OutboxEntry",
+    "OutboxRelay",
+    "OutboxStore",
     "WebhookDelivery",
     "WebhookDispatcher",
     "WebhookEndpoint",

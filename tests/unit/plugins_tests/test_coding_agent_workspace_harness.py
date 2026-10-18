@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from baselith.plugins.coding_agent.harness import parse_report, screen_texts
-from baselith.plugins.coding_agent.workspace_harness import (
+from baselith.plugins.coding_agent.runner.harness import parse_report, screen_texts
+from baselith.plugins.coding_agent.workspace.harness import (
     WORKSPACE_MAX_BYTES,
     build_workspace_script,
     stage,
@@ -126,7 +126,7 @@ def test_other_users_cannot_list_where_workspaces_live():
 
 
 def test_a_parent_owned_by_someone_else_is_refused(monkeypatch, tmp_path):
-    from baselith.plugins.coding_agent import workspace_harness
+    from baselith.plugins.coding_agent.workspace import harness as workspace_harness
 
     trap = tmp_path / "planted"
     trap.symlink_to(tmp_path)

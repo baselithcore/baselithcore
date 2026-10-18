@@ -7,7 +7,7 @@
 #   - path: baselith/plugins/<name>/<dir-or-file>
 #     reason: why it still loads a model / opens a client itself
 allow:
-  - path: baselith/plugins/document_sources/docling_reader.py
+  - path: baselith/plugins/document_sources/readers/docling.py
     reason: >-
       Docling DocumentConverter. Docling as a service (docling-serve) is a
       separate piece of work.

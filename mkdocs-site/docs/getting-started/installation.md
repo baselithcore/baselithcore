@@ -296,7 +296,8 @@ LLM_MODEL=llama3.2
 ```env
 LLM_PROVIDER=openai
 LLM_OPENAI_API_KEY=sk-your-api-key
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-6-luna
+LLM_OPENAI_REASONING_EFFORT=none
 ```
 
 ### HuggingFace (Inference API)

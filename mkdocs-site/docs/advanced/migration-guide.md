@@ -1,3 +1,5 @@
+<!-- docs-consistency: skip imports -->
+<!-- The 'Before' snippets show the removed v0.3 paths on purpose. -->
 # v0.3.x → v0.4.0 Migration Guide
 
 <!-- ns-migrate: skip-file (a historical guide: it quotes the 0.x module names) -->

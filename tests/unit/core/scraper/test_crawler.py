@@ -135,7 +135,7 @@ async def test_robots_txt_blocking(mock_config):
     mock_config.follow_robots_txt = True
 
     # The robots fetch now goes through the shared pooled client
-    # (baselith.plugins.web_scraper._http_pool.get_robots_client) instead of building a
+    # (baselith.plugins.web_scraper.engine.http_pool.get_robots_client) instead of building a
     # new httpx.AsyncClient per call.
     mock_client = _StreamingClient([b"User-agent: *\nDisallow: /private"])
 
@@ -235,7 +235,7 @@ async def test_robots_fetch_refuses_internal_targets(mock_config, mock_dns_resol
 
 @pytest.mark.asyncio
 async def test_robots_body_is_capped(mock_config):
-    from baselith.plugins.web_scraper.crawler import ROBOTS_MAX_BYTES
+    from baselith.plugins.web_scraper.engine.crawler import ROBOTS_MAX_BYTES
 
     chunk = b"#" * 65536
     client = _StreamingClient([chunk] * 1000)  # ~64 MB offered
@@ -269,7 +269,7 @@ async def test_repeated_links_are_enqueued_once(mock_config, mock_scraper_cls):
         )
 
     mock_scraper_cls.return_value.scrape.side_effect = scrape
-    from baselith.plugins.web_scraper import crawler as crawler_module
+    from baselith.plugins.web_scraper.engine import crawler as crawler_module
 
     crawler = CrawlEngine(config=mock_config, max_pages=10, max_depth=3)
     with patch.object(

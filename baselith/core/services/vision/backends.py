@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 from baselith.core.config import get_vision_config
 from baselith.core.observability.logging import get_logger
+from baselith.core.services.llm.providers._openai_request import (
+    apply_reasoning_defaults,
+)
 from baselith.core.services.vision.models import (
     VisionProvider,
     VisionRequest,
@@ -40,13 +43,24 @@ async def analyze_openai(
     for image in request.images:
         content.append(image.to_openai_format())
 
+    # Chat Completions takes the cap as ``max_completion_tokens`` (current
+    # models answer 400 to ``max_tokens``), and reasoning models accept only
+    # the default temperature: the same shaping the LLM provider applies.
+    kwargs: dict[str, Any] = apply_reasoning_defaults(
+        {
+            "max_completion_tokens": request.max_tokens,
+            "temperature": request.temperature,
+        },
+        model,
+        None,
+    )
+    if request.json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
     response = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": content}],
-        max_tokens=request.max_tokens,
-        temperature=request.temperature,
-        response_format={"type": "json_object"} if request.json_mode else None,
-    )  # type: ignore[call-overload]
+        **kwargs,
+    )
 
     return VisionResponse(
         success=True,

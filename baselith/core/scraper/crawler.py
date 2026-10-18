@@ -2,6 +2,6 @@
 
 import sys
 
-import baselith.plugins.web_scraper.crawler as _crawler
+import baselith.plugins.web_scraper.engine.crawler as _crawler
 
 sys.modules[__name__] = _crawler

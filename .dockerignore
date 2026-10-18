@@ -79,6 +79,12 @@ compose*.yaml
 # === Frontend & Build Artifacts ===
 **/node_modules
 **/.pnpm-store
+# Gitignored build output that `COPY baselith/ baselith/` would otherwise push through the
+# build context and into an image layer: Cargo's target/ (a plugin with a Rust component,
+# e.g. a daemon or a desktop app, builds gigabytes of it) and the Terraform provider cache.
+# The plugin integrity hash already skips `target` (integrity.py _EXCLUDED_DIRS).
+**/target
+**/.terraform
 frontend/dist
 frontend/.vite
 frontend/node_modules

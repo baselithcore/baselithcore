@@ -361,8 +361,15 @@ class OllamaProvider:
             # Estimate prompt tokens once; accumulate per-delta instead of
             # re-tokenizing the full accumulated text on every chunk.
             tokens = estimate_tokens(prompt)
+            # A delta's whitespace IS text: " world" and "\n\n" carry the
+            # word and paragraph breaks. Only the leading blank before the
+            # first word is dropped, as the OpenAI-compatible stream does.
+            started = False
             async for chunk in stream:
-                content = self._extract_content(chunk)
+                content = self._extract_content(chunk, strip=False)
+                if not started:
+                    content = content.lstrip()
+                    started = bool(content)
                 if content:
                     tokens += estimate_tokens(content)
                     yield content, tokens
@@ -374,23 +381,27 @@ class OllamaProvider:
                 f"{describe_exception(e)}"
             ) from e
 
-    def _extract_content(self, response: Any) -> str:
+    def _extract_content(self, response: Any, *, strip: bool = True) -> str:
         """
         Normalize and extract reasoning content from different Ollama response schemas.
 
         Args:
             response: Raw dictionary or object response from Ollama.
+            strip: Trim surrounding whitespace — right for a whole reply, wrong
+                for a streamed delta, whose spaces separate it from the next.
 
         Returns:
-            str: Cleaned and stripped text content.
+            str: The text content, stripped unless ``strip`` is false.
         """
         if isinstance(response, dict):
-            return str(response.get("message", {}).get("content", "")).strip()
+            text = str(response.get("message", {}).get("content", ""))
         elif hasattr(response, "message"):
-            if hasattr(response.message, "content"):
-                return str(response.message.content).strip()
-            return str(response.message)
-        return str(response)
+            if not hasattr(response.message, "content"):
+                return str(response.message)
+            text = str(response.message.content)
+        else:
+            return str(response)
+        return text.strip() if strip else text
 
     def _extract_tokens(self, response: Any, prompt: str, content: str) -> int:
         """

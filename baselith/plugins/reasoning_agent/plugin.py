@@ -14,7 +14,7 @@ from baselith.core.orchestration.checkpoint_scope import (
 )
 from baselith.core.plugins import AgentPlugin
 
-from .reasoning_agent import ReasoningAgent
+from .agent import ReasoningAgent
 
 
 class ReasoningAgentPlugin(AgentPlugin):

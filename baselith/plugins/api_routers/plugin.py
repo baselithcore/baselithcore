@@ -63,28 +63,32 @@ class ApiRoutersPlugin(Plugin):
 
         # WebSocket chat channel: authenticates at the handshake with the
         # same credentials as the REST chat surface.
-        from baselith.plugins.api_routers.chat_ws import router as chat_ws_router
+        from baselith.plugins.api_routers.routes.chat_ws import router as chat_ws_router
 
         routers: list[Any] = []
 
         # Prompt-catalog admin surface: reads are always useful (local
         # registry); writes self-gate on the synchronizer (503 without
         # BASELITH_PROMPT_SYNC), so the router mounts unconditionally.
-        from baselith.plugins.api_routers.prompts import router as prompts_router
+        from baselith.plugins.api_routers.routes.prompts import router as prompts_router
 
         routers.append(prompts_router)
 
         from baselith.core.config.webhooks import get_webhook_config
 
         if get_webhook_config().enabled:
-            from baselith.plugins.api_routers.webhooks import router as webhooks_router
+            from baselith.plugins.api_routers.routes.webhooks import (
+                router as webhooks_router,
+            )
 
             routers.append(webhooks_router)
 
         from baselith.core.config.privacy import get_privacy_config
 
         if get_privacy_config().enabled:
-            from baselith.plugins.api_routers.privacy import router as privacy_router
+            from baselith.plugins.api_routers.routes.privacy import (
+                router as privacy_router,
+            )
 
             routers.append(privacy_router)
 
@@ -100,10 +104,10 @@ class ApiRoutersPlugin(Plugin):
         from baselith.core.config.orchestration import get_orchestration_config
 
         if get_orchestration_config().checkpoint_enabled:
-            from baselith.plugins.api_routers.approvals import (
+            from baselith.plugins.api_routers.routes.approvals import (
                 router as approvals_router,
             )
-            from baselith.plugins.api_routers.runs import router as runs_router
+            from baselith.plugins.api_routers.routes.runs import router as runs_router
 
             routers.append(approvals_router)
             routers.append(runs_router)
@@ -111,7 +115,7 @@ class ApiRoutersPlugin(Plugin):
         from baselith.core.config.evaluation import get_evaluation_config
 
         if get_evaluation_config().online_enabled:
-            from baselith.plugins.api_routers.evaluation import (
+            from baselith.plugins.api_routers.routes.evaluation import (
                 router as evaluation_router,
             )
 
@@ -120,7 +124,9 @@ class ApiRoutersPlugin(Plugin):
         # Async agent runs (POST /agent/async + GET /agent/status/{id}).
         # Mounted unconditionally: queue-infrastructure absence surfaces as
         # 503 at call time, not as a missing route.
-        from baselith.plugins.api_routers.async_runs import router as async_runs_router
+        from baselith.plugins.api_routers.routes.async_runs import (
+            router as async_runs_router,
+        )
 
         routers.append(async_runs_router)
         return [

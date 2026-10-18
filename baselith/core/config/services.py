@@ -15,7 +15,7 @@ from typing import Any, Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import SettingsConfigDict
 
-from baselith.core.config._aliased import AliasedSettings
+from baselith.core.config._llm_vllm import VLLMThinkingSettings
 
 # Re-exported for backwards compatibility: the multimodal schemas used to live
 # here, and `baselith.core.config` still resolves them through this module.
@@ -35,7 +35,7 @@ from baselith.core.config.overrides import overridable
 logger = logging.getLogger(__name__)
 
 
-class LLMConfig(AliasedSettings):
+class LLMConfig(VLLMThinkingSettings):
     """
     Configuration for Large Language Model providers.
 
@@ -358,6 +358,15 @@ class LLMConfig(AliasedSettings):
         default=False,
         description="Derive an extended-thinking effort tier from task_category "
         "for providers that support it (off keeps previous behaviour).",
+    )
+
+    openai_reasoning_effort: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_OPENAI_REASONING_EFFORT"),
+        description=(
+            "Default reasoning_effort for every OpenAI request (none, low, "
+            "medium, high); empty sends nothing. Skipped for gpt-3/gpt-4 models."
+        ),
     )
 
     # == Response Caching ==

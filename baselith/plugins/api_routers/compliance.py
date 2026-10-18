@@ -450,7 +450,7 @@ async def review_plan(request: Request, plan_id: str) -> dict[str, Any]:
 
 # The Art. 9 / Art. 13 / DPIA / Art. 22 artefact endpoints live in a sibling
 # module (500-line cap) and mount under this same prefix and scope.
-from baselith.plugins.api_routers.compliance_artefacts import (  # noqa: E402
+from baselith.plugins.api_routers.routes.compliance_artefacts import (  # noqa: E402
     router as _artefacts_router,
 )
 

@@ -54,6 +54,14 @@ are masked in logs, tracebacks and error reporting.
 A variable that resembles a setting without matching one binds nothing and is
 silently ignored; `baselith config env` reports those.
 
+## Thinking-mode settings for models served by vLLM
+
+Declared in `baselith.core.config._llm_vllm`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `LLM_VLLM_ENABLE_THINKING` | `bool \| None` | *empty* | Whether a thinking model served by vLLM (Qwen3) reasons before it answers, sent as chat_template_kwargs.enable_thinking on every request. false is faster and cheaper; true forces it on. Unset leaves the server's own default. A call that sets enable_thinking itself keeps its choice. |
+
 ## General Application Configuration
 
 Declared in `baselith.core.config.app`.
@@ -849,6 +857,7 @@ Declared in `baselith.core.config.services`.
 | `LLM_MAX_TOKENS` | `int \| None` | *empty* | Maximum tokens to generate |
 | `LLM_MODEL` | `str` | `llama3.2` | Model name to use |
 | `LLM_OLLAMA_API_BASE` | `str \| None` | *empty* | Dedicated Ollama endpoint. Set it when Ollama is NOT the default provider but a per-plugin LLM policy pins some plugin to it: LLM_API_BASE belongs to the default provider, and handing it to Ollama would aim those calls at the wrong server. Falls back to LLM_API_BASE (only when LLM_PROVIDER=ollama), then OLLAMA_HOST, then `http://localhost:11434`. |
+| `LLM_OPENAI_REASONING_EFFORT` | `str \| None` | *empty* | Default reasoning_effort for every OpenAI request (none, low, medium, high); empty sends nothing. Skipped for gpt-3/gpt-4 models. |
 | `LLM_PREFLIGHT` | `Literal['auto', 'off', 'warn', 'strict']` | `auto` | Startup LLM posture check: 'auto' (default) fails startup in a production environment and warns elsewhere, 'warn' always logs, 'strict' always fails, 'off' skips. Never calls a hosted provider. |
 | `LLM_PROVIDER` | `Literal['openai', 'ollama', 'huggingface', 'anthropic', 'gemini', 'vllm']` | `ollama` | LLM provider (openai, ollama, huggingface, anthropic, gemini, or vllm) |
 | `LLM_REQUEST_TIMEOUT` | `float` | `120.0` | Total per-request timeout (seconds) for provider SDK calls |
@@ -975,10 +984,10 @@ Declared in `baselith.core.config.vectorstore`.
 
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
+| `BASELITH_QDRANT_API_KEY` :material-key:<br>also accepts `QDRANT_API_KEY` | `SecretStr \| None` | *empty* | API key for managed/remote Qdrant (unset for local) |
 | `EMBEDDING_CACHE_TTL` | `int` | `7 * 24 * 3600` | Embedding cache TTL in seconds (default 7 days) |
 | `INDEX_BATCH_SIZE` | `int` | `32` | Bulk-ingestion batching + bounded delete fan-out (see indexing service): docs per index() call, and max concurrent vector-store delete round-trips. |
 | `INDEX_MAX_CONCURRENCY` | `int` | `8` |  |
-| `QDRANT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | API key for managed/remote Qdrant (unset for local) |
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
@@ -1012,6 +1021,11 @@ Declared in `baselith.core.config.webhooks`.
 | `WEBHOOK_MAX_ATTEMPTS` | `int` | `4` | Delivery attempts before a webhook is dead-lettered (1 = no retry). |
 | `WEBHOOK_MAX_CONNECTIONS` | `int` | `20` | Upper bound on concurrent outbound sockets across all deliveries, so a burst of events to many endpoints cannot open an unbounded number of connections from the process. |
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT` | `int` | `50` | Cap registrations per tenant to bound fan-out and memory. |
+| `WEBHOOK_OUTBOX_BATCH_SIZE` | `int` | `50` | Rows claimed per poll. |
+| `WEBHOOK_OUTBOX_ENABLED` | `bool` | `False` | Transactional outbox: `WebhookService.publish` queues the event in a durable table (in the caller's transaction when it passes a cursor) and a relay in every API process delivers it, so an event survives a crash between the business commit and the delivery. At-least-once: receivers deduplicate on the envelope `id`. Only durable with WEBHOOK_STORE=postgres (migration 016); with "memory" it queues in-process and survives nothing. |
+| `WEBHOOK_OUTBOX_LEASE_SECONDS` | `float` | `120.0` | How long a relay owns a claimed row. Keep it above one event's worst-case delivery time (max attempts x timeout + backoff across its endpoints). |
+| `WEBHOOK_OUTBOX_MAX_ATTEMPTS` | `int` | `8` | Dispatch attempts before a row is parked as dead for an operator. |
+| `WEBHOOK_OUTBOX_POLL_SECONDS` | `float` | `2.0` | Seconds between polls when the outbox is empty. |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS` | `float` | `1.0` | Base backoff (seconds); exponential with jitter between attempts. |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `int` | `300` | Signature freshness window enforced by verify_signature (seconds). |
 | `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
@@ -1055,4 +1069,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-714 settings documented.
+721 settings documented.

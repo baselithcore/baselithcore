@@ -2,8 +2,10 @@
 
 import sys
 
-import baselith.plugins.document_sources.filesystem as _filesystem
-from baselith.plugins.document_sources.filesystem import FilesystemDocumentSource
+import baselith.plugins.document_sources.sources.filesystem as _filesystem
+from baselith.plugins.document_sources.sources.filesystem import (
+    FilesystemDocumentSource,
+)
 
 # Register self as the plugin module for runtime compatibility
 sys.modules[__name__] = _filesystem

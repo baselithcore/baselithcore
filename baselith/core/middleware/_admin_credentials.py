@@ -1,5 +1,5 @@
-"""Admin password verification: PBKDF2-SHA256 checking + a verified-credential
-cache.
+"""Admin password verification: Argon2id / PBKDF2-SHA256 checking + a
+verified-credential cache.
 
 Split out of :mod:`baselith.core.middleware.security` so the security manager stays under
 the file-size cap. The cache lets a burst of identical Basic-auth requests
@@ -72,6 +72,61 @@ def verify_pbkdf2_sha256(encoded: str, candidate: str) -> bool:
 
     derived = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, iterations)
     return secrets.compare_digest(derived, digest)
+
+
+# OWASP Password Storage Cheat Sheet, minimum Argon2id profile: 19 MiB of
+# memory, 2 iterations, 1 lane. A hash tuned below it is rejected outright for
+# the same reason a 1-iteration PBKDF2 value is: it would only look like a KDF.
+ARGON2_MIN_MEMORY_KIB = 19_456
+ARGON2_MIN_TIME_COST = 2
+ARGON2_MIN_PARALLELISM = 1
+
+
+def verify_argon2id(encoded: str, candidate: str) -> bool:
+    """Verify an Argon2id hash in the standard ``$argon2id$v=19$m=..,t=..,p=..$`` form.
+
+    ``argon2-cffi`` is imported here, not at module scope, so a deployment that
+    keeps a PBKDF2 hash never pays for it. Hashes tuned below the OWASP minimum
+    (:data:`ARGON2_MIN_MEMORY_KIB`, :data:`ARGON2_MIN_TIME_COST`) are rejected.
+    """
+    from argon2 import PasswordHasher, extract_parameters
+    from argon2.exceptions import InvalidHashError, VerificationError
+
+    try:
+        params = extract_parameters(encoded)
+    except (InvalidHashError, ValueError):
+        return False
+    if (
+        params.memory_cost < ARGON2_MIN_MEMORY_KIB
+        or params.time_cost < ARGON2_MIN_TIME_COST
+        or params.parallelism < ARGON2_MIN_PARALLELISM
+    ):
+        logger.error(
+            "ADMIN_PASS_HASHED is an Argon2id hash with m=%d KiB, t=%d, p=%d — "
+            "below the OWASP minimum (m>=%d KiB, t>=%d); rejected. Regenerate "
+            "it with argon2-cffi's PasswordHasher().hash(password).",
+            params.memory_cost,
+            params.time_cost,
+            params.parallelism,
+            ARGON2_MIN_MEMORY_KIB,
+            ARGON2_MIN_TIME_COST,
+        )
+        return False
+    try:
+        return bool(PasswordHasher().verify(encoded, candidate))
+    except (VerificationError, InvalidHashError):
+        return False
+
+
+def verify_admin_hash(encoded: str, candidate: str) -> bool:
+    """Verify ``candidate`` against an ``ADMIN_PASS_HASHED`` value of either scheme.
+
+    ``$argon2id$...`` is Argon2id; ``pbkdf2_sha256$...`` stays supported so an
+    existing deployment keeps working unchanged. Anything else is refused.
+    """
+    if encoded.startswith("$argon2id$"):
+        return verify_argon2id(encoded, candidate)
+    return verify_pbkdf2_sha256(encoded, candidate)
 
 
 class VerifiedCredentialCache:

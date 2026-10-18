@@ -88,7 +88,9 @@ async def test_close_fetchers_keeps_going_past_a_failing_fetcher() -> None:
     scraper._httpx_fetcher = broken  # type: ignore[assignment]
     scraper._playwright_fetcher = healthy  # type: ignore[assignment]
 
-    with patch("baselith.plugins.web_scraper._http_pool.close_robots_client") as robots:
+    with patch(
+        "baselith.plugins.web_scraper.engine.http_pool.close_robots_client"
+    ) as robots:
         await scraper.close_fetchers()
 
     healthy.close.assert_awaited_once()

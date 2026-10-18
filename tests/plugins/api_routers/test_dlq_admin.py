@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from baselith.core.task_queue.dead_letter import DeadLetterError, DeadLetterRecord
-from baselith.plugins.api_routers import admin
+from baselith.plugins.api_routers.routes import admin
 
 
 def _record(job_id="j1"):

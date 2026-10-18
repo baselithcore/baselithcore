@@ -18,7 +18,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.chat as chat_module
+import baselith.plugins.api_routers.routes.chat as chat_module
 
 
 class _StubRequest:
@@ -259,7 +259,7 @@ class TestHeartbeat:
     ) -> None:
         from types import SimpleNamespace
 
-        import baselith.plugins.api_routers._sse as sse_module
+        import baselith.plugins.api_routers.routes._sse as sse_module
 
         monkeypatch.setattr(
             sse_module,
