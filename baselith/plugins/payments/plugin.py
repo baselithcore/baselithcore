@@ -12,7 +12,7 @@ from typing import Any
 
 from baselith.core.plugins import Plugin
 
-from .mock_psp import MockPSPAdapter
+from .adapters.mock_psp import MockPSPAdapter
 
 
 class PaymentsPlugin(Plugin):

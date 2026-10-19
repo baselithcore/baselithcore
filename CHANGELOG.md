@@ -741,6 +741,13 @@ pull-request-only, so the release job cannot commit here. Follows
   bake into an image.
 
 ### Added
+- **vLLM thinking can be switched off for the whole deployment.**
+  `LLM_VLLM_ENABLE_THINKING=false` sends `chat_template_kwargs.enable_thinking=false`
+  on every request to a vLLM server, so a Qwen3 model answers without reasoning first:
+  faster and cheaper. Unset keeps the server's default, and a call that sets it
+  itself keeps its choice. The messages (tool-calling loop) and structured paths now
+  forward `extra_body` too; before, only plain generation and streaming did, so a
+  vLLM-only request field never reached the server on those paths.
 
 - **Encryption at rest** — versioned AES-256-GCM field encryption
   (`core.security.encryption`) with key rotation; opt-in via `DATA_ENCRYPTION_KEYS`.
@@ -767,6 +774,12 @@ pull-request-only, so the release job cannot commit here. Follows
 - Raised the project test-coverage gate.
 
 ### Fixed
+- **vLLM streams stay live with thinking switched off.** With
+  `LLM_VLLM_ENABLE_THINKING=false` the vLLM provider's stream filter still waited
+  for a `</think>` that a thinking-off reply never sends, so every streamed answer
+  from a model not listed in `LLM_VLLM_LIVE_STREAM_MODELS` arrived in one piece at
+  the end. A request that turns thinking off now releases text as soon as it is
+  clear no `<think>` opens it, on both stream paths.
 
 - `scripts/restore-db.sh` now restores gzipped (`.sql.gz`) backups.
 

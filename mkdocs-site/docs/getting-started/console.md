@@ -42,7 +42,7 @@ and requires `WEBHOOKS_ENABLED=true`. You can:
 The console is plain ES modules under `baselith/core/static/frontend/js/` (an `api`
 client, a tiny DOM helper, and one module per view), served via the `/static`
 mount. The routes live in the `api_routers` plugin
-(`baselith/plugins/api_routers/console.py`): `/console` and `/console/{full_path:path}`
+(`baselith/plugins/api_routers/routes/console.py`): `/console` and `/console/{full_path:path}`
 both return `baselith/core/static/frontend/index.html`, so client-side routing works on
 refresh. `baselith/core/routers/console.py` is only a backward-compatible shim that
 re-exports that router. No bundler is involved — edit a module and reload.

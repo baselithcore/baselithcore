@@ -416,7 +416,7 @@ failed.
 
 ```python
 from baselith.core.world_model import InMemoryReceiptStore, execute_payment
-from baselith.plugins.payments.mock_psp import MockPSPAdapter
+from baselith.plugins.payments.adapters.mock_psp import MockPSPAdapter
 
 store = InMemoryReceiptStore()
 receipt = await execute_payment(

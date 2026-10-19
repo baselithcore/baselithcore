@@ -224,13 +224,20 @@ def known_routes(repo_root: Path) -> set[str] | None:
         pass
 
     api_routers = repo_root / "baselith" / "plugins" / "api_routers"
-    for module_file in sorted(api_routers.glob("*.py")):
+    # The routers live in ``routes/`` (plugin layout standard); the package
+    # root keeps only the compliance router beside the plugin class.
+    router_modules = [
+        (module_file, f"baselith.plugins.api_routers.{module_file.stem}")
+        for module_file in sorted(api_routers.glob("*.py"))
+    ] + [
+        (module_file, f"baselith.plugins.api_routers.routes.{module_file.stem}")
+        for module_file in sorted((api_routers / "routes").glob("*.py"))
+    ]
+    for module_file, module_name in router_modules:
         if module_file.name.startswith("_") or module_file.name == "plugin.py":
             continue
         try:
-            module = importlib.import_module(
-                f"baselith.plugins.api_routers.{module_file.stem}"
-            )
+            module = importlib.import_module(module_name)
         except Exception:
             continue
         router = getattr(module, "router", None)

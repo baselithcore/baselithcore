@@ -7,7 +7,7 @@ from baselith.core.utils.optional_import import (
     unavailable_admin_credentials,
 )
 
-_admin, router = optional_router("baselith.plugins.api_routers.admin")
+_admin, router = optional_router("baselith.plugins.api_routers.routes.admin")
 if _admin is not None:
     verify_credentials = _admin.verify_credentials
     # Register self as the plugin module for runtime compatibility

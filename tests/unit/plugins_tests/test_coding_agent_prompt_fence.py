@@ -16,7 +16,7 @@ from baselith.plugins.coding_agent.prompts import (
     label,
 )
 from baselith.plugins.coding_agent.workspace import Workspace
-from baselith.plugins.coding_agent.workspace_prompts import workspace_fix_prompt
+from baselith.plugins.coding_agent.workspace.prompts import workspace_fix_prompt
 
 
 def inner(fenced: str) -> str:

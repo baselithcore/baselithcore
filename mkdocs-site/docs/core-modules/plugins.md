@@ -339,6 +339,40 @@ handlers.register(other, name="custom", overwrite=False)  # may raise
 
 ---
 
+## Keeping old import paths alive
+
+Plugins keep their root tidy by grouping modules into sub-packages
+(`web.py` → `sources/web.py`, see the plugin layout standard). A documented
+import of the old path — including through the `baselith.core.doc_sources`
+and `baselith.core.scraper` compatibility packages, which *are* the plugin
+package under another name — must keep working, so a plugin registers the
+moved names once in its `__init__.py`:
+
+```python
+from baselith.core.plugins.compat_aliases import register_module_aliases
+
+register_module_aliases(
+    {"web": "sources.web", "docling_reader": "readers.docling"},
+    packages=(__name__, "baselith.core.doc_sources"),
+    unchanged=("models", "utils", "readers", "plugin"),
+)
+```
+
+`unchanged` lists the modules that did not move: under the compatibility
+name they resolve to the plugin's own module object instead of a second copy
+the import system would otherwise build from the same file — the copy that
+makes `isinstance(result, CrawlResult)` fail when the class was imported
+through `baselith.core.scraper.models` and the instance came from
+`baselith.plugins.web_scraper.models`.
+
+`register_module_aliases` installs a single meta-path finder that answers an
+import of `<package>.<old>` with the module at `<package>.<new>`: lazily
+(nothing is imported until someone asks), with one module identity
+(`sys.modules` holds the same object under both names, so `isinstance` checks
+and test monkeypatches keep working), and only for the names listed — a typo
+still raises `ModuleNotFoundError`. `registered_aliases()` returns the live
+table for diagnostics.
+
 ## PluginRegistry
 
 The `PluginRegistry` serves as the central catalog for all active plugins. Construct one

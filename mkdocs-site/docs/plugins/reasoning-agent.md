@@ -59,7 +59,7 @@ Because the plugin registers an intent pattern, any user message containing keyw
 ### 3. Programmatic Usage
 
 ```python
-from baselith.plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+from baselith.plugins.reasoning_agent.agent import ReasoningAgent
 
 agent = ReasoningAgent(service=my_llm_service, sandbox_service=my_sandbox)
 

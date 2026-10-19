@@ -98,6 +98,35 @@ async def test_analyze_openai(vision_service):
         assert response.content == "A cat"
         assert response.provider == "openai"
         mock_client.chat.completions.create.assert_awaited_once()
+        # Chat Completions rejects the legacy name on current models (HTTP 400
+        # "Use 'max_completion_tokens' instead"), which broke the browser agent.
+        sent = mock_client.chat.completions.create.call_args.kwargs
+        assert "max_tokens" not in sent
+        assert sent["max_completion_tokens"] == request.max_tokens
+
+
+@pytest.mark.asyncio
+async def test_analyze_openai_reasoning_model_drops_custom_temperature(vision_service):
+    vision_service.models[VisionProvider.OPENAI] = "gpt-5-vision"
+    with patch("openai.AsyncOpenAI") as mock_cls:
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="{}"))]
+        mock_response.usage.total_tokens = 10
+        mock_client.chat.completions.create.return_value = mock_response
+
+        request = VisionRequest(
+            prompt="What is this?",
+            images=[ImageContent.from_url("http://example.com/cat.jpg")],
+            provider=VisionProvider.OPENAI,
+            temperature=0.2,
+        )
+        await vision_service.analyze(request)
+
+        sent = mock_client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in sent  # reasoning models take only the default
+        assert "max_tokens" not in sent
 
 
 @pytest.mark.asyncio

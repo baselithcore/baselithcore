@@ -8,6 +8,10 @@ for the event's tenant and fans delivery out concurrently via the dispatcher.
 Emission is a no-op (returns no deliveries) when webhooks are disabled, so call
 sites can fire events unconditionally with zero overhead until an operator opts
 in.
+
+:meth:`WebhookService.publish` is the durable variant: with
+``WEBHOOK_OUTBOX_ENABLED`` it queues the event in the transactional outbox
+(:mod:`baselith.core.webhooks.outbox`) instead of delivering in-process.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ from baselith.core.observability.logging import get_logger
 from baselith.core.security.ssrf import SsrfPolicy, assert_url_safe
 from baselith.core.tenancy.guard import tenants_match
 from baselith.core.webhooks.dispatcher import WebhookDispatcher
+from baselith.core.webhooks.outbox import InMemoryOutbox, OutboxEntry, OutboxStore
+from baselith.core.webhooks.relay import OutboxRelay
 from baselith.core.webhooks.signing import reserved_header_names
 from baselith.core.webhooks.store import InMemoryWebhookStore, WebhookStore
 from baselith.core.webhooks.types import (
@@ -45,6 +51,7 @@ class WebhookService:
         self._config = config or get_webhook_config()
         self._store: WebhookStore = store or InMemoryWebhookStore()
         self._dispatcher = dispatcher or WebhookDispatcher(self._store, self._config)
+        self._outbox: OutboxStore | None = None
 
     @property
     def store(self) -> WebhookStore:
@@ -128,12 +135,21 @@ class WebhookService:
 
         Returns the delivery records (empty if disabled or no subscribers).
         Deliveries run concurrently; a single failing endpoint does not affect
-        the others.
+        the others. The delivery happens in this process, so it does not
+        survive a crash; :meth:`publish` is the durable path.
         """
         if not self._config.enabled:
             return []
         event = WebhookEvent(type=event_type, tenant_id=tenant_id, data=data)
-        endpoints = await self._store.endpoints_for_event(tenant_id, event_type)
+        return await self.deliver_event(event)
+
+    async def deliver_event(self, event: WebhookEvent) -> list[WebhookDelivery]:
+        """Deliver an already-built ``event`` to its tenant's subscribers.
+
+        Raises whatever the store raises (for instance an unreachable
+        database): the outbox relay relies on that to reschedule the row.
+        """
+        endpoints = await self._store.endpoints_for_event(event.tenant_id, event.type)
         if not endpoints:
             return []
         results = await asyncio.gather(
@@ -150,6 +166,63 @@ class WebhookService:
                     extra={"endpoint_id": ep.id, "error": str(res)},
                 )
         return deliveries
+
+    @property
+    def outbox(self) -> OutboxStore:
+        """The outbox store (built on first use)."""
+        if self._outbox is None:
+            self._outbox = _configured_outbox()
+        return self._outbox
+
+    async def publish(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        tenant_id: str = "default",
+        cur: Any | None = None,
+    ) -> str | None:
+        """Emit durably through the outbox, or fall back to :meth:`emit`.
+
+        With ``WEBHOOK_OUTBOX_ENABLED`` the event is queued and the relay
+        delivers it later; pass ``cur`` (the open cursor of the transaction
+        that changed the data) to make the queueing atomic with that change.
+        Without the outbox this is a plain in-process :meth:`emit`.
+
+        Returns:
+            The event id when it was queued, ``None`` otherwise (webhooks off,
+            or delivered in-process).
+        """
+        if not self._config.enabled:
+            return None
+        if not self._config.outbox_enabled:
+            await self.emit(event_type, data, tenant_id=tenant_id)
+            return None
+        event = WebhookEvent(type=event_type, tenant_id=tenant_id, data=data)
+        await self.outbox.enqueue(
+            OutboxEntry(
+                id=event.id,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                data=data,
+                created_at=event.created_at,
+            ),
+            cur,
+        )
+        return event.id
+
+    def build_relay(self) -> OutboxRelay:
+        """A relay wired to this service, tuned by the ``WEBHOOK_OUTBOX_*`` knobs."""
+        cfg = self._config
+        return OutboxRelay(
+            self,
+            self.outbox,
+            poll_seconds=cfg.outbox_poll_seconds,
+            batch_size=cfg.outbox_batch_size,
+            lease_seconds=cfg.outbox_lease_seconds,
+            max_attempts=cfg.outbox_max_attempts,
+            backoff_seconds=max(cfg.retry_backoff_seconds, 1.0),
+        )
 
     async def replay_delivery(
         self, delivery_id: str, *, tenant_id: str | None = None
@@ -199,3 +272,14 @@ def _configured_store() -> WebhookStore | None:
 
         return PostgresWebhookStore()
     return None
+
+
+def _configured_outbox() -> OutboxStore:
+    """The outbox store ``WEBHOOK_STORE`` selects (durable only with postgres)."""
+    from baselith.core.config.webhooks import get_webhook_config
+
+    if get_webhook_config().store == "postgres":
+        from baselith.core.webhooks.outbox_postgres import PostgresOutbox
+
+        return PostgresOutbox()
+    return InMemoryOutbox()

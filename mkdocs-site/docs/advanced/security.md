@@ -499,7 +499,7 @@ See [World Model](../core-modules/world-model.md#replay-protection).
 | -------------------------- | ------------ | ------------------------------------------------------------------------------------- |
 | `SECRET_KEY`               | `None`       | **Required** when `AUTH_REQUIRED=true`. Must be at least 32 chars. Uses `SecretStr`. |
 | `ADMIN_PASS`               | `None`       | Uses `SecretStr`. Rejected at startup if set to `"password"`, `"changeme"`, or `"admin"`. |
-| `ADMIN_PASS_HASHED`        | `None`       | PBKDF2-SHA256 hashed password. Preferred over `ADMIN_PASS`.                          |
+| `ADMIN_PASS_HASHED`        | `None`       | Argon2id (`$argon2id$…`) or PBKDF2-SHA256 (`pbkdf2_sha256$…`) hashed password, told apart by prefix. Preferred over `ADMIN_PASS`. |
 | `API_KEYS_USER` / `API_KEYS_ADMIN` / `API_KEYS_JOB` | `[]` (empty) | Comma-separated keys, wrapped in `SecretStr` so they never appear in `repr()`, logs, or Sentry frames. |
 | `ALLOW_ORIGINS`            | `[]` (empty) | Blocks all cross-origin by default. `["*"]` disables credentials for security. |
 | `TRUSTED_HOSTS`            | `[]` (empty) | Allowlist for incoming `Host` headers. Empty means `TrustedHostMiddleware` is **not mounted** and the header goes unvalidated — production **refuses to boot** that way unless `BASELITH_ALLOW_UNVALIDATED_HOST=true`. Set it to the hostnames your reverse proxy serves. |
@@ -1094,6 +1094,14 @@ between the floor and `PBKDF2_RECOMMENDED_ITERATIONS` (**600 000**, OWASP's
 current PBKDF2-SHA256 recommendation) still **verify but log a warning**
 telling the operator to regenerate with ≥ 600 000 iterations at the next
 rotation — a silently accepted 100k hash would stay under-hardened forever.
+
+**Argon2id.** `ADMIN_PASS_HASHED` also accepts the standard Argon2id encoding
+(`$argon2id$v=19$m=…,t=…,p=…$…`), OWASP's first choice for password storage.
+Produce one with `argon2.PasswordHasher().hash(password)` (the defaults clear
+the floor). A hash tuned below the OWASP minimum (`ARGON2_MIN_MEMORY_KIB`
+**19 456**, `ARGON2_MIN_TIME_COST` **2**) is rejected outright, like a
+low-iteration PBKDF2 value. Existing PBKDF2 hashes keep working unchanged;
+the verified-credential cache and the KDF slot pool apply to both.
 
 **TOTP step-up (MFA).** `TOTPProvider.verify_code(..., identity=...)` enforces
 single-use codes (an accepted OTP cannot be replayed within the clock-skew

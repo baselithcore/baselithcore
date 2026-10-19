@@ -232,6 +232,9 @@ class TestOpenAI:
                     "input_audio": {"data": _B64_WAV, "format": "wav"},
                 }
             ]
+            # The cap goes under its current name: the legacy one is a 400.
+            assert "max_tokens" not in kwargs
+            assert kwargs["max_completion_tokens"] > 0
 
     @pytest.mark.asyncio
     async def test_audio_uses_audio_capable_model(self, vision_service):

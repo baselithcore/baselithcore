@@ -128,7 +128,8 @@ async def analyze_audio_openai(
                 "content": [{"type": "text", "text": prompt}, audio_part],
             }
         ],
-        max_tokens=_MAX_TOKENS,
+        # Current name of the cap: Chat Completions answers 400 to max_tokens.
+        max_completion_tokens=_MAX_TOKENS,
     )
 
     return VisionResponse(

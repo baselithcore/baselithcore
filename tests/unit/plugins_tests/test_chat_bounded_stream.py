@@ -7,7 +7,7 @@ abandoned stream kept the upstream LLM call running.
 
 import pytest
 
-from baselith.plugins.api_routers.chat import bounded_stream
+from baselith.plugins.api_routers.routes.chat import bounded_stream
 
 
 def _upstream(closed: list[bool]):

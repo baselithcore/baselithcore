@@ -82,35 +82,41 @@ LEGACY_CORE_FILE_ALLOWLIST = frozenset(
 CORE_TO_PLUGIN_IMPORT_ALLOWLIST = {
     "baselith/core/doc_sources/__init__.py": {"baselith.plugins.document_sources"},
     "baselith/core/doc_sources/filesystem.py": {
-        "baselith.plugins.document_sources.filesystem"
+        "baselith.plugins.document_sources.sources.filesystem"
     },
-    "baselith/core/doc_sources/labels.py": {"baselith.plugins.document_sources.labels"},
+    "baselith/core/doc_sources/labels.py": {
+        "baselith.plugins.document_sources.sources.labels"
+    },
     "baselith/core/doc_sources/models.py": {"baselith.plugins.document_sources.models"},
     "baselith/core/doc_sources/ocr_backends.py": {
-        "baselith.plugins.document_sources.ocr_backends"
+        "baselith.plugins.document_sources.readers.ocr_backends"
     },
     "baselith/core/doc_sources/readers.py": {
         "baselith.plugins.document_sources.readers"
     },
     "baselith/core/doc_sources/registry.py": {
-        "baselith.plugins.document_sources.registry"
+        "baselith.plugins.document_sources.sources.registry"
     },
     "baselith/core/doc_sources/utils.py": {"baselith.plugins.document_sources.utils"},
-    "baselith/core/doc_sources/web.py": {"baselith.plugins.document_sources.web"},
+    "baselith/core/doc_sources/web.py": {
+        "baselith.plugins.document_sources.sources.web"
+    },
     "baselith/core/doc_sources/web_constants.py": {
-        "baselith.plugins.document_sources.web_constants"
+        "baselith.plugins.document_sources.sources.web_constants"
     },
     "baselith/core/doc_sources/web_parser.py": {
-        "baselith.plugins.document_sources.web_parser"
+        "baselith.plugins.document_sources.sources.web_parser"
     },
-    "baselith/core/routers/admin.py": {"baselith.plugins.api_routers.admin"},
-    "baselith/core/routers/chat.py": {"baselith.plugins.api_routers.chat"},
-    "baselith/core/routers/console.py": {"baselith.plugins.api_routers.console"},
-    "baselith/core/routers/feedback.py": {"baselith.plugins.api_routers.feedback"},
-    "baselith/core/routers/index.py": {"baselith.plugins.api_routers.index"},
+    "baselith/core/routers/admin.py": {"baselith.plugins.api_routers.routes.admin"},
+    "baselith/core/routers/chat.py": {"baselith.plugins.api_routers.routes.chat"},
+    "baselith/core/routers/console.py": {"baselith.plugins.api_routers.routes.console"},
+    "baselith/core/routers/feedback.py": {
+        "baselith.plugins.api_routers.routes.feedback"
+    },
+    "baselith/core/routers/index.py": {"baselith.plugins.api_routers.routes.index"},
     "baselith/core/routers/metrics.py": {"baselith.plugins.api_routers.metrics"},
-    "baselith/core/routers/status.py": {"baselith.plugins.api_routers.status"},
-    "baselith/core/routers/tenant.py": {"baselith.plugins.api_routers.tenant"},
+    "baselith/core/routers/status.py": {"baselith.plugins.api_routers.routes.status"},
+    "baselith/core/routers/tenant.py": {"baselith.plugins.api_routers.routes.tenant"},
 }
 
 CORE_TO_PLUGIN_IMPORT_PREFIX_ALLOWLIST = {

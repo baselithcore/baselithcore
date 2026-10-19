@@ -29,8 +29,12 @@ Example usage:
 
 # Configuration
 from baselith.core.config.scraper import ScraperConfig, get_scraper_config
+from baselith.core.plugins.compat_aliases import register_module_aliases
 
-from .crawler import CrawlEngine, create_crawler
+from .engine.crawler import CrawlEngine, create_crawler
+
+# Main facades
+from .engine.scraper import Scraper
 
 # Extractors
 from .extractors import (
@@ -41,13 +45,20 @@ from .extractors import (
     FieldSchema,
     ImageExtractor,
     LinkExtractor,
+    MarkdownExtractor,
     MetadataExtractor,
     SchemaOrgExtractor,
     TextExtractor,
 )
 
 # Fetchers
-from .fetchers import BaseFetcher, FetchError, HttpxFetcher, PlaywrightFetcher
+from .fetchers import (
+    BaseFetcher,
+    FetchError,
+    HttpxFetcher,
+    PlaywrightFetcher,
+    ScraplingFetcher,
+)
 
 # Middleware
 from .middleware import (
@@ -70,9 +81,6 @@ from .models import (
     PageMetadata,
     ScrapedPage,
 )
-
-# Main facades
-from .scraper import Scraper
 
 # Storage
 from .storage import BaseStorage, FilesystemStorage, MemoryStorage
@@ -109,6 +117,7 @@ __all__ = [
     "FetchError",
     "HttpxFetcher",
     "PlaywrightFetcher",
+    "ScraplingFetcher",
     # Extractors
     "BaseExtractor",
     "ExtractorRegistry",
@@ -118,6 +127,7 @@ __all__ = [
     "MetadataExtractor",
     "SchemaOrgExtractor",
     "CssSelectorExtractor",
+    "MarkdownExtractor",
     "ExtractionSchema",
     "FieldSchema",
     # Middleware
@@ -151,3 +161,25 @@ __all__ = [
 from .plugin import WebScraperPlugin as WebScraperPlugin
 
 __all__.append("WebScraperPlugin")
+
+# The modules below moved into sub-packages (plugin layout standard); the old
+# import paths stay importable so documented code and downstream plugins keep working.
+register_module_aliases(
+    {
+        "crawler": "engine.crawler",
+        "scraper": "engine.scraper",
+        "protocols": "engine.protocols",
+        "_http_pool": "engine.http_pool",
+    },
+    packages=(__name__, "baselith.core.scraper"),
+    unchanged=(
+        "models",
+        "utils",
+        "extractors",
+        "fetchers",
+        "middleware",
+        "storage",
+        "tools",
+        "plugin",
+    ),
+)

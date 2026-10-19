@@ -105,6 +105,17 @@ Both `generate_response` and `generate_response_stream` accept optional
 their system prompt or sampling parameters no longer collide on a stale cached
 answer.
 
+On the OpenAI provider, reasoning families (o-series, gpt-5 and later) reject
+any `temperature` but the default 1, so a different value is dropped from the
+request rather than failing it; other models, including unknown ones behind a
+compatible endpoint, keep theirs. The `LLM_OPENAI_REASONING_EFFORT` default is
+sent on the text, streaming and message API paths, but never to gpt-3, gpt-4 or
+chatgpt models, which answer 400 to the field.
+The streamed message turn (`generate_messages_stream`, the path every tool-calling
+chat uses) carries it too: a reasoning model refuses function tools on Chat
+Completions unless the effort is `none`, so a streamed turn without the default
+answers 400. A `reasoning_effort` passed by the caller wins.
+
 When a call passes no `max_tokens`, `LLM_MAX_TOKENS` (`LLMConfig.max_tokens`)
 fills it on every path — text, streaming, structured and the message API —
 via `baselith.core.services.llm.model_capabilities.configured_max_tokens`. The setting
@@ -285,7 +296,7 @@ other providers and `LLM_STREAM_AGENT_TEXT=false` keep the buffered turn. See
 **Cross-provider fallback (`LLM_FALLBACK_CHAIN`).** `generate_response()` can
 fall through an ordered chain of `provider:model` stages when the primary
 provider fails or its circuit breaker is open — e.g.
-`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,ollama:llama3.2` (empty disables
+`LLM_FALLBACK_CHAIN=openai:gpt-6-luna,ollama:llama3.2` (empty disables
 fallback, the default). Each stage is a cached `LLMService` clone with the
 provider's dedicated credentials (`baselith.core.services.llm.fallback_runtime`, whose
 shared machinery lives in `_fallback_support`); a clone never recurses into its
@@ -738,7 +749,7 @@ LLM_VLLM_NATIVE_TOOLS=true                # false without --enable-auto-tool-cho
 - **The endpoint is required.** There is no default: vLLM's `:8000` is also
   where this backend listens, so a guessed `localhost:8000` would call the
   framework itself. `LLM_API_BASE` is honoured only when `vllm` is the default
-  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-4o-mini,vllm:qwen3-8b`)
+  provider; a policy pin or fallback stage (`LLM_FALLBACK_CHAIN=openai:gpt-6-luna,vllm:qwen3-8b`)
   reads `LLM_VLLM_API_BASE`.
 - **Only the dedicated key is ever sent.** `LLM_VLLM_API_KEY` (or
   `VLLM_API_KEY`, the variable the server itself reads); `LLM_API_KEY` is
@@ -1374,6 +1385,29 @@ applied tier is recorded on the LLM span as
 `gen_ai.baselith.thinking_effort`, and the response cache key includes the
 effort so tiers never share cached answers.
 
+#### vLLM: thinking on or off for the deployment
+
+A thinking model served by vLLM (Qwen3) reasons before it answers unless the
+chat template is told not to. `LLM_VLLM_ENABLE_THINKING=false` makes the vLLM
+provider send `chat_template_kwargs.enable_thinking=false` on every request
+(plain generation, structured output, the message-history path that carries tool
+calls, and both streams): the model answers directly, which is faster and
+cheaper. `true` forces it on, and unset (the default) sends nothing, so the
+server's own default stands. A call that sets `chat_template_kwargs.enable_thinking`
+itself keeps its choice, and JSON mode still turns thinking off, because a
+reasoning block forced inside a constrained JSON object garbles the reply. The
+message-history and structured request builders forward `extra_body`, which is
+how this reaches the server. It is separate from `LLM_OPENAI_REASONING_EFFORT`,
+which is OpenAI's own parameter.
+
+Streaming follows the same switch. A thinking model's reply can open with
+reasoning the server did not parse out, so the vLLM stream normally holds text
+back until a `</think>` shows where the answer starts (unless the model is listed
+in `LLM_VLLM_LIVE_STREAM_MODELS`). A request with thinking off cannot carry such a
+block — the template closes it in the prompt — so its stream releases text as
+soon as it is clear no `<think>` opens it, instead of holding the whole answer to
+the end.
+
 ---
 
 ## VectorStore Service
@@ -1885,6 +1919,18 @@ built once with an explicit `timeout=60.0` and `max_retries=2`. Previously the
 OpenAI backend constructed a fresh client per call, which leaked its httpx pool
 and inherited the SDK's 600 s default timeout. `await service.close()` closes
 both (a no-op if never used).
+
+### OpenAI request shape
+
+The OpenAI image and audio calls send the output cap as
+`max_completion_tokens`: Chat Completions answers 400 ("Use
+'max_completion_tokens' instead") to `max_tokens` on current models, which
+used to break every OpenAI vision call, the browser agent's included. The
+image path also runs the request through the same `apply_reasoning_defaults`
+shaping the [OpenAI LLM provider](#llm-service) uses, so a reasoning model
+(o-series, gpt-5 and later) gets its non-default `temperature` dropped rather
+than refusing the call; other models keep theirs. No `reasoning_effort` is
+sent on the vision path.
 
 ---
 

@@ -101,7 +101,7 @@ the page where it started while the model believes it moved on, and
 re-executing them would repeat whatever a click or a submit did. So when the
 run has a checkpoint (the orchestrator binds it as ambient while a handler
 runs), `execute_task` is durable at **whole-task** granularity
-(`baselith/plugins/browser_agent/durable.py`):
+(`baselith/plugins/browser_agent/agent/durable.py`):
 
 - the task's outcome is one checkpoint step: a resumed run whose task had
   finished replays its result and never relaunches the browser. The replayed
@@ -388,7 +388,7 @@ When the run has a checkpoint (the orchestrator binds it as ambient while a
 flow handler runs, and composite runners re-bind their own scope), every
 verified task — `fix_code`, `generate_code`, `generate_tests`,
 `refactor_code`, `fix_in_workspace` — records its expensive steps under a
-`coding_agent` child scope (`baselith/plugins/coding_agent/durable.py`):
+`coding_agent` child scope (`baselith/plugins/coding_agent/runner/durable.py`):
 
 - **each typed model answer**, keyed by a digest of the prompt and the answer
   schema;

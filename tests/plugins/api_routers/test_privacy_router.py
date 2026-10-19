@@ -14,7 +14,7 @@ from baselith.core.privacy import (
     DataSubjectService,
     DictDataProvider,
 )
-from baselith.plugins.api_routers import privacy as pr
+from baselith.plugins.api_routers.routes import privacy as pr
 
 
 def _service() -> DataSubjectService:

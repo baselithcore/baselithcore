@@ -16,18 +16,18 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.async_runs as async_runs_module
-import baselith.plugins.api_routers.chat as chat_module
-import baselith.plugins.api_routers.feedback as feedback_module
-import baselith.plugins.api_routers.index as index_module
-import baselith.plugins.api_routers.privacy as privacy_module
-import baselith.plugins.api_routers.prompts as prompts_module
+import baselith.plugins.api_routers.routes.async_runs as async_runs_module
+import baselith.plugins.api_routers.routes.chat as chat_module
+import baselith.plugins.api_routers.routes.feedback as feedback_module
+import baselith.plugins.api_routers.routes.index as index_module
+import baselith.plugins.api_routers.routes.privacy as privacy_module
+import baselith.plugins.api_routers.routes.prompts as prompts_module
 from baselith.core.middleware import require_admin_or_job, require_user
 from baselith.core.models.chat import ChatResponse
 from baselith.core.privacy.types import ErasureReport, RetentionReport, SubjectExport
 from baselith.core.prompts.registry import PromptRegistry
 from baselith.core.prompts.sync import PromptSynchronizer
-from baselith.plugins.api_routers.admin import verify_credentials
+from baselith.plugins.api_routers.routes.admin import verify_credentials
 from tests.unit.core.prompts.test_prompt_sync import FakeBackend
 from tests.unit.plugins_tests._wire_helpers import (
     WireSpy,

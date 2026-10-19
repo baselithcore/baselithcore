@@ -37,7 +37,7 @@ To use the Reasoning Agent in your application:
 3. **Direct Usage (Code)**:
 
    ```python
-   from baselith.plugins.reasoning_agent.reasoning_agent import ReasoningAgent
+   from baselith.plugins.reasoning_agent.agent import ReasoningAgent
 
    agent = ReasoningAgent(service=my_llm_service, sandbox_service=my_sandbox)
 

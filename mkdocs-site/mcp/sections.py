@@ -30,6 +30,8 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _INLINE_RE = re.compile(r"[`*_]+")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _NON_SLUG_RE = re.compile(r"[^\w\- ]+")
+# A trailing attribute list (``## Signing {#integrity}``) sets the anchor itself.
+_ATTR_ID_RE = re.compile(r"\s*\{[^}]*#([\w\-]+)[^}]*\}\s*$")
 
 
 def estimate_tokens(text: str) -> int:
@@ -62,6 +64,14 @@ class Section:
         return estimate_tokens(content[self.start : self.end])
 
 
+def _section(heading: str, level: int, start: int, end: int) -> Section:
+    """A section whose anchor honours an explicit ``{#id}`` on its heading."""
+    attr = _ATTR_ID_RE.search(heading)
+    if attr is None:
+        return Section(heading, slugify(heading), level, start, end)
+    return Section(heading[: attr.start()].rstrip(), attr.group(1), level, start, end)
+
+
 def parse_sections(content: str) -> list[Section]:
     """Split a page into its H2/H3 sections, in document order.
 
@@ -91,16 +101,14 @@ def parse_sections(content: str) -> list[Section]:
             if match and _MIN_LEVEL <= len(match.group(1)) <= _MAX_LEVEL:
                 if pending:
                     title, level, start = pending.pop()
-                    sections.append(
-                        Section(title, slugify(title), level, start, offset)
-                    )
+                    sections.append(_section(title, level, start, offset))
                 pending.append((match.group(2).strip(), len(match.group(1)), offset))
 
         offset += len(line)
 
     if pending:
         title, level, start = pending.pop()
-        sections.append(Section(title, slugify(title), level, start, len(content)))
+        sections.append(_section(title, level, start, len(content)))
 
     return sections
 

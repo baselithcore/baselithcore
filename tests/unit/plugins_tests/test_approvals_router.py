@@ -8,14 +8,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import baselith.plugins.api_routers.approvals as approvals_module
+import baselith.plugins.api_routers.routes.approvals as approvals_module
 from baselith.core.orchestration.checkpoint import (
     STATUS_AWAITING_APPROVAL,
     Checkpoint,
     InMemoryCheckpointStore,
 )
-from baselith.plugins.api_routers.admin import verify_credentials
-from baselith.plugins.api_routers.approvals import router
+from baselith.plugins.api_routers.routes.admin import verify_credentials
+from baselith.plugins.api_routers.routes.approvals import router
 
 
 @pytest.fixture

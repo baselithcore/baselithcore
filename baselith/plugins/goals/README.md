@@ -28,7 +28,7 @@ To use the Goals plugin in your agent workflow:
 2. **Register a Goal**:
 
    ```python
-   from baselith.plugins.goals.tracker import Goal, GoalTracker
+   from baselith.plugins.goals.tracking.tracker import Goal, GoalTracker
 
    tracker = GoalTracker()
    my_goal = Goal(

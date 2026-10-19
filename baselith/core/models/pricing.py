@@ -195,6 +195,9 @@ DEFAULT_PRICING: Final[Mapping[str, ModelPrice]] = {
     "claude-haiku-4-5": ModelPrice(1.0, 5.0),
     # OpenAI
     "gpt-5": ModelPrice(10.0, 30.0),
+    # gpt-6-luna: $0.10 in / $0.50 out, cached input $0.01 (= the derived 0.1x),
+    # confirmed by the operator against the OpenAI price list on 2026-10-14.
+    "gpt-6-luna": ModelPrice(0.10, 0.50),
     "gpt-4o": ModelPrice(2.50, 10.0),
     "gpt-4o-mini": ModelPrice(0.15, 0.60),
     # Google

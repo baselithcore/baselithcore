@@ -71,6 +71,46 @@ store = PostgresWebhookStore()
 removed = await store.purge_deliveries_before(time.time() - 30 * 86400)
 ```
 
+### Transactional outbox (`WEBHOOK_OUTBOX_ENABLED`)
+
+`emit` delivers inside the calling process. If that process dies between the
+business commit and the delivery, the event is lost: the data changed and no
+subscriber heard of it. `WebhookService.publish` closes that gap. With
+`WEBHOOK_OUTBOX_ENABLED=true` it writes the event to the `webhook_outbox` table
+and returns; a relay running in every API process then delivers it, so any
+replica can finish what a dead one started. With the outbox off, `publish` is a
+plain `emit`. The terminal `agent.completed` / `agent.failed` events of the RQ
+worker go through `publish`.
+
+```python
+async with get_async_cursor() as cur:
+    await cur.execute("UPDATE orders SET status = 'paid' WHERE id = %s", (order_id,))
+    # Same transaction: the change and its event commit together or not at all.
+    await get_webhook_service().publish(
+        "order.paid", {"order_id": order_id}, tenant_id=tenant, cur=cur
+    )
+```
+
+- **At least once.** A relay that dies after delivering and before deleting the
+  row delivers the event again. The event `id` is stable, so a receiver
+  deduplicates on the `id` in the envelope.
+- **Per-endpoint retries stay with the dispatcher.** The outbox guarantees the
+  event was *dispatched*: a row is deleted once every subscribed endpoint was
+  attempted. A failing endpoint is retried, dead-lettered and replayed through
+  the delivery records, as before.
+- **Failures of the pipeline itself** (database unreachable, a crash) reschedule
+  the row with exponential backoff, capped at 300 s. After
+  `WEBHOOK_OUTBOX_MAX_ATTEMPTS` it is parked with `status = 'dead'` and its
+  `last_error`, for an operator to inspect.
+- **No ordering** across events.
+- **Several relays are safe.** A claim takes a lease (`FOR UPDATE SKIP LOCKED`)
+  measured on the database clock, so two replicas never deliver the same row at
+  once and clock skew cannot hand over a live lease. Keep
+  `WEBHOOK_OUTBOX_LEASE_SECONDS` above one event's worst-case delivery time.
+- **Durable only with `WEBHOOK_STORE=postgres`.** The table comes from migration
+  `016_webhook_outbox`. With the `memory` store the outbox queues in-process and
+  survives nothing; `cur` is ignored.
+
 ## Enabling & registering
 
 Set `WEBHOOKS_ENABLED=true`. Register endpoints over the API or in code.
@@ -275,6 +315,11 @@ of never mixing them up.
 | `WEBHOOK_MAX_CONNECTIONS`             | `20`    | Cap on concurrent outbound delivery sockets    |
 | `WEBHOOK_MAX_ATTEMPTS`                | `4`     | Delivery attempts before dead-lettering        |
 | `WEBHOOK_RETRY_BACKOFF_SECONDS`       | `1`     | Base backoff (exponential + jitter)            |
+| `WEBHOOK_OUTBOX_ENABLED`              | `false` | `publish` queues events in the transactional outbox |
+| `WEBHOOK_OUTBOX_POLL_SECONDS`         | `2`     | Seconds between polls when the outbox is empty |
+| `WEBHOOK_OUTBOX_BATCH_SIZE`           | `50`    | Rows claimed per poll                          |
+| `WEBHOOK_OUTBOX_LEASE_SECONDS`        | `120`   | How long a relay owns a claimed row            |
+| `WEBHOOK_OUTBOX_MAX_ATTEMPTS`         | `8`     | Dispatch attempts before a row is parked as dead |
 | `WEBHOOK_SIGNATURE_TOLERANCE_SECONDS` | `300`   | Max signature age `verify_signature` accepts when called without `tolerance_seconds`; `0` disables the check |
 | `WEBHOOK_ALLOW_INTERNAL`              | `false` | Bypass the SSRF guard (local dev only)         |
 | `WEBHOOK_MAX_ENDPOINTS_PER_TENANT`    | `50`    | Per-tenant registration cap                    |

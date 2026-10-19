@@ -10,13 +10,13 @@ from __future__ import annotations
 import pytest
 
 from baselith.plugins.coding_agent import CodingAgent, Workspace
-from baselith.plugins.coding_agent.flows import NO_CHECKS, checks_something
-from baselith.plugins.coding_agent.harness import (
+from baselith.plugins.coding_agent.runner.flows import NO_CHECKS, checks_something
+from baselith.plugins.coding_agent.runner.harness import (
     build_test_script,
     parse_report,
     report_marker,
 )
-from baselith.plugins.coding_agent.workspace_harness import (
+from baselith.plugins.coding_agent.workspace.harness import (
     build_workspace_script,
     stage,
 )

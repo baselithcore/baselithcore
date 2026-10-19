@@ -23,7 +23,7 @@ async def test_run_tests_reads_the_report_the_sandbox_printed(
     coding_agent, monkeypatch
 ):
     from baselith.plugins.coding_agent import agent as agent_module
-    from baselith.plugins.coding_agent.harness import report_marker
+    from baselith.plugins.coding_agent.runner.harness import report_marker
 
     monkeypatch.setattr(agent_module, "new_run_key", lambda: "k" * 32)
     line = (
