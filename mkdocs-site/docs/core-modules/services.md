@@ -2656,7 +2656,9 @@ models or opening Qdrant clients themselves. The wire protocol is pluggable
 (`baselith/core/services/inference/_protocols.py`): TEI by default, or an
 OpenAI-compatible `/embeddings` and a Cohere- or NIM-style rerank for a
 customer's own servers. `EmbeddingService` refuses vectors whose size differs
-from the configured `dim` before they reach a collection. See
+from the configured `dim` before they reach a collection. Against vLLM, set
+`*_TRUNCATE_PROMPT_TOKENS=-1` so an over-long input is cut as TEI cuts it,
+instead of failing its whole batch with `400`. See
 [Inference Services](../advanced/inference-services.md).
 
 `baselith.core.services.retrieval.Reranker` follows the same rule: with the rerank

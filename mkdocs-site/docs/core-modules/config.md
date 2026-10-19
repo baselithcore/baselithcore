@@ -1467,8 +1467,9 @@ rerank clients carry four hardening knobs each — `MAX_TOTAL_SECONDS`,
 `MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. Calling a
 model server that is not TEI, such as a customer's own GPUs, uses `API`
 (embedding `tei` | `openai`; rerank `tei` | `cohere` | `nim`), `PATH`, the
-embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, and `CA_BUNDLE` / `CLIENT_CERT` /
-`CLIENT_KEY` for a private CA or mutual TLS. See
+embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, `TRUNCATE_PROMPT_TOKENS` (vLLM
+only: `-1` cuts an over-long input to the model's maximum, as TEI does), and
+`CA_BUNDLE` / `CLIENT_CERT` / `CLIENT_KEY` for a private CA or mutual TLS. See
 [Inference Services](../advanced/inference-services.md).
 
 ### Voice: OpenAI-compatible sidecars

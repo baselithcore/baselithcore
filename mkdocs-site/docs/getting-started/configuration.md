@@ -346,6 +346,7 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_EMBEDDING_QUERY_PREFIX` | `str` | *empty* | Text prepended to queries, for models trained with an instruction (e5: 'query: ', Qwen3-Embedding, ...). bge-m3 needs none. |
 | `BASELITH_EMBEDDING_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_EMBEDDING_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='openai'): ask the server to cut each input to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to a text past max-model-len and the whole batch fails. Leave empty for OpenAI and other servers, which refuse the unknown parameter. |
 | `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 | `BASELITH_QDRANT_API_KEY` :material-key:<br>also accepts `QDRANT_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `BASELITH_QDRANT_GRPC_PORT` | `int` | `6334` |  |
@@ -369,6 +370,7 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_RERANK_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own. |
 | `BASELITH_RERANK_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_RERANK_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='cohere'): ask the server to cut each query+passage pair to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to an over-long pair. Leave empty for Cohere, Jina and other servers. |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 
 ## MCP Configuration
@@ -1069,4 +1071,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-721 settings documented.
+723 settings documented.

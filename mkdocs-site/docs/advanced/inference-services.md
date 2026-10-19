@@ -63,6 +63,7 @@ inference that already exists on someone's own GPUs:
 | `BASELITH_RERANK_API` | `tei` (default), `cohere`, `nim` | `cohere`: `/rerank` with `documents`/`top_n` (Cohere, Jina, vLLM, Infinity); `nim`: NIM `/ranking` |
 | `BASELITH_EMBEDDING_PATH`, `BASELITH_RERANK_PATH` | a relative path | when the server mounts the API elsewhere; an absolute URL (`https://…`, `//host/…`) is refused at startup, since it would carry the bearer token to another host |
 | `BASELITH_EMBEDDING_QUERY_PREFIX`, `BASELITH_EMBEDDING_DOCUMENT_PREFIX` | text | models trained with instructions (e5: `query:` / `passage:`, each followed by a space). The query prefix applies to `embed_query`/`embed_queries`, the document prefix to `embed_documents` |
+| `BASELITH_EMBEDDING_TRUNCATE_PROMPT_TOKENS`, `BASELITH_RERANK_TRUNCATE_PROMPT_TOKENS` | an integer, `-1` = the model's maximum | vLLM only. TEI cuts an over-long input by itself; vLLM answers `400` instead, and one long text fails its whole batch. Set `-1` when `*_API` points at vLLM; leave empty for OpenAI, Cohere and the rest, which refuse the unknown `truncate_prompt_tokens` field |
 | `*_CA_BUNDLE`, `*_CLIENT_CERT`, `*_CLIENT_KEY` | PEM paths | a private CA, mutual TLS |
 
 `BASELITH_EMBEDDING_DIM` must be the model's own size: a vector of any other

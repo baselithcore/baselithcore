@@ -134,6 +134,46 @@ async def test_cohere_style_rerank() -> None:
     assert out == [(1, 3.0), (2, 2.0)]
 
 
+async def test_vllm_truncation_is_asked_for_only_when_configured() -> None:
+    bodies: list[dict[str, object]] = []
+
+    def embed(req: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(req.content))
+        return httpx.Response(
+            200, json={"data": [{"index": 0, "embedding": [1.0, 1.0, 1.0]}]}
+        )
+
+    for cfg in (_emb(), _emb(truncate_prompt_tokens=-1)):
+        svc = EmbeddingService.from_config(cfg, transport=httpx.MockTransport(embed))
+        await svc.embed_query("q")
+    assert "truncate_prompt_tokens" not in bodies[0]
+    assert bodies[1]["truncate_prompt_tokens"] == -1
+
+    def rerank(req: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(req.content))
+        return httpx.Response(
+            200, json={"results": [{"index": 0, "relevance_score": 1.0}]}
+        )
+
+    for cfg in (_rr(api="cohere"), _rr(api="cohere", truncate_prompt_tokens=512)):
+        rsvc = RerankService.from_config(cfg, transport=httpx.MockTransport(rerank))
+        await rsvc.rerank("q", ["a"], top_k=1)
+    assert "truncate_prompt_tokens" not in bodies[2]
+    assert bodies[3]["truncate_prompt_tokens"] == 512
+
+
+def test_tei_payloads_ignore_the_vllm_truncation_knob() -> None:
+    from baselith.core.services.inference._protocols import (
+        embed_payload,
+        rerank_payload,
+    )
+
+    assert "truncate_prompt_tokens" not in embed_payload("tei", "m", ["a"], truncate=-1)
+    assert "truncate_prompt_tokens" not in rerank_payload(
+        "tei", "m", "q", ["a"], truncate=-1
+    )
+
+
 async def test_nim_ranking_maps_logits_to_unit_scores() -> None:
     seen: dict[str, object] = {}
 
