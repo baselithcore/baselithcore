@@ -2221,6 +2221,9 @@ BaselithCore supports two types of sandboxing for secure code execution:
   resource ceilings. Passing `enable_network=` explicitly overrides the setting
   for one call.
 - **Resource Limits**: Configurable memory and CPU quotas are enforced per execution.
+  Memory (128 MiB) and the writable `/tmp` tmpfs (64 MiB) can be raised for one
+  call within operator-set ceilings — see
+  [Bounded per-call resources](#bounded-per-call-resources).
 - **Host Protection**: Agents in "YOLO mode" (autonomous execution) are strictly confined to the sandbox environment.
 - **Pre-execution static analysis**: Python payloads are AST-analyzed before
   any container spins up (`baselith/core/services/sandbox/static_analysis.py`, on by
@@ -2243,10 +2246,28 @@ BaselithCore supports two types of sandboxing for secure code execution:
   Besides numpy, pandas, matplotlib and scikit-learn the image carries
   `pytest`, so a coding agent can run the tests it writes: write the code and the
   test file under `/tmp` (the only writable path) and call `pytest.main` with
-  `-p no:cacheprovider`. An image built before pytest was added has to be
-  rebuilt (from the repository root: `docker build -t agent-sandbox:latest -f
-  baselith/core/services/sandbox/Dockerfile.sandbox baselith/core/services/sandbox`), or removed so
-  the first run builds it again.
+  `-p no:cacheprovider`.
+- **Office files**: the image also carries `openpyxl` (`.xlsx`), `python-docx`
+  (`.docx`) and `python-pptx` (`.pptx`), so code run through
+  [file transfer](#file-transfer-through-stdin-and-stdout) can read and write
+  spreadsheets, Word documents and slide decks. File transfer is docker-provider
+  only (`transfer.py` raises `ValueError` under `SANDBOX_PROVIDER=sbx`), so that
+  workflow does not exist under `sbx`, though the libraries are importable by any
+  code that runs in this image. `python-pptx` brings `lxml`,
+  `Pillow` and `XlsxWriter`; all of them install as wheels on linux/amd64 and
+  linux/arm64, so the image still compiles nothing. An image built before
+  these libraries (or pytest) were added has to be rebuilt (from the
+  repository root: `docker build -t agent-sandbox:latest -f
+  baselith/core/services/sandbox/Dockerfile.sandbox baselith/core/services/sandbox`),
+  or (docker provider only) removed so the first run builds it again, and
+  `SANDBOX_IMAGE` must name it: `SANDBOX_IMAGE=agent-sandbox:latest`. The `sbx`
+  provider runs `SANDBOX_IMAGE` exactly as named and never builds it, so there
+  the image has to be built and present beforehand. The stock `python:3.12-slim`
+  has none of these libraries, so `import openpyxl` fails there. Real files are
+  larger than the defaults allow: for heavy file work raise the ceilings
+  `SANDBOX_MAX_MEMORY_MB`, `SANDBOX_MAX_TMPFS_MB` and `SANDBOX_MAX_TIMEOUT`
+  (see [Bounded per-call resources](#bounded-per-call-resources)) so a caller's
+  `Resources(...)` request is not clamped back to 128 MiB / 64 MiB / 30 s.
 - **Read-only mounts**: `execute_code_async(..., mounts=..., mounts_read_only=True)`
   binds every `mounts` entry read-only (docker provider; the sbx provider refuses
   it with `ValueError` before anything runs). A caller that hands the sandbox a
@@ -2264,6 +2285,117 @@ BaselithCore supports two types of sandboxing for secure code execution:
   `SANDBOX_ALLOW_UNHARDENED_BASE`, an unreviewed base image);
   `scripts/check_distribution_artifacts.py` now asserts both on the built
   artifacts.
+
+### Bounded per-call resources
+
+A caller that has to process something larger (an uploaded document, a big
+dataframe) can ask for more memory, scratch space or time for a single run, but
+only up to ceilings the operator sets:
+
+```python
+from baselith.core.services.sandbox import Resources, SandboxService
+
+result = await SandboxService().execute_code_async(
+    code,
+    resources=Resources(memory_mb=1024, tmpfs_mb=512, timeout_s=120),
+)
+```
+
+Each field is `min(requested or default, ceiling)`, where the defaults are
+128 MiB / 64 MiB / `SANDBOX_TIMEOUT` and the ceilings are
+`SANDBOX_MAX_MEMORY_MB` / `SANDBOX_MAX_TMPFS_MB` / `SANDBOX_MAX_TIMEOUT`
+(`resources.clamp`, in `baselith/core/services/sandbox/resources.py`). The
+ceilings default to **today's fixed limits** (128 / 64 / 30), so a request is
+inert until an operator raises them; a request above a ceiling is silently
+clamped, never refused. `build_sandbox_runtime_kwargs(resources=...)` applies the
+clamped memory and tmpfs size; the timeout becomes the effective wait of
+`execute_code_async`. Only those three values move per call: capabilities, the
+read-only root, the `noexec` tmpfs, `pids_limit` and the ulimits (including the
+64 MiB per-file `fsize` cap) stay fixed. Without `resources` the call behaves
+exactly as before, and the streaming path and the warm pool keep the defaults.
+
+### File transfer through stdin and stdout
+
+A run can be handed files and give files back without a bind mount, so the same
+call works against the local socket, a remote TCP daemon and Docker-in-Docker:
+
+```python
+from baselith.core.services.sandbox import FileTransfer, Resources, SandboxService
+
+result = await SandboxService().execute_code_async(
+    "import csv, os\n"
+    "rows = list(csv.reader(open('/tmp/in/data.csv')))\n"
+    "open('summary.csv', 'w').write(f'rows,{len(rows)}\\n')\n",
+    files=FileTransfer(inputs={"data.csv": data}, max_output_files=5),
+    resources=Resources(memory_mb=1024, tmpfs_mb=512, timeout_s=120),
+)
+result.outputs          # {"summary.csv": b"rows,42\n"}
+result.output_refusals  # {"huge.bin": "too_large"}
+```
+
+The hardened container has a read-only root and a `/tmp` tmpfs, which neither
+the Docker archive API (`PUT /archive` is refused) nor `docker cp` reaches, so
+the files travel through the container's own stdin and stdout
+(`baselith/core/services/sandbox/transfer.py`). The container is created with
+the usual `build_sandbox_runtime_kwargs(resources=...)` plus an open stdin and
+the `none` logging driver, and runs a fixed, trusted bootstrap,
+`python -c BOOTSTRAP` (`baselith/core/services/sandbox/bootstrap.py`; never
+model-written):
+
+1. Before starting the container the parent opens two attach streams, one for
+   stdin and one for stdout and stderr. A reader thread demultiplexes the
+   second into bounded windows from the first byte on. Nothing is read from
+   the daemon's logs, so log rotation, retention limits and the logging driver
+   cannot lose an archive. The parent then sends an 8-byte big-endian length
+   followed by an uncompressed tar: the code as the member `__code__.py` (not
+   argv, so the 128 KiB argument limit does not apply; the cap is 1 MiB), then
+   the inputs (`pack_inputs`).
+2. The bootstrap extracts **regular files with flat names only**
+   (`[A-Za-z0-9._ -]{1,120}`, no separators, no leading `..`, at most 64 files,
+   no more bytes than the parent announced) into `/tmp/in`. A link, a device, a
+   directory or a path aborts the run with exit code 2 before any code runs.
+3. It writes the code to `/tmp/run/main.py` and runs it in a **child**
+   interpreter from `/tmp/out`, with stdin closed, stdout and stderr inherited
+   and the bootstrap's environment keys removed. The child's own shutdown
+   (flushing files left open, joining non-daemon threads, `atexit`) finishes
+   before anything is collected. `sys.argv[0]` is the script path, and
+   inputs or outputs named like a module (`csv.py`) are never importable,
+   because the script's directory holds nothing else. The child's exit status
+   is the run's. Past the bootstrap's deadline the child is killed with exit
+   code 124; the deadline is the parent's timeout minus `max(2 s, 10 %)`, so a
+   slow run still returns what it printed and wrote. Every process the code
+   left behind is then killed.
+4. The bootstrap then writes `\n<boundary>\n` and the base64 of a tar of
+   `/tmp/out`: regular files only, no recursion, symlinks never followed, at
+   most `max_output_files` (default 16) and `max_output_bytes` (default 64 MiB,
+   a running total). Everything else is listed in `output_refusals` as
+   `too_many`, `too_large`, `bad_name` or `not_a_file`. If `/tmp/out` holds
+   more entries than the bootstrap scans (4096), the key `"*"` carries
+   `listing_truncated`.
+
+The boundary is `secrets.token_hex(16)`, new on every run, and the parent takes
+its **last** occurrence: what comes before is the code's stdout (capped at
+1 MiB before decoding), what follows is the archive. The code runs as the same
+uid in the same container and can read the boundary from `/proc`, so the
+archive is untrusted: the boundary only frames the output and is not a secret.
+`unpack_outputs` parses the archive in memory and checks every member again
+(name, type, count, bytes), keeping at most 64 refusals. When no usable
+archive arrives (missing boundary, oversized or corrupt archive), the result
+carries `output_refusals == {"*": "archive_missing"}` and a stderr note, and
+the run counts as failed: `exit_code` is 1 if the code itself exited 0.
+stderr keeps 256 KiB from each end. Outputs are collected even when the code
+fails: `exit_code` tells the caller whether to keep them. If the parent's own
+timeout expires first, the container is killed and the result has exit code
+124, the output captured so far and no files.
+
+File transfer is **docker-provider only**: with `SANDBOX_PROVIDER=sbx`,
+`execute_code_async(files=...)` raises
+`ValueError("file transfer needs the docker sandbox provider")`. It also refuses
+`mounts`, languages other than python, a single input over the 64 MiB per-file
+`fsize` limit and inputs larger than the run's `/tmp`. `BASELITH_SANDBOX_*`
+environment keys belong to the bootstrap, so the parent drops any a caller
+passes in `envs`. Static analysis, metering and `budget=` apply as on any other
+run, and the container is always removed.
 
 ### Compute Metering & Budget Charging
 
@@ -2340,6 +2472,11 @@ SANDBOX_SBX_PROFILE=default
 
 # General
 SANDBOX_TIMEOUT=30
+
+# Ceilings for per-call Resources requests (defaults = the historical limits)
+SANDBOX_MAX_MEMORY_MB=128                    # MiB, 64..16384
+SANDBOX_MAX_TMPFS_MB=64                      # MiB, 16..8192
+SANDBOX_MAX_TIMEOUT=30                       # seconds, 1..3600
 
 # Metering: USD per wall-clock compute second (0.0 = record time, charge nothing)
 SANDBOX_COST_PER_COMPUTE_SECOND=0.0

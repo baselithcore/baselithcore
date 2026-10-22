@@ -1437,8 +1437,10 @@
     ],
     "baselith.core.services.sandbox": [
       "ExecutionResult",
+      "FileTransfer",
       "PoolConfig",
       "PooledContainer",
+      "Resources",
       "SandboxPool",
       "SandboxService",
       "StreamFrame",

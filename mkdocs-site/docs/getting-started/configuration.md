@@ -725,6 +725,9 @@ Declared in `baselith.core.config.sandbox`.
 | `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker daemon socket for the sandbox client. Used only when set explicitly and DOCKER_HOST is unset; otherwise Docker's own client environment decides. |
 | `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Give Docker sandbox containers the default bridge network (egress for untrusted code). Off: network_mode none. |
 | `SANDBOX_IMAGE` | `str` | `python:3.12-slim` | Docker image for sandbox |
+| `SANDBOX_MAX_MEMORY_MB` | `int` | `128` | Ceiling, in MiB, on the memory a single sandbox run may be given. A caller may request less, never more. The default keeps today's 128 MiB. |
+| `SANDBOX_MAX_TIMEOUT` | `int` | `30` | Ceiling, in seconds, on a per-call sandbox timeout request. A caller may request less, never more. The default keeps today's 30 seconds. |
+| `SANDBOX_MAX_TMPFS_MB` | `int` | `64` | Ceiling, in MiB, on the writable /tmp scratch space of a single sandbox run. A caller may request less, never more. The default keeps today's 64 MiB. |
 | `SANDBOX_PROVIDER` | `Literal['docker', 'sbx']` | `docker` | Sandbox provider (docker or sbx) |
 | `SANDBOX_SBX_PATH` | `str` | `sbx` | Path to the sbx CLI binary |
 | `SANDBOX_SBX_PROFILE` | `str \| None` | *empty* | Optional profile to use with sbx |
@@ -1071,4 +1074,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-723 settings documented.
+726 settings documented.

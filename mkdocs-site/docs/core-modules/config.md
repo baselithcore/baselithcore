@@ -64,7 +64,7 @@ baselith/core/config/
 ├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
-├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second, max_* ceilings)
 ├── webhooks.py           # WebhookConfig (WEBHOOKS_ENABLED, WEBHOOK_STORE, WEBHOOK_*)
 └── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
@@ -79,7 +79,8 @@ stdio script runs until an operator approves a directory -,
 [MCP › Command Allowlist](mcp.md#command-allowlist), the durable MCP task
 store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
 [MCP](mcp.md), and sandbox metering
-(`SANDBOX_COST_PER_COMPUTE_SECOND`) under
+(`SANDBOX_COST_PER_COMPUTE_SECOND`) and the per-call resource ceilings
+(`SANDBOX_MAX_MEMORY_MB`, `SANDBOX_MAX_TMPFS_MB`, `SANDBOX_MAX_TIMEOUT`) under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
