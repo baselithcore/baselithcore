@@ -22,6 +22,14 @@ USAGE_SINK_FAILURES_TOTAL = Counter(
     ["sink"],
 )
 
+# === Logging ===
+LOG_RECORDS_TOTAL = Counter(
+    "mas_log_records_total",
+    "Log records emitted, by level — volume/error-rate signal independent "
+    "of any log viewer's retention window.",
+    ["level"],
+)
+
 # === Chat Metrics ===
 CHAT_REQUESTS_TOTAL = Counter(
     "mas_chat_requests_total",
@@ -326,6 +334,8 @@ UPDATE_AVAILABLE = Gauge(
 
 __all__ = [
     "UPDATE_AVAILABLE",
+    # Logging
+    "LOG_RECORDS_TOTAL",
     # Chat
     "CHAT_REQUESTS_TOTAL",
     "CHAT_REQUEST_LATENCY_SECONDS",

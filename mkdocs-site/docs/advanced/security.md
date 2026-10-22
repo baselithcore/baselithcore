@@ -432,7 +432,7 @@ escapes every non-printable character (`\n` becomes the literal `\x0a`, so the
 evidence survives) and caps the length, keeping one record on one line. It is
 applied at every boundary where outside text meets a log line — the plugin
 gates and loader, the plugin admin API, the tenant router, and the `SafeLogger`
-fallback in `baselith/core/observability/logging.py`, which also replaces values whose
+fallback in `baselith/core/observability/logging/_safe_logger.py`, which also replaces values whose
 key marks them a secret:
 
 ```python
