@@ -20,3 +20,9 @@ scikit-learn==1.9.1
 # Coding agents run the tests they write inside the sandbox; the closure adds
 # iniconfig, pluggy and pygments, all pure-Python wheels.
 pytest==9.1.1
+# Office files: so sandboxed code can read and write spreadsheets, Word
+# documents and slide decks. python-pptx brings lxml, Pillow and XlsxWriter,
+# all wheels on linux/amd64 and arm64.
+openpyxl==3.1.5
+python-docx==1.2.0
+python-pptx==1.0.2

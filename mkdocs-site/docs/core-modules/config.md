@@ -64,7 +64,7 @@ baselith/core/config/
 ├── drift.py              # suspected-typo detection for environment variables
 ├── quotas.py             # QuotaConfig + per-key/per-tenant runtime overrides
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
-├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second)
+├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second, max_* ceilings)
 ├── webhooks.py           # WebhookConfig (WEBHOOKS_ENABLED, WEBHOOK_STORE, WEBHOOK_*)
 └── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
@@ -79,7 +79,8 @@ stdio script runs until an operator approves a directory -,
 [MCP › Command Allowlist](mcp.md#command-allowlist), the durable MCP task
 store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
 [MCP](mcp.md), and sandbox metering
-(`SANDBOX_COST_PER_COMPUTE_SECOND`) under
+(`SANDBOX_COST_PER_COMPUTE_SECOND`) and the per-call resource ceilings
+(`SANDBOX_MAX_MEMORY_MB`, `SANDBOX_MAX_TMPFS_MB`, `SANDBOX_MAX_TIMEOUT`) under
 [Services › Sandbox Configuration](services.md#sandbox-configuration), the
 `GUARDRAILS_*` input/output guard settings under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
@@ -1467,8 +1468,9 @@ rerank clients carry four hardening knobs each — `MAX_TOTAL_SECONDS`,
 `MAX_RESPONSE_BYTES`, `RETRY_RATE_LIMITED`, `ALLOW_INSECURE_KEY`. Calling a
 model server that is not TEI, such as a customer's own GPUs, uses `API`
 (embedding `tei` | `openai`; rerank `tei` | `cohere` | `nim`), `PATH`, the
-embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, and `CA_BUNDLE` / `CLIENT_CERT` /
-`CLIENT_KEY` for a private CA or mutual TLS. See
+embedding `QUERY_PREFIX` / `DOCUMENT_PREFIX`, `TRUNCATE_PROMPT_TOKENS` (vLLM
+only: `-1` cuts an over-long input to the model's maximum, as TEI does), and
+`CA_BUNDLE` / `CLIENT_CERT` / `CLIENT_KEY` for a private CA or mutual TLS. See
 [Inference Services](../advanced/inference-services.md).
 
 ### Voice: OpenAI-compatible sidecars

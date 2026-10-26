@@ -346,6 +346,7 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_EMBEDDING_QUERY_PREFIX` | `str` | *empty* | Text prepended to queries, for models trained with an instruction (e5: 'query: ', Qwen3-Embedding, ...). bge-m3 needs none. |
 | `BASELITH_EMBEDDING_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_EMBEDDING_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_EMBEDDING_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='openai'): ask the server to cut each input to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to a text past max-model-len and the whole batch fails. Leave empty for OpenAI and other servers, which refuse the unknown parameter. |
 | `BASELITH_EMBEDDING_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 | `BASELITH_QDRANT_API_KEY` :material-key:<br>also accepts `QDRANT_API_KEY` | `SecretStr \| None` | *empty* |  |
 | `BASELITH_QDRANT_GRPC_PORT` | `int` | `6334` |  |
@@ -369,6 +370,7 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_RERANK_PATH` | `str \| None` | *empty* | Request path under the URL; empty = the protocol's own. |
 | `BASELITH_RERANK_RETRY_RATE_LIMITED` | `bool` | `False` | Retry on HTTP 429. Off by default: a full TEI queue is not helped by more requests on the interactive path; enable for batch indexing jobs. |
 | `BASELITH_RERANK_TIMEOUT` | `float` | `60.0` | Per-request timeout (s). |
+| `BASELITH_RERANK_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='cohere'): ask the server to cut each query+passage pair to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to an over-long pair. Leave empty for Cohere, Jina and other servers. |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 
 ## MCP Configuration
@@ -723,6 +725,9 @@ Declared in `baselith.core.config.sandbox`.
 | `SANDBOX_DOCKER_SOCKET` | `str` | `/var/run/docker.sock` | Docker daemon socket for the sandbox client. Used only when set explicitly and DOCKER_HOST is unset; otherwise Docker's own client environment decides. |
 | `SANDBOX_ENABLE_NETWORK` | `bool` | `False` | Give Docker sandbox containers the default bridge network (egress for untrusted code). Off: network_mode none. |
 | `SANDBOX_IMAGE` | `str` | `python:3.12-slim` | Docker image for sandbox |
+| `SANDBOX_MAX_MEMORY_MB` | `int` | `128` | Ceiling, in MiB, on the memory a single sandbox run may be given. A caller may request less, never more. The default keeps today's 128 MiB. |
+| `SANDBOX_MAX_TIMEOUT` | `int` | `30` | Ceiling, in seconds, on a per-call sandbox timeout request. A caller may request less, never more. The default keeps today's 30 seconds. |
+| `SANDBOX_MAX_TMPFS_MB` | `int` | `64` | Ceiling, in MiB, on the writable /tmp scratch space of a single sandbox run. A caller may request less, never more. The default keeps today's 64 MiB. |
 | `SANDBOX_PROVIDER` | `Literal['docker', 'sbx']` | `docker` | Sandbox provider (docker or sbx) |
 | `SANDBOX_SBX_PATH` | `str` | `sbx` | Path to the sbx CLI binary |
 | `SANDBOX_SBX_PROFILE` | `str \| None` | *empty* | Optional profile to use with sbx |
@@ -1069,4 +1074,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-721 settings documented.
+726 settings documented.

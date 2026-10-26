@@ -26,7 +26,10 @@ from logging.handlers import QueueHandler, QueueListener
 from typing import Any
 
 from baselith.core.config import get_app_config
-from baselith.core.utils.logsafe import sanitize_log_value
+
+from ._levels import get_log_level, set_log_level
+from ._processors import _count_log_record, add_otel_context
+from ._safe_logger import SafeLogger
 
 # Check if structlog is available (soft dependency for lean environments).
 try:
@@ -64,37 +67,13 @@ def _stop_log_listener() -> None:
         _log_listener = None
 
 
-def add_otel_context(
-    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
-) -> MutableMapping[str, Any]:
-    """
-    structlog processor that injects the active OpenTelemetry trace context.
-
-    Adds ``trace_id``/``span_id`` (zero-padded hex, W3C format) to every log
-    entry when a span is recording, enabling trace↔log correlation in
-    backends like Grafana/Tempo/Loki. No-op when the OTel SDK is absent or no
-    span is active, so it is always safe to keep in the processor chain.
-    """
-    try:
-        from opentelemetry import trace
-
-        span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx.is_valid:
-            event_dict["trace_id"] = f"{ctx.trace_id:032x}"
-            event_dict["span_id"] = f"{ctx.span_id:016x}"
-    except Exception:  # silent-ok: structlog processor; logging here recurses
-        pass
-    return event_dict
-
-
 # --- Sensitive-data redaction (moved to baselith.core.observability.redaction; ------
 # re-exported here for backward compatibility with existing importers). ------
 from baselith.core.observability.redaction import (  # noqa: E402
     _REDACTED,
     _key_is_sensitive,  # (also patched/imported by tests)
-    _mask_text,  # noqa: F401
-    _redact_value,  # noqa: F401
+    _mask_text,
+    _redact_value,
     redact_sensitive,
     redact_url_credentials,
 )
@@ -149,6 +128,7 @@ def configure_logging(
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.contextvars.merge_contextvars,
         add_otel_context,
+        _count_log_record,
         structlog.processors.TimeStamper(fmt=fmt, utc=utc),
         # Redact secrets/PII from foreign (uvicorn/fastapi/3rd-party) logs.
         redact_sensitive,
@@ -160,7 +140,7 @@ def configure_logging(
         final_renderer = structlog.processors.JSONRenderer()
     else:
         try:
-            import rich  # noqa: F401 # Attempt to use Rich for beautiful dev logs.
+            import rich  # Attempt to use Rich for beautiful dev logs.
 
             exception_formatter = structlog.dev.rich_traceback
         except ImportError:
@@ -204,6 +184,7 @@ def configure_logging(
             structlog.stdlib.add_logger_name,
             structlog.contextvars.merge_contextvars,
             add_otel_context,
+            _count_log_record,
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
@@ -302,63 +283,6 @@ def get_log_config() -> dict[str, Any]:
             },
         },
     }
-
-
-#: Generous cap for a single rendered field: long enough for a stack-trace
-#: line or a payload excerpt, short enough that one field cannot flood the log.
-_MAX_LOGGED_CHARS = 2000
-
-
-class SafeLogger:
-    """
-    Fallback wrapper for standard logging when structlog is missing.
-
-    Ensures that modern kwarg-based logging (e.g. log.info("msg", key="val"))
-    remains functional and readable in standard text logs.
-    """
-
-    def __init__(self, logger: logging.Logger) -> None:
-        self._logger = logger
-
-    def _format(self, msg: Any, **kwargs: Any) -> str:
-        """Render message + kwargs as one safe line.
-
-        This path bypasses the structlog processors, so it has to do their two
-        jobs itself: values whose key marks them a secret are replaced, and
-        every rendered value is escaped — a kwarg carrying a newline would
-        otherwise forge a second log entry.
-        """
-        safe_msg = sanitize_log_value(msg, max_length=_MAX_LOGGED_CHARS)
-        if not kwargs:
-            return safe_msg
-        pairs = " ".join(
-            f"{k}="
-            + (
-                _REDACTED
-                if _key_is_sensitive(str(k))
-                else sanitize_log_value(v, max_length=_MAX_LOGGED_CHARS)
-            )
-            for k, v in kwargs.items()
-        )
-        return f"{safe_msg} [{pairs}]"
-
-    def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.info(self._format(msg, **kwargs), *args)
-
-    def error(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.error(self._format(msg, **kwargs), *args)
-
-    def warning(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.warning(self._format(msg, **kwargs), *args)
-
-    def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.debug(self._format(msg, **kwargs), *args)
-
-    def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.critical(self._format(msg, **kwargs), *args)
-
-    def exception(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        self._logger.exception(self._format(msg, **kwargs), *args)
 
 
 def _install_library_defaults() -> None:
@@ -480,13 +404,17 @@ def ensure_configured(stream: Any = sys.stdout) -> None:
 
 __all__ = [
     "STRUCTLOG_AVAILABLE",
+    "SafeLogger",
     "add_context",
     "add_otel_context",
     "bind_context",
     "clear_context",
     "configure_logging",
     "ensure_configured",
+    "get_log_config",
+    "get_log_level",
     "get_logger",
     "redact_sensitive",
     "redact_url_credentials",
+    "set_log_level",
 ]

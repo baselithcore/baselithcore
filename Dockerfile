@@ -225,7 +225,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
-       pip install --prefix /install "setuptools>=83.0.0" \
+       pip install --prefix /install "setuptools>=84.1.0" \
     && if [ "${ML_RUNTIME}" = "local" ]; then \
          PYTHONPATH=/install/lib/python3.12/site-packages \
          pip install --prefix /install \

@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .resources import Resources, clamp
+
+#: Largest single file a sandboxed process may write (the ``fsize`` rlimit).
+FSIZE_LIMIT_BYTES = 64 * 1024 * 1024
+
 #: Resource ceilings applied as kernel ``rlimit``s, as ``(name, value)``.
 #: These bound what dropped capabilities and ``pids_limit`` do not:
 #:
@@ -26,7 +31,7 @@ from typing import Any
 _ULIMITS: tuple[tuple[str, int], ...] = (
     ("nofile", 1024),
     ("nproc", 256),
-    ("fsize", 64 * 1024 * 1024),
+    ("fsize", FSIZE_LIMIT_BYTES),
 )
 
 
@@ -48,7 +53,9 @@ def _build_ulimits() -> list[Any]:
     return [Ulimit(name=name, soft=value, hard=value) for name, value in _ULIMITS]
 
 
-def build_sandbox_runtime_kwargs(enable_network: bool | None = None) -> dict[str, Any]:
+def build_sandbox_runtime_kwargs(
+    enable_network: bool | None = None, resources: Resources | None = None
+) -> dict[str, Any]:
     """Return conservative Docker runtime options for untrusted code.
 
     The container gets no network (unless ``SANDBOX_ENABLE_NETWORK`` opts in),
@@ -56,6 +63,12 @@ def build_sandbox_runtime_kwargs(enable_network: bool | None = None) -> dict[str
     **read-only root filesystem**, a non-root uid and hard resource ceilings.
     ``/tmp`` is the single writable path — a ``noexec,nosuid`` tmpfs, so code
     can stage scratch files there but cannot write a binary and run it.
+
+    Memory (128 MiB) and the ``/tmp`` size (64 MiB) are the defaults; a caller
+    may pass ``resources`` to ask for more, bounded by the operator's
+    ``SANDBOX_MAX_MEMORY_MB`` / ``SANDBOX_MAX_TMPFS_MB`` ceilings (see
+    :func:`~baselith.core.services.sandbox.resources.clamp`). Nothing else is
+    adjustable per call.
 
     ``user`` is ``65534:65534`` (``nobody:nogroup`` on Debian-derived images,
     which the bundled ``Dockerfile.sandbox`` is): a uid that owns nothing, so
@@ -72,18 +85,23 @@ def build_sandbox_runtime_kwargs(enable_network: bool | None = None) -> dict[str
         enable_network: Give the container the default bridge network.
             ``None`` (the default) reads ``SANDBOX_ENABLE_NETWORK``, which is
             off: sandboxed code gets egress only when an operator opts in.
+        resources: Optional per-call memory / tmpfs request, clamped to the
+            configured ceilings. ``None`` keeps the defaults.
 
     Returns:
         Keyword arguments to splat into ``containers.run`` / ``containers.create``.
     """
-    if enable_network is None:
-        from baselith.core.config.sandbox import get_sandbox_config
+    from baselith.core.config.sandbox import get_sandbox_config
 
-        enable_network = get_sandbox_config().enable_network
+    config = get_sandbox_config()
+    if enable_network is None:
+        enable_network = config.enable_network
+    memory_mb, tmpfs_mb, _ = clamp(resources, config)
+    tmpfs_options = f"rw,noexec,nosuid,size={tmpfs_mb}m"
 
     return {
         "network_mode": "bridge" if enable_network else "none",
-        "mem_limit": "128m",
+        "mem_limit": f"{memory_mb}m",
         "cpu_period": 100000,
         "cpu_quota": 50000,
         "security_opt": ["no-new-privileges:true"],
@@ -94,5 +112,5 @@ def build_sandbox_runtime_kwargs(enable_network: bool | None = None) -> dict[str
         "ulimits": _build_ulimits(),
         # cwd on the writable tmpfs — the image's WORKDIR is 0700 uid 1000.
         "working_dir": "/tmp",  # nosec B108  # noqa: S108
-        "tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m"},  # nosec B108  # noqa: S108
+        "tmpfs": {"/tmp": tmpfs_options},  # nosec B108  # noqa: S108
     }
