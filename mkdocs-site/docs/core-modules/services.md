@@ -2334,7 +2334,7 @@ result.output_refusals  # {"huge.bin": "too_large"}
 ```
 
 The hardened container has a read-only root and a `/tmp` tmpfs, which neither
-the Docker archive API (`PUT /archive` is refused) nor `docker cp` reaches, so
+the Docker archive API (the daemon refuses uploads into it) nor `docker cp` reaches, so
 the files travel through the container's own stdin and stdout
 (`baselith/core/services/sandbox/transfer.py`). The container is created with
 the usual `build_sandbox_runtime_kwargs(resources=...)` plus an open stdin and
