@@ -868,6 +868,22 @@
       "telemetry",
       "unregister_span_sink"
     ],
+    "baselith.core.observability.logging": [
+      "STRUCTLOG_AVAILABLE",
+      "SafeLogger",
+      "add_context",
+      "add_otel_context",
+      "bind_context",
+      "clear_context",
+      "configure_logging",
+      "ensure_configured",
+      "get_log_config",
+      "get_log_level",
+      "get_logger",
+      "redact_sensitive",
+      "redact_url_credentials",
+      "set_log_level"
+    ],
     "baselith.core.optimization": [
       "Candidate",
       "CandidateArchive",
@@ -1421,8 +1437,10 @@
     ],
     "baselith.core.services.sandbox": [
       "ExecutionResult",
+      "FileTransfer",
       "PoolConfig",
       "PooledContainer",
+      "Resources",
       "SandboxPool",
       "SandboxService",
       "StreamFrame",

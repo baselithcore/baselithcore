@@ -67,12 +67,14 @@ class RemoteEmbeddingBackend:
         self._path = config.path or EMBED_PATHS[config.api]
         self._query_prefix = config.query_prefix
         self._document_prefix = config.document_prefix
+        self._truncate = config.truncate_prompt_tokens
 
     async def embed(self, texts: list[str], *, is_query: bool) -> list[list[float]]:
         prefix = self._query_prefix if is_query else self._document_prefix
         inputs = [prefix + t for t in texts] if prefix else texts
         body = await self._http.post_json(
-            self._path, embed_payload(self._api, self._model, inputs)
+            self._path,
+            embed_payload(self._api, self._model, inputs, truncate=self._truncate),
         )
         return parse_embeddings(self._api, body, len(texts))
 

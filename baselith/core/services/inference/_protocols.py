@@ -43,10 +43,23 @@ RERANK_PATHS: dict[str, str] = {
 }
 
 
-def embed_payload(api: str, model: str, texts: list[str]) -> dict[str, Any]:
-    """Request body for one batch of ``texts``."""
+def embed_payload(
+    api: str, model: str, texts: list[str], *, truncate: int | None = None
+) -> dict[str, Any]:
+    """Request body for one batch of ``texts``.
+
+    ``truncate`` is vLLM's ``truncate_prompt_tokens`` (``openai`` only): TEI
+    truncates on its own, vLLM refuses an over-long input unless asked.
+    """
     if api == "openai":
-        return {"model": model, "input": texts, "encoding_format": "float"}
+        body: dict[str, Any] = {
+            "model": model,
+            "input": texts,
+            "encoding_format": "float",
+        }
+        if truncate is not None:
+            body["truncate_prompt_tokens"] = truncate
+        return body
     return {"inputs": texts, "normalize": True, "truncate": True}
 
 
@@ -72,11 +85,22 @@ def parse_embeddings(api: str, body: Any, count: int) -> list[list[float]]:
 
 
 def rerank_payload(
-    api: str, model: str, query: str, texts: list[str]
+    api: str, model: str, query: str, texts: list[str], *, truncate: int | None = None
 ) -> dict[str, Any]:
-    """Request body scoring ``texts`` against ``query``."""
+    """Request body scoring ``texts`` against ``query``.
+
+    ``truncate`` is vLLM's ``truncate_prompt_tokens`` (``cohere`` only).
+    """
     if api == "cohere":
-        return {"model": model, "query": query, "documents": texts, "top_n": len(texts)}
+        body: dict[str, Any] = {
+            "model": model,
+            "query": query,
+            "documents": texts,
+            "top_n": len(texts),
+        }
+        if truncate is not None:
+            body["truncate_prompt_tokens"] = truncate
+        return body
     if api == "nim":
         return {
             "model": model,

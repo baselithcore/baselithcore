@@ -30,6 +30,30 @@ class SandboxConfig(BaseSettings):
         default="python:3.12-slim", description="Docker image for sandbox"
     )
     timeout: int = Field(default=30, description="Execution timeout in seconds")
+    max_memory_mb: int = Field(
+        default=128,
+        ge=64,
+        le=16384,
+        description="Ceiling, in MiB, on the memory a single sandbox run may "
+        "be given. A caller may request less, never more. The default keeps "
+        "today's 128 MiB.",
+    )
+    max_tmpfs_mb: int = Field(
+        default=64,
+        ge=16,
+        le=8192,
+        description="Ceiling, in MiB, on the writable /tmp scratch space of a "
+        "single sandbox run. A caller may request less, never more. The "
+        "default keeps today's 64 MiB.",
+    )
+    max_timeout: int = Field(
+        default=30,
+        ge=1,
+        le=3600,
+        description="Ceiling, in seconds, on a per-call sandbox timeout "
+        "request. A caller may request less, never more. The default keeps "
+        "today's 30 seconds.",
+    )
     cost_per_compute_second: float = Field(
         default=0.0,
         description="USD charged per wall-clock compute second of sandbox "

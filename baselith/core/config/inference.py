@@ -150,6 +150,15 @@ class EmbeddingConfig(BaseSettings):
 
     model: str = Field(default="BAAI/bge-m3", description="Embedding model id.")
     dim: int = Field(default=1024, gt=0, description="Vector dimension.")
+    truncate_prompt_tokens: int | None = Field(
+        default=None,
+        ge=-1,
+        description="vLLM only (api='openai'): ask the server to cut each input "
+        "to this many tokens, -1 = the model's maximum. TEI truncates by itself; "
+        "vLLM otherwise answers 400 to a text past max-model-len and the whole "
+        "batch fails. Leave empty for OpenAI and other servers, which refuse "
+        "the unknown parameter.",
+    )
     allow_model_substitution: bool = Field(
         default=False,
         description="Let the served model stand in for a different requested "
@@ -257,6 +266,14 @@ class RerankConfig(BaseSettings):
     )
     batch_size: int = Field(
         default=32, ge=1, le=512, description="Texts per HTTP request (TEI limit)."
+    )
+    truncate_prompt_tokens: int | None = Field(
+        default=None,
+        ge=-1,
+        description="vLLM only (api='cohere'): ask the server to cut each "
+        "query+passage pair to this many tokens, -1 = the model's maximum. TEI "
+        "truncates by itself; vLLM otherwise answers 400 to an over-long pair. "
+        "Leave empty for Cohere, Jina and other servers.",
     )
 
 

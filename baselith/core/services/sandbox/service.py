@@ -7,7 +7,7 @@ Provides isolated environments for secure code execution.
 import contextlib
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from baselith.core.observability.logging import get_logger
@@ -23,9 +23,12 @@ from baselith.core.config.sandbox import (
     get_sandbox_config,
 )
 
+from .bootstrap import FileTransfer
 from .docker_factory import DockerFactory
 from .policy import build_sandbox_runtime_kwargs
+from .resources import Resources, effective_timeout
 from .sbx_factory import SbxFactory
+from .transfer import execute_with_files, validate_transfer
 
 logger = get_logger(__name__)
 
@@ -45,6 +48,13 @@ class ExecutionResult:
         cost_usd: Metered cost in USD — ``compute_seconds`` multiplied by
             ``SandboxConfig.cost_per_compute_second`` (0.0 when the rate
             is 0).
+        outputs: Files a file run left in ``/tmp/out``, name -> content
+            (empty unless ``execute_code_async`` got ``files``).
+        output_refusals: Files of ``/tmp/out`` not returned, name -> reason
+            (``too_many``, ``too_large``, ``bad_name``, ``not_a_file``). The
+            key ``"*"`` speaks for the whole collection: ``listing_truncated``,
+            or ``archive_missing`` — no usable archive arrived, the run is
+            then failed (``exit_code`` 1 if the code exited 0, plus a stderr note).
     """
 
     stdout: str
@@ -53,6 +63,8 @@ class ExecutionResult:
     execution_time: float
     compute_seconds: float = 0.0
     cost_usd: float = 0.0
+    outputs: dict[str, bytes] = field(default_factory=dict)
+    output_refusals: dict[str, str] = field(default_factory=dict)
 
 
 class SandboxService:
@@ -90,6 +102,8 @@ class SandboxService:
         envs: dict[str, str] | None = None,
         budget: Any | None = None,
         mounts_read_only: bool = False,
+        resources: Resources | None = None,
+        files: FileTransfer | None = None,
     ) -> ExecutionResult:
         """
         Execute code asynchronously in a sandbox environment.
@@ -106,6 +120,14 @@ class SandboxService:
                 ``BudgetExceededError`` propagates to the caller.
             mounts_read_only: Mount every ``mounts`` entry read-only (docker
                 provider only).
+            resources: Optional per-call memory / tmpfs / timeout request,
+                clamped to ``SANDBOX_MAX_MEMORY_MB`` / ``SANDBOX_MAX_TMPFS_MB``
+                / ``SANDBOX_MAX_TIMEOUT`` (docker provider; the sbx provider
+                honours the clamped timeout only). ``None`` keeps today's
+                limits.
+            files: Inputs for ``/tmp/in`` and limits on what ``/tmp/out``
+                returns, carried through the container's stdin/stdout
+                (docker provider, python only; see ``sandbox.transfer``).
 
         Returns:
             ExecutionResult with ``compute_seconds``/``cost_usd`` populated
@@ -113,13 +135,16 @@ class SandboxService:
 
         Raises:
             ValueError: ``mounts_read_only`` on the sbx provider, which does not
-                promise read-only mounts.
+                promise read-only mounts; ``files`` on the sbx provider, with
+                ``mounts``, for another language or larger than ``/tmp``.
         """
 
         if mounts_read_only and self.provider == "sbx":
             raise ValueError("read-only mounts need the docker sandbox provider")
         config = get_sandbox_config()
-        timeout = timeout or config.timeout
+        if files is not None:
+            validate_transfer(files, self.provider, mounts, language, resources, config)
+        timeout = effective_timeout(timeout, resources, config)
 
         # Static analysis before any container spin-up (rejections carry
         # zero compute_seconds/cost_usd and never touch the budget).
@@ -127,13 +152,23 @@ class SandboxService:
         if rejection is not None:
             return rejection
 
-        if self.provider == "sbx":
+        if files is not None:
+            result = await execute_with_files(
+                self.docker_factory, code, files, envs, resources, timeout
+            )
+        elif self.provider == "sbx":
             result = await self._execute_sbx_async(
                 code, language, timeout, mounts, envs
             )
         else:
             result = await self._execute_docker_async(
-                code, language, timeout, mounts, envs, read_only=mounts_read_only
+                code,
+                language,
+                timeout,
+                mounts,
+                envs,
+                read_only=mounts_read_only,
+                resources=resources,
             )
         return self._meter_and_charge(result, config, budget)
 
@@ -336,6 +371,7 @@ class SandboxService:
         envs: dict[str, str] | None,
         *,
         read_only: bool = False,
+        resources: Resources | None = None,
     ) -> ExecutionResult:
         """Internal Docker execution path (Legacy)."""
         import asyncio
@@ -376,6 +412,10 @@ class SandboxService:
         # Ensure image first (async)
         await self.docker_factory.ensure_image()
 
+        # Resolved here, not in the executor thread: it reads the (possibly
+        # overridden) sandbox config, which is context-scoped.
+        runtime_kwargs = build_sandbox_runtime_kwargs(resources=resources)
+
         def _blocking_run() -> ExecutionResult:
             """Synchronous blocking logic for Docker container execution."""
             start_time = time.time()
@@ -397,7 +437,7 @@ class SandboxService:
                     detach=True,
                     mounts=docker_mounts,
                     environment=envs or {},
-                    **build_sandbox_runtime_kwargs(),
+                    **runtime_kwargs,
                 )
 
                 try:

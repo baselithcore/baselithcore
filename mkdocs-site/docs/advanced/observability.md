@@ -289,6 +289,12 @@ Guardrail layers are instrumented too — `mas_guardrail_blocks_total`,
 labelled by `layer`) and `mas_tool_rate_limited_total` — see
 [Observability › Guardrail metrics](../core-modules/observability-module.md#guardrail-metrics).
 
+Every log record emitted through the structlog pipeline also increments
+`mas_log_records_total{level}` — an error-rate signal that outlives any log
+viewer's retention window, so an alert can fire on a spike (e.g.
+`rate(mas_log_records_total{level="ERROR"}[5m])`) even after the lines
+themselves have scrolled out of a bounded tail.
+
 Update notices are exported as `baselith_update_available{component,security}`
 (no `mas_` prefix) — `1` while a framework or plugin update is available. See
 [Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts).
@@ -610,7 +616,27 @@ uvicorn backend:app --log-config log_config.yaml
 ```
 
 !!! note "CLI Synchronization"
-    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`baselith/core/observability/logging.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
+    `baselith run` passes its `--log-level` flag (default `info`) straight to uvicorn; the application's own structlog pipeline reads `LOG_LEVEL_CONSOLE`, `LOG_LEVEL_FILE` and `LOG_JSON` from `.env`. The `get_log_config()` helper (`baselith/core/observability/logging/__init__.py`) builds a uvicorn-compatible dict from `LOG_LEVEL_CONSOLE` and `LOG_JSON` for `uvicorn.run(..., log_config=get_log_config())` setups. `log_config.yaml` is reserved for manual overrides or complex custom deployments.
+
+### Changing the level at runtime
+
+`LOG_LEVEL_CONSOLE` is read once, at `configure_logging()` time — changing it
+means a restart. For an incident where a process is already running,
+`baselith.core.observability.logging` also exposes:
+
+```python
+from baselith.core.observability.logging import get_log_level, set_log_level
+
+set_log_level("DEBUG")   # raises ValueError on an unknown level name
+get_log_level()           # -> "DEBUG"
+```
+
+This works with no re-configuration because `structlog.stdlib.filter_by_level`
+(already in the processor chain `configure_logging()` builds) reads the
+underlying stdlib logger's *current* effective level on every call — `set_log_level`
+is a plain `Logger.setLevel()` under a validated name. Pass `logger_name` to
+scope the change to one logger instead of the root. The change is in-process
+only (nothing is persisted), so a restart reverts to `LOG_LEVEL_CONSOLE`.
 
 ---
 

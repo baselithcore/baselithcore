@@ -59,10 +59,14 @@ class RemoteRerankBackend:
         self._api = config.api
         self._model = config.model
         self._path = config.path or RERANK_PATHS[config.api]
+        self._truncate = config.truncate_prompt_tokens
 
     async def score(self, query: str, texts: list[str]) -> list[float]:
         body = await self._http.post_json(
-            self._path, rerank_payload(self._api, self._model, query, texts)
+            self._path,
+            rerank_payload(
+                self._api, self._model, query, texts, truncate=self._truncate
+            ),
         )
         return parse_scores(self._api, body, len(texts))
 

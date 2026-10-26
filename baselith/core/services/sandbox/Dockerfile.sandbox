@@ -20,7 +20,7 @@ FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1
 # agent code against two different library versions, and a build months from
 # now is a different sandbox from the one that was reviewed.
 #
-# The four direct pins live in requirements.sandbox.in; requirements.sandbox.txt
+# The direct pins live in requirements.sandbox.in; requirements.sandbox.txt
 # is the compiled closure — every transitive dependency pinned to a version AND
 # to the sha256 of each distribution that may satisfy it. Version pins alone
 # left both halves open: the transitive set floated (contourpy, scipy, pillow
