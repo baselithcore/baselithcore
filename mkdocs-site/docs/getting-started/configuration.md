@@ -373,6 +373,17 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_RERANK_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='cohere'): ask the server to cut each query+passage pair to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to an over-long pair. Leave empty for Cohere, Jina and other servers. |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 
+## Knowledge API configuration
+
+Declared in `baselith.core.config.knowledge`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `KNOWLEDGE_API_ENABLED` | `bool` | `False` | Master switch: mounts /knowledge (ingest, upload, delete, search). |
+| `KNOWLEDGE_COLLECTIONS` | `Annotated[tuple[str, ...], NoDecode]` | `()` | Collections a client may name besides the configured default one. A client that could name any collection could write into the ones that hold agent memory, or create new ones at will; the default collection is always available, everything else is opt-in here. |
+| `KNOWLEDGE_MAX_TEXT_CHARS` | `int` | `2000000` | Largest document text accepted, in characters, whether it was posted as text or extracted from a file (a small PDF can hold a lot of text). |
+| `KNOWLEDGE_MAX_UPLOAD_BYTES` | `int` | `10 * 1024 * 1024` | Largest upload accepted, in bytes. Checked while the body streams in, not after it has been buffered. |
+
 ## MCP Configuration
 
 Declared in `baselith.core.config.mcp`.
@@ -639,6 +650,9 @@ Declared in `baselith.core.config.processing`.
 | `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. `http://mineru:30000`). |
 | `MINERU_TABLE_ENABLE` | `bool` | `True` |  |
 | `MINERU_TIMEOUT_SECONDS` | `float` | `300.0` |  |
+| `NOTION_API_TOKEN` :material-key: | `SecretStr \| None` | *empty* | The Notion document source is inert until a token is set. The token is an integration secret: it can read every page shared with that integration. |
+| `NOTION_MAX_PAGES` | `int` | `200` |  |
+| `NOTION_ROOT_PAGE_IDS` | `Annotated[tuple[str, ...], NoDecode]` | `()` | Pages to index with their sub-pages. Empty = every page shared with the integration. |
 | `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` | OCR backend. MinerU is the default and needs the extra (pip install -e ".[mineru]") — heavy, and it downloads models on first use, so pre-fetch with `mineru-models-download`. Selected but not installed, OCR falls back to tesseract automatically; set 'tesseract' to avoid pulling the mineru/transformers stack at all. |
 | `SPACY_FALLBACK_LANGUAGE` | `str \| None` | *empty* |  |
 | `SPACY_MODEL` | `str` | `en_core_web_sm` |  |
@@ -1036,6 +1050,25 @@ Declared in `baselith.core.config.webhooks`.
 | `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `float` | `10.0` | Per-delivery HTTP timeout (seconds). |
 
+## Workflow catalog and runtime configuration
+
+Declared in `baselith.core.config.workflows`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `WORKFLOWS_CODE_ENABLED` | `bool` | `False` | Allow CODE nodes, which run a Python snippet in the sandbox (Docker or microVM). Off by default: a definition can be uploaded through the API, so a node that runs code turns "may save a workflow" into "may run code". |
+| `WORKFLOWS_DIR` | `str \| None` | *empty* | Directory of `*.yaml` / `*.yml` / `*.json` definitions loaded at startup. Definitions saved through the API are written back here; without it the catalog is memory-only and an API upload is lost on restart. |
+| `WORKFLOWS_ENABLED` | `bool` | `False` | Master switch: loads the catalog, mounts the /workflows router and registers opted-in workflows as MCP tools. |
+| `WORKFLOWS_HTTP_ALLOW_INTERNAL` | `bool` | `False` | SSRF: HTTP nodes reject loopback/private/link-local/reserved targets by default. Enable only for trusted local development. |
+| `WORKFLOWS_HTTP_CREDENTIALS` :material-key: | `SecretStr \| None` | *empty* | Credentials HTTP nodes may name (`config['credential']`), as one JSON object: {"crm": {"Authorization": "Bearer ..."}}. A definition only ever carries the name; the secret stays here, wrapped so it never reaches a repr, a log line or an exported definition. |
+| `WORKFLOWS_MAX_CONCURRENT_RUNS` | `int` | `8` | Runs in flight at once in this process; further starts answer 429. |
+| `WORKFLOWS_RUN_HISTORY_SIZE` | `int` | `500` | Finished runs kept for GET /workflows/runs/{id} (process-local, oldest evicted first). |
+| `WORKFLOWS_RUN_TIMEOUT_SECONDS` | `float` | `300.0` | Wall-clock limit of one run started through the API, a trigger or MCP. |
+| `WORKFLOWS_SCHEDULER_ENABLED` | `bool` | `False` | Run catalog workflows that carry a cron `schedule` inside this process. Leave it off on all but one replica, or each replica fires the schedule. |
+| `WORKFLOWS_SCHEDULER_INTERVAL_SECONDS` | `float` | `30.0` |  |
+| `WORKFLOWS_TRIGGER_SECRET` :material-key: | `SecretStr \| None` | *empty* | Shared secret of the inbound trigger (POST /workflows/{id}/trigger). Unset means the trigger answers 503: an unsigned trigger is never served. |
+| `WORKFLOWS_TRIGGER_TOLERANCE_SECONDS` | `int` | `300` | Oldest X-Baselith-Signature timestamp a trigger accepts, in seconds (replay window). A repeated signature inside the window is refused too. |
+
 ## World-model configuration (`WORLD_MODEL_`)
 
 Declared in `baselith.core.config.world_model`.
@@ -1074,4 +1107,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-726 settings documented.
+745 settings documented.

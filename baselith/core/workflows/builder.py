@@ -30,6 +30,15 @@ class NodeType(str, Enum):
     HUMAN = "human"  # Human-in-the-loop
     TRANSFORM = "transform"  # Data transformation
     SUBGRAPH = "subgraph"  # Nested workflow composition
+    LLM = "llm"  # Language-model call with a templated prompt
+    CLASSIFIER = "classifier"  # N-way routing on a declared label set
+    RETRIEVE = "retrieve"  # Knowledge-base lookup
+    HTTP = "http"  # Outbound HTTP request (SSRF-guarded)
+    TEMPLATE = "template"  # Render text/structure from earlier results
+    ASSIGN = "assign"  # Set run variables
+    ITERATION = "iteration"  # Run a nested workflow over a list
+    LIST = "list"  # Filter / sort / slice / project a list
+    CODE = "code"  # Python snippet in the sandbox (opt-in)
 
 
 @dataclass
@@ -137,6 +146,10 @@ class WorkflowDefinition:
             construction time (``ValueError`` on a malformed expression).
         on_failure: Optional webhook event name (e.g. ``"workflow.failed"``)
             emitted when a scheduled run of this workflow fails.
+        webhook_trigger: Whether a signed inbound webhook may start this
+            workflow (``POST /workflows/{id}/trigger``). Off by default: a
+            workflow in the catalog is not externally triggerable unless its
+            author says so.
     """
 
     id: str = field(default_factory=lambda: str(uuid4()))
@@ -148,6 +161,7 @@ class WorkflowDefinition:
     metadata: dict[str, Any] = field(default_factory=dict)
     schedule: str | None = None
     on_failure: str | None = None
+    webhook_trigger: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -198,11 +212,17 @@ class WorkflowDefinition:
 
     def validate(self) -> list[str]:
         """
-        Validate the workflow structure.
+        Validate the workflow structure and its typed nodes' configuration.
 
         Returns:
             List of validation errors (empty if valid)
         """
+        from .nodes_validation import validate_node_configs
+
+        return [*self.structure_errors(), *validate_node_configs(self)]
+
+    def structure_errors(self) -> list[str]:
+        """Graph-shape errors only: start/end nodes, dangling edges, agents."""
         errors = []
 
         # Check for start node
@@ -248,6 +268,7 @@ class WorkflowDefinition:
             "metadata": self.metadata,
             "schedule": self.schedule,
             "on_failure": self.on_failure,
+            "webhook_trigger": self.webhook_trigger,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
@@ -263,6 +284,7 @@ class WorkflowDefinition:
             metadata=data.get("metadata", {}),
             schedule=data.get("schedule"),
             on_failure=data.get("on_failure"),
+            webhook_trigger=bool(data.get("webhook_trigger", False)),
         )
         workflow.nodes = [WorkflowNode.from_dict(n) for n in data.get("nodes", [])]
         workflow.edges = [WorkflowEdge.from_dict(e) for e in data.get("edges", [])]
@@ -276,6 +298,19 @@ class WorkflowDefinition:
     def from_json(cls, json_str: str) -> "WorkflowDefinition":
         """Import from JSON string."""
         return cls.from_dict(json.loads(json_str))
+
+    def to_yaml(self) -> str:
+        """Export as YAML (see :mod:`baselith.core.workflows.serialization`)."""
+        from .serialization import dump_yaml
+
+        return dump_yaml(self)
+
+    @classmethod
+    def from_yaml(cls, text: str) -> "WorkflowDefinition":
+        """Import from YAML or JSON text, rejecting anchors and aliases."""
+        from .serialization import load_definition
+
+        return load_definition(text)
 
 
 class WorkflowBuilder:
@@ -394,6 +429,46 @@ class WorkflowBuilder:
         if workflow is not None:
             config["workflow"] = workflow
         return self._add_node(NodeType.SUBGRAPH, label, config=config)
+
+    def llm(self, label: str, prompt: str, **config: Any) -> "WorkflowBuilder":
+        """Add a language-model node (``prompt`` is a ``{{ }}`` template)."""
+        return self._add_node(NodeType.LLM, label, config={"prompt": prompt, **config})
+
+    def retrieve(self, label: str, **config: Any) -> "WorkflowBuilder":
+        """Add a knowledge-base lookup node (``query``, ``top_k``, ...)."""
+        return self._add_node(NodeType.RETRIEVE, label, config=config)
+
+    def http(self, label: str, url: str, **config: Any) -> "WorkflowBuilder":
+        """Add an outbound HTTP request node (SSRF-guarded)."""
+        return self._add_node(NodeType.HTTP, label, config={"url": url, **config})
+
+    def template(self, label: str, template: str) -> "WorkflowBuilder":
+        """Add a node rendering ``template`` against earlier results."""
+        return self._add_node(NodeType.TEMPLATE, label, config={"template": template})
+
+    def assign(self, label: str, **assignments: Any) -> "WorkflowBuilder":
+        """Add a node setting run variables (values may be templates)."""
+        return self._add_node(NodeType.ASSIGN, label, config={"assign": assignments})
+
+    def iterate(
+        self, label: str, workflow: Any, items: str = "{{ output }}", **config: Any
+    ) -> "WorkflowBuilder":
+        """Add a node running ``workflow`` once per item of a list."""
+        return self._add_node(
+            NodeType.ITERATION,
+            label,
+            config={"workflow": workflow, "items": items, **config},
+        )
+
+    def list_ops(
+        self, label: str, ops: list[dict[str, Any]], items: str = "{{ output }}"
+    ) -> "WorkflowBuilder":
+        """Add a node reshaping a list (``ops`` is a sequence of one-key steps)."""
+        return self._add_node(NodeType.LIST, label, config={"ops": ops, "items": items})
+
+    def code(self, label: str, code: str, **config: Any) -> "WorkflowBuilder":
+        """Add a sandboxed Python node (needs ``WORKFLOWS_CODE_ENABLED``)."""
+        return self._add_node(NodeType.CODE, label, config={"code": code, **config})
 
     def build(self) -> WorkflowDefinition:
         """Build and return the workflow."""

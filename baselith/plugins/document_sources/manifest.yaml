@@ -1,7 +1,7 @@
 name: document-sources
-version: 0.2.1
-description: Filesystem, web, OCR (MinerU/Tesseract) and document ingestion sources
-  for indexing workflows
+version: 0.3.0
+description: Filesystem, web, Notion, OCR (MinerU/Tesseract) and document ingestion
+  sources for indexing workflows
 author: Baselith
 tags:
 - documents
@@ -22,8 +22,9 @@ python_dependencies:
 - docling>=2.130.0,<3
 optional_resources:
 - internet
-# Declared capabilities. The web source fetches operator-supplied URLs and the
-# filesystem source reads operator-supplied paths, so neither set can be
+# Declared capabilities. The web source fetches operator-supplied URLs, the
+# filesystem source reads operator-supplied paths and the Notion source sends
+# NOTION_API_TOKEN to api.notion.com only, so neither set can be
 # narrowed here — that is the plugin's purpose, and saying so plainly is worth
 # more than an understated list.
 # See mkdocs-site/docs/plugins/packaging.md#permissions.
@@ -32,8 +33,9 @@ permissions:
     egress:
     - '*'
   tools: []
-  secrets: []
+  secrets:
+  - NOTION_API_TOKEN
   filesystem:
   - '*'
-integrity_sha256: ca42a1147f6f53304a34bdf0700e8de97baf558b4e6eadef963c6b38713d203b
+integrity_sha256: e256c39f3ec353982a8454bfef1d8b0490fb6dcfbe97cda5e6387297a4b7eee2
 hash_surface_version: 5

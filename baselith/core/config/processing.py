@@ -7,7 +7,7 @@ Document ingestion, Web Crawling, OCR, and NLP settings.
 import logging
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import NoDecode, SettingsConfigDict
 
 from baselith.core.config._aliased import AliasedSettings
@@ -108,6 +108,17 @@ class ProcessingConfig(AliasedSettings):
     web_documents_allowlist: Annotated[list[str], NoDecode] = Field(
         default_factory=list, alias="WEB_DOCUMENTS_ALLOWLIST"
     )
+
+    # === Notion ===
+    # The Notion document source is inert until a token is set. The token is an
+    # integration secret: it can read every page shared with that integration.
+    notion_api_token: SecretStr | None = Field(default=None, alias="NOTION_API_TOKEN")
+    # Pages to index with their sub-pages. Empty = every page shared with the
+    # integration.
+    notion_root_page_ids: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(), alias="NOTION_ROOT_PAGE_IDS"
+    )
+    notion_max_pages: int = Field(default=200, alias="NOTION_MAX_PAGES", ge=1, le=5000)
 
     # === NLP / Spacy ===
     enable_spacy_documents: bool = Field(default=True, alias="ENABLE_SPACY_DOCUMENTS")
@@ -221,6 +232,7 @@ class ProcessingConfig(AliasedSettings):
         "documents_extensions",
         "web_documents_urls",
         "web_documents_allowlist",
+        "notion_root_page_ids",
         mode="before",
     )
     @classmethod

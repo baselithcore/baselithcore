@@ -66,6 +66,8 @@ baselith/core/config/
 ├── mcp.py                # MCPConfig + MCPServerSpec (declarative MCP_SERVERS registry)
 ├── sandbox.py            # SandboxConfig (SANDBOX_* incl. cost_per_compute_second, max_* ceilings)
 ├── webhooks.py           # WebhookConfig (WEBHOOKS_ENABLED, WEBHOOK_STORE, WEBHOOK_*)
+├── workflows.py         # WorkflowsConfig (WORKFLOWS_* : catalog, signed trigger, scheduler, limits)
+├── knowledge.py          # KnowledgeApiConfig (KNOWLEDGE_* : API switch, exposed collections, size caps)
 └── ...                   # cache, swarm, reasoning, world_model, etc.
 ```
 
@@ -582,6 +584,34 @@ document runtime without making Docling mandatory for every minimal core
 installation. See
 [Services › PDF Reader Strategy](services.md#pdf-reader-strategy) for the
 runtime indexing behavior.
+
+The Notion document source reads three more settings from the same object:
+`NOTION_API_TOKEN` (a `SecretStr`; the source stays inert without it),
+`NOTION_ROOT_PAGE_IDS` (comma-separated, empty = every page shared with the
+integration) and `NOTION_MAX_PAGES`. See [Services › Notion
+source](services.md#notion-source).
+
+---
+
+### Workflows and Knowledge API Config
+
+Two opt-in surfaces have their own settings classes, both read through a
+`get_*_config()` factory and both off until their switch is set:
+
+- `WorkflowsConfig` (`baselith/core/config/workflows.py`, `WORKFLOWS_` prefix) holds the
+  catalog directory, the master secret of the inbound trigger (a `SecretStr`),
+  the scheduler switch and interval, the per-run timeout and concurrency cap, the
+  run-history size, the HTTP-node credentials (a `SecretStr` holding JSON),
+  the outbound-HTTP SSRF override and the `CODE`-node switch. See [Workflow
+  Catalog & API](workflow-catalog.md#enabling).
+- `KnowledgeApiConfig` (`baselith/core/config/knowledge.py`, `KNOWLEDGE_` prefix) holds
+  the API switch, the collections a client may name besides the default one
+  (`KNOWLEDGE_COLLECTIONS`, a comma list that follows the [`NoDecode` +
+  `csv_list` contract](#collection-settings)), and the upload and text size
+  limits. See [Knowledge API](knowledge-api.md#enabling).
+
+Every field of both is in the [generated
+reference](../getting-started/configuration.md).
 
 ---
 

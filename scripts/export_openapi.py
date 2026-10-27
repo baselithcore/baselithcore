@@ -17,7 +17,8 @@ fully-configured deployment.
 
 Construction alone is not the whole contract: the ``api_routers`` plugin mounts
 ``/prompts``, ``/chat/ws``, ``/agent/*``, ``/webhooks``, ``/privacy``,
-``/compliance``, ``/runs`` and ``/approvals`` from the FastAPI *lifespan*, and
+``/compliance``, ``/runs``, ``/approvals``, ``/workflows`` and ``/knowledge`` from the FastAPI
+*lifespan*, and
 several of those are feature-gated. This exporter includes those routers
 explicitly with every gate opened, so the emitted schema describes the full
 server surface rather than the subset a bare ``create_app()`` shows.
@@ -48,6 +49,8 @@ ROUTE_GATES = (
     "ENABLE_FEEDBACK",
     "ORCHESTRATOR_CHECKPOINT_ENABLED",
     "EVAL_ONLINE_ENABLED",
+    "WORKFLOWS_ENABLED",
+    "KNOWLEDGE_API_ENABLED",
 )
 
 

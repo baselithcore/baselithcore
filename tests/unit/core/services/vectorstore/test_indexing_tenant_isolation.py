@@ -145,3 +145,62 @@ async def test_grouped_query_ignores_a_caller_supplied_tenant(tenant: str) -> No
     )
 
     assert provider.query_points_groups.call_args.kwargs["tenant_id"] == tenant
+
+
+class TestPointIdsAreTenantScoped:
+    """The point id is the primary key; it must not collide across tenants."""
+
+    def test_tenants_with_the_same_document_id_get_different_point_ids(self):
+        from baselith.core.services.vectorstore.chunking import chunk_point_id
+
+        assert chunk_point_id("faq", 0, "tenant-a") != chunk_point_id(
+            "faq", 0, "tenant-b"
+        )
+        assert chunk_point_id("faq", 0, "tenant-a") != chunk_point_id("faq", 0)
+
+    def test_tenant_and_document_cannot_be_confused_at_the_boundary(self):
+        from baselith.core.services.vectorstore.chunking import chunk_point_id
+
+        # "ab" + "c" must not equal "a" + "bc".
+        assert chunk_point_id("c", 0, "ab") != chunk_point_id("bc", 0, "a")
+
+    def test_the_default_tenant_keeps_the_original_ids(self):
+        """A single-tenant deployment must keep landing on its existing points."""
+        from baselith.core.services.vectorstore.chunking import chunk_point_id
+
+        legacy = chunk_point_id("doc123", 4)
+        assert chunk_point_id("doc123", 4, None) == legacy
+        assert chunk_point_id("doc123", 4, "") == legacy
+        assert chunk_point_id("doc123", 4, "default") == legacy
+        # The original derivation, spelled out: changing it silently duplicates
+        # every document a single-tenant deployment has already indexed.
+        import hashlib
+
+        original = int.from_bytes(
+            hashlib.sha256(b"doc123::4").digest()[:8], byteorder="big"
+        )
+        assert legacy == original
+
+    @pytest.mark.asyncio
+    @patch("baselith.core.services.vectorstore._indexing.get_embeddings_cached")
+    async def test_two_tenants_indexing_the_same_document_write_separate_points(
+        self, mock_embed
+    ):
+        mock_embed.side_effect = _one_vector_per_text
+        written: dict[str, set[Any]] = {}
+
+        for name in ("tenant-a", "tenant-b"):
+            provider = AsyncMock()
+            service = _service(provider)
+            token = set_tenant_context(name)
+            try:
+                await service.index(
+                    [Document(id="faq", content="shared title", metadata={})],
+                    embedder=Mock(),
+                )
+            finally:
+                reset_tenant_context(token)
+            points = provider.upsert.call_args.kwargs["points"]
+            written[name] = {p["id"] for p in points}
+
+        assert written["tenant-a"].isdisjoint(written["tenant-b"])

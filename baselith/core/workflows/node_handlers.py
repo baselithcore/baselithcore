@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from baselith.core.observability.logging import get_logger
 
-from .builder import WorkflowDefinition, WorkflowNode
+from .builder import NodeType, WorkflowDefinition, WorkflowNode
 from .conditions import _safe_condition
 from .durable import NODE_CHECKPOINT_KEY
 
@@ -158,8 +158,9 @@ async def handle_tool(
     """Handle tool node: call a registered (or inline) callable.
 
     Resolution order: ``config['fn']``, then ``tool_id`` in the executor's
-    ``tools`` registry. Called with the last output; sync and async
-    callables both work.
+    ``tools`` registry. Called with the last output - or, when
+    ``config['arguments']`` is a mapping, with those (templated) keyword
+    arguments; sync and async callables both work.
     """
     fn = node.config.get("fn") or executor._tools.get(node.tool_id or "")
     if fn is None:
@@ -167,7 +168,20 @@ async def handle_tool(
             f"Tool node {node.id!r}: no tool registered for "
             f"tool_id={node.tool_id!r} and no config['fn']"
         )
-    result = fn(context.get_last_output())
+    arguments = node.config.get("arguments")
+    if arguments is None:
+        result = fn(context.get_last_output())
+    else:
+        # Named arguments (templated against the run scope), for tools that
+        # take keyword parameters - the shape plugin tools are registered in.
+        from ._scope import build_scope, render_value
+
+        kwargs = render_value(arguments, build_scope(context))
+        if not isinstance(kwargs, dict):
+            raise ValueError(
+                f"Tool node {node.id!r}: config['arguments'] must be a mapping"
+            )
+        result = fn(**kwargs)
     if asyncio.iscoroutine(result):
         return await result
     return result
@@ -219,6 +233,38 @@ def handle_loop(node: WorkflowNode, context: ExecutionContext) -> Any:
     )
 
 
+def install_defaults(executor: WorkflowExecutor) -> None:
+    """Register the default handler of every node type on ``executor``.
+
+    Handlers that need the executor (registries, ``services``, nested runs)
+    are bound to it with ``functools.partial``.
+    """
+    from functools import partial
+
+    from . import nodes_ai, nodes_code, nodes_data, nodes_http, nodes_list
+
+    handlers = executor._handlers
+    handlers[NodeType.START] = handle_start
+    handlers[NodeType.END] = handle_end
+    handlers[NodeType.HUMAN] = handle_human
+    handlers[NodeType.LOOP] = handle_loop
+    handlers[NodeType.TRANSFORM] = handle_transform
+    handlers[NodeType.CONDITION] = handle_condition
+    handlers[NodeType.MERGE] = handle_merge
+    handlers[NodeType.TEMPLATE] = nodes_data.handle_template
+    handlers[NodeType.ASSIGN] = nodes_data.handle_assign
+    handlers[NodeType.SUBGRAPH] = partial(handle_subgraph, executor)
+    handlers[NodeType.AGENT] = partial(handle_agent, executor)
+    handlers[NodeType.TOOL] = partial(handle_tool, executor)
+    handlers[NodeType.ITERATION] = partial(nodes_data.handle_iteration, executor)
+    handlers[NodeType.HTTP] = partial(nodes_http.handle_http, executor)
+    handlers[NodeType.LLM] = partial(nodes_ai.handle_llm, executor)
+    handlers[NodeType.CLASSIFIER] = partial(nodes_ai.handle_classifier, executor)
+    handlers[NodeType.RETRIEVE] = partial(nodes_ai.handle_retrieve, executor)
+    handlers[NodeType.LIST] = nodes_list.handle_list
+    handlers[NodeType.CODE] = partial(nodes_code.handle_code, executor)
+
+
 __all__ = [
     "handle_agent",
     "handle_condition",
@@ -230,4 +276,5 @@ __all__ = [
     "handle_subgraph",
     "handle_tool",
     "handle_transform",
+    "install_defaults",
 ]

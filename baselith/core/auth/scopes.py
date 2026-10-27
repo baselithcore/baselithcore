@@ -46,6 +46,8 @@ SCOPE_MEMORY_READ = "memory:read"
 SCOPE_MEMORY_WRITE = "memory:write"
 SCOPE_FEEDBACK_WRITE = "feedback:write"
 SCOPE_METRICS_READ = "metrics:read"
+SCOPE_KNOWLEDGE_READ = "knowledge:read"
+SCOPE_KNOWLEDGE_WRITE = "knowledge:write"
 SCOPE_WEBHOOKS_READ = "webhooks:read"
 SCOPE_WEBHOOKS_WRITE = "webhooks:write"
 SCOPE_KEYS_MANAGE = "keys:manage"
@@ -71,6 +73,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset(
         SCOPE_MEMORY_READ,
         SCOPE_MEMORY_WRITE,
         SCOPE_FEEDBACK_WRITE,
+        SCOPE_KNOWLEDGE_READ,
+        SCOPE_KNOWLEDGE_WRITE,
         SCOPE_METRICS_READ,
         SCOPE_WEBHOOKS_READ,
         SCOPE_WEBHOOKS_WRITE,
@@ -100,6 +104,7 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
             "chat:*",
             "memory:*",
             "feedback:*",
+            "knowledge:*",
             "webhooks:*",
             SCOPE_METRICS_READ,
             SCOPE_MCP_INVOKE,
@@ -113,6 +118,7 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
             SCOPE_MEMORY_READ,
             SCOPE_MEMORY_WRITE,
             SCOPE_FEEDBACK_WRITE,
+            SCOPE_KNOWLEDGE_READ,
             SCOPE_METRICS_READ,
             SCOPE_MCP_INVOKE,
         }
@@ -124,6 +130,7 @@ ROLE_SCOPES: dict[AuthRole, frozenset[str]] = {
             SCOPE_CHAT_READ,
             SCOPE_CHAT_WRITE,
             SCOPE_MEMORY_READ,
+            SCOPE_KNOWLEDGE_READ,
             SCOPE_METRICS_READ,
             SCOPE_MCP_INVOKE,
         }

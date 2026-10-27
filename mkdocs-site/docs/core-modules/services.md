@@ -1425,7 +1425,9 @@ baselith/core/services/vectorstore/
 ├── chunking.py               # Text chunking utilities (default pipeline)
 ├── recursive_splitter.py     # The recursive character splitter (no LangChain)
 ├── splitters.py              # Document-aware splitters (markdown, python)
+├── qa_splitter.py            # Question/answer chunking (one chunk per pair)
 ├── chunking_hierarchical.py  # Parent/child chunking for small-to-big retrieval
+├── knowledge.py              # Text-level ingest / search / delete helpers
 └── providers/
     ├── qdrant_provider.py    # Qdrant implementation (default)
     └── pgvector_provider.py  # PostgreSQL + pgvector implementation
@@ -1738,6 +1740,56 @@ splitter = select_splitter("docs/guide.md")
 for chunk in splitter.split(markdown_text):
     print(chunk.metadata.get("headings"), len(chunk.text))
 ```
+
+### Question/answer chunking
+
+`baselith/core/services/vectorstore/qa_splitter.py` turns an FAQ into one chunk
+per question/answer pair, and embeds the **question**: users ask in the shape of a
+question, so matching against the stored question retrieves the right entry far
+more reliably than matching against a slice of the answer. Retrieval still
+returns the whole pair.
+
+Three input shapes are recognised, in this order:
+
+| Shape | Example |
+| ----- | ------- |
+| Table (CSV or TSV) | a header naming a `question` and an `answer` column |
+| Labelled lines | `Q:` / `Question:` then `A:` / `Answer:`, optionally numbered or bulleted; a value runs to the next label; labels inside a code fence are content |
+| Markdown FAQ | a heading ending in `?` is the question, the text under it the answer |
+
+At most 5000 pairs are read from a document, a question over 1000 characters
+drops its pair, and an answer over 8000 characters is cut. A document with **no**
+recognisable pair yields no chunks and `ingest_document(chunking="qa")` refuses
+it, rather than quietly indexing a mis-formatted FAQ as prose.
+
+`QASplitter` follows the splitter interface (`split_text`, `split`), and
+`qa_ingestion_chunks(text)` returns the pairs in the form the indexing pipeline
+takes as precomputed chunks (`embedding_text` is the question, `text` the pair).
+
+### Text-level helpers
+
+`baselith/core/services/vectorstore/knowledge.py` holds the steps every text-level
+caller needs around the vector store, so the [knowledge API](knowledge-api.md),
+the MCP `index_document` tool and the workflow `RETRIEVE` node share one
+implementation:
+
+- `search_by_text(query, top_k=, collection=, rerank=, min_score=)` loads the
+  embedder off the event loop, embeds the query as a *query*, and returns
+  `KnowledgeHit` records (document id, chunk index, content, score, metadata
+  without the pipeline's internal keys). A store failure raises; it is never an
+  empty list, because "nothing found" and "the store is down" are different
+  answers.
+- `ingest_document(content, document_id=, metadata=, collection=, chunking=,
+  source_name=, replace=True)` with `chunking` one of `default` (by size), `auto`
+  (by structure: markdown headings, python units) or `qa`. Ingesting an id again
+  replaces the document: chunk ids are deterministic per tenant, document and
+  position, so the new chunks overwrite the old ones in place and only the tail of
+  a longer old version is deleted, *after* the new version is written, so a
+  failure in between leaves the old document readable.
+- `delete_document(document_id, collection=)`.
+
+Chunk point ids include the tenant for every tenant but `default`; see [Upgrade
+Notes](../advanced/upgrade-notes.md#vector-point-ids-are-tenant-scoped).
 
 ### Hierarchical Chunking (small-to-big retrieval)
 
@@ -2638,6 +2690,43 @@ The default Docling budgets are intentionally close to the lab baseline:
 `DOCLING_CONTEXT_TOKENS=520` for the retrieved prompt context. Tune them only
 when the corpus shape requires it; the core fallback remains deterministic for
 minimal installations that do not include the `documents` extra.
+
+### Notion source
+
+The `document_sources` plugin registers a `notion` source next to `filesystem` and
+`web`. It is **inert until `NOTION_API_TOKEN` is set**: an integration token that
+can read every Notion page shared with that integration.
+
+| Variable | Meaning |
+| -------- | ------- |
+| `NOTION_API_TOKEN` | The integration token (a `SecretStr`: never in a repr, a log line or an error message) |
+| `NOTION_ROOT_PAGE_IDS` | Comma-separated page ids to index **with their sub-pages**; empty indexes every page shared with the integration |
+| `NOTION_MAX_PAGES` | Stop after this many pages (default 200) |
+
+Each readable page becomes one markdown document: its title as the `#` heading,
+then headings, paragraphs, bulleted, numbered and to-do lists, quotes, callouts,
+code, tables, equations and bookmark links, with nested blocks indented and
+followed up to six levels deep. Images, files, databases, and block types the
+converter does not know are skipped, never guessed at. Archived pages and pages
+with almost no text are skipped. The metadata carries `origin: notion`, the page
+`url` as `source`, `title`, `page_id` and `last_edited`; the fingerprint is the
+content hash, so an unchanged page is not re-embedded on the next incremental run.
+
+The source is built to keep the token where it belongs:
+
+- **Fixed egress.** The host is `api.notion.com` and is not configurable, so the
+  token can only ever be sent there. Requests go through the SSRF-hardened client.
+- **Ids are validated** (a UUID, dashes optional) before they are placed in an API
+  path, including ids that come back from the API itself.
+- **Rate limits are honoured**: about three requests a second, `429` is retried
+  after `Retry-After` (capped at 30 s) and `5xx` with backoff, each three times.
+  A client error is not retried.
+- **Errors carry the status code only**, never the response body.
+- A page that is not shared with the integration is skipped with a warning; a
+  rejected token stops the run, because no page can be read.
+
+Share the pages with the integration in Notion (**Connections**) before indexing:
+an integration sees nothing it was not explicitly given.
 
 ### Persistence
 

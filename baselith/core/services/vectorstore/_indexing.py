@@ -216,7 +216,7 @@ async def index_documents(
 
             doc_points.append(
                 {
-                    "id": chunk_point_id(doc_id, idx),
+                    "id": chunk_point_id(doc_id, idx, current_tenant),
                     "vector": vector,
                     "payload": payload,
                 }

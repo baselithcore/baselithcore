@@ -47,7 +47,9 @@ description: Core modules of the BaselithCore Framework
 | ------------------ | -------------------------------------------------------------------- | ------------------------------------------- |
 | **Orchestration**  | Intent classification, flow routing, RAG workflow handler            | [`baselith/core/orchestration/`](orchestration.md)   |
 | **Prioritization** | Weighted task scoring, dependency graph and priority queue           | [`baselith/core/prioritization/`](prioritization.md) |
-| **Workflows**      | Workflow builder, safe expression executor, plan-to-workflow adapter | [`baselith/core/workflows/`](workflows.md)           |
+| **Workflows**      | Workflow builder, safe expression executor, LLM/retrieval/HTTP/classifier nodes, YAML definitions | [`baselith/core/workflows/`](workflows.md)           |
+| **Workflow Catalog** | Directory-backed catalog, HTTP API, signed triggers, cron scheduling, workflows as MCP tools | [`baselith/core/workflows/`](workflow-catalog.md) |
+| **Knowledge API**  | Ingest, delete and hit-test documents over HTTP; Q&A chunking | [`baselith/core/services/vectorstore/`](knowledge-api.md) |
 | **Planning**       | Goal decomposition, dependency-aware step plans, budget constraints  | [`baselith/core/planning/`](planning.md)             |
 | **Plugin System**  | Plugin discovery and lifecycle                                       | [`baselith/core/plugins/`](plugins.md)               |
 | **Declarative Skills** | Versioned `SKILL.md` catalog surfaced with progressive disclosure | [`baselith/core/plugins/declarative.py`](skills.md) |

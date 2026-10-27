@@ -260,7 +260,8 @@
       "run",
       "shell",
       "test",
-      "verify"
+      "verify",
+      "workflow"
     ],
     "baselith.core.cli.commands.plugin": [
       "add_plugin",
@@ -379,6 +380,7 @@
       "EvaluationConfig",
       "EventsConfig",
       "FineTuningConfig",
+      "KnowledgeApiConfig",
       "LLMConfig",
       "MCPConfig",
       "MCPServerSpec",
@@ -406,6 +408,7 @@
       "VisionConfig",
       "VoiceConfig",
       "WebhookConfig",
+      "WorkflowsConfig",
       "WorldModelConfig",
       "evaluation_config",
       "get_app_config",
@@ -414,6 +417,7 @@
       "get_core_config",
       "get_events_config",
       "get_finetuning_config",
+      "get_knowledge_config",
       "get_llm_config",
       "get_mcp_config",
       "get_memory_runtime_config",
@@ -439,6 +443,7 @@
       "get_voice_config",
       "get_web_concurrency",
       "get_webhook_config",
+      "get_workflows_config",
       "get_world_model_config",
       "is_production_env",
       "override_config",

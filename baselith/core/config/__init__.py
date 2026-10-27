@@ -34,6 +34,7 @@ from baselith.core.config.drift import (
 from baselith.core.config.environment import get_runtime_environment, is_production_env
 from baselith.core.config.evaluation import EvaluationConfig, evaluation_config
 from baselith.core.config.events import EventsConfig, get_events_config
+from baselith.core.config.knowledge import KnowledgeApiConfig, get_knowledge_config
 from baselith.core.config.mcp import MCPConfig, MCPServerSpec, get_mcp_config
 from baselith.core.config.memory import (
     MemoryRuntimeConfig,
@@ -87,6 +88,7 @@ from baselith.core.config.swarm import (
 )
 from baselith.core.config.task_queue import TaskQueueConfig
 from baselith.core.config.webhooks import WebhookConfig, get_webhook_config
+from baselith.core.config.workflows import WorkflowsConfig, get_workflows_config
 from baselith.core.config.world_model import WorldModelConfig, get_world_model_config
 
 __all__ = [
@@ -127,6 +129,8 @@ __all__ = [
     "VisionConfig",
     "VoiceConfig",
     "WebhookConfig",
+    "KnowledgeApiConfig",
+    "WorkflowsConfig",
     "WorldModelConfig",
     "evaluation_config",
     "get_app_config",
@@ -164,6 +168,8 @@ __all__ = [
     "get_vision_config",
     "get_voice_config",
     "get_webhook_config",
+    "get_knowledge_config",
+    "get_workflows_config",
     "get_world_model_config",
     "is_production_env",
 ]
