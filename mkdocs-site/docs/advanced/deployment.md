@@ -565,10 +565,67 @@ without unpickling anything (checked with `--network none`). It also covers a
 build where the Hub hands over only the converted file: `main` would then hold
 no weights at all, and the link is what lets the offline load find them.
 
+That link step used to race with transformers. When it sees a repo with only a
+pickled file, it converts to safetensors on a background thread
+(`Thread-auto_conversion`) that the loader does not wait for, and Python waits
+for it only at interpreter exit, after the dedupe has already looked. Two
+builds of one tree, back to back on one machine, gave a 2.3GB models layer when
+the download won and a 4.7GB one, both copies kept, when it lost. The step now
+joins that thread before it links, and ends with a check that fails the build
+if any weight blob over 50MB is not reachable from the `main` snapshot, the
+only one read offline: a lost race, or a half-finished `.incomplete` download,
+now stops the build instead of adding 2.3GB to every pull.
+
 `.dockerignore` now excludes `**/.env` and `**/.env.*`, not
 only the root copies: `COPY plugins/`, `configs/` and `templates/` take whole
 trees, so a filled-in `plugins/<name>/.env` would otherwise ride into a pushed
-layer.
+layer. It also lists every tree no stage `COPY`s — the docs site, setuptools'
+`build/` output, the Backstage portal, demo media, the SDK clients, CI and
+agent tooling, the evals corpora, the hypothesis cache — because the whole
+context is tarred and uploaded before the first instruction runs. Measured
+with a `COPY . /ctx` probe, that took the context from 123MB to under 20MB. A
+tree that a stage starts to COPY must come off that list in the same change.
+
+#### Build arguments and image variants
+
+The one `Dockerfile` produces four images, selected by two build arguments.
+Each defaults to the full image; nothing changes for a build that passes
+neither.
+
+| Argument | Values | What `remote` / `none` leaves out |
+|---|---|---|
+| `ML_RUNTIME` | `local` (default), `remote` | torch, torchvision, sentence-transformers, accelerate, docling's layout models and the pre-cached `BAAI/bge-m3` + reranker weights — about 3GB. The in-process embedder and reranker are then unavailable: point `BASELITH_EMBEDDING_URL` / `BASELITH_RERANK_URL` at TEI, see [Inference Services](inference-services.md#an-image-without-torch) |
+| `BROWSER_RUNTIME` | `bundled` (default), `none` | The Chromium headless shell, its shared libraries and the font set — 615MB measured on a built image. The playwright Python package stays (the `web` extra needs it), so a `chromium.launch()` on such an image fails with Playwright's own "Executable doesn't exist" at call time: set `browser_agent: enabled: false` in `configs/plugins.yaml` alongside |
+
+```bash
+# Smallest image the file produces: no local ML runtime, no browser.
+docker build --build-arg ML_RUNTIME=remote --build-arg BROWSER_RUNTIME=none \
+  -t baselith:remote-nobrowser .
+```
+
+Any other value fails the build with a message naming the argument. The
+compose stack builds the default image; a deployment that runs the
+`inference` profile and no browser agent can pass both arguments through
+`build.args` and drop the bytes it never executes.
+
+Two trims apply to every variant:
+
+- **Test suites and headers are not shipped.** The wheels ship their own test
+  suites and torch ships its C++ headers: 264MB of `tests/` and `test/`
+  directories (torch 91, pandas 37, scipy 32, sympy 32, numpy 16,
+  scikit-learn 15, …) plus 64MB under `torch/include`, measured on a built
+  image. The deps stage deletes them before the spaCy load check and the
+  sentence-transformers pre-cache run, so both of those exercise the trimmed
+  tree and a package that imported from its tests directory would fail the
+  build, not the pod. The headers served only `torch.utils.cpp_extension` and
+  inductor's C++ codegen, which need a compiler the image does not ship.
+- **`MALLOC_ARENA_MAX=2`.** glibc opens up to 8 × cores malloc arenas as
+  threads contend for the heap, and a process with a thread pool
+  (`asyncio.to_thread`, torch, the tokenizers) accumulates a few hundred MB
+  of fragmented, never-returned arena memory that counts against the
+  container limit. Two arenas is the usual container setting; the cost is a
+  little lock contention on a path that is not this service's bottleneck.
+  Override it in the environment if a profile shows otherwise.
 
 #### What the layer rewrite changed
 
@@ -1156,6 +1213,13 @@ server {
     }
 }
 ```
+
+The `http` block of the shipped `deploy/nginx/nginx.conf` also sets
+`gzip_proxied any`. nginx's default is `off`: a request that arrives with a
+`Via` header — one that crossed another proxy, a cloud load balancer, a
+corporate egress proxy, a CDN — got its response uncompressed, and the
+upstream could not step in because `Accept-Encoding` is stripped above. Those
+are exactly the deployments where the bytes cross the most network.
 
 The bundled gateway config (`deploy/nginx/nginx.conf`, mounted by
 `compose.prod.yaml`) applies the same rules — empty `Connection`

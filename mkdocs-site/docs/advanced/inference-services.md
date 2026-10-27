@@ -237,6 +237,12 @@ and fails the build if any other requirement pulls torch in. The default stays
 docker build --build-arg ML_RUNTIME=remote -t baselith:remote .
 ```
 
+The browser has the same switch: `--build-arg BROWSER_RUNTIME=none` leaves out
+the Chromium headless shell, its libraries and the fonts (615MB), for a
+deployment that runs the browser agent nowhere. Both arguments, their defaults
+and the trims every variant gets are tabled under
+[Build arguments and image variants](deployment.md#build-arguments-and-image-variants).
+
 Measured on the same tree, with two plugins enabled and the
 inference services configured: the `remote` image is 7.9 GB against 13.1 GB, and
 the API process (one worker) holds about 250 MB RSS after startup, where an

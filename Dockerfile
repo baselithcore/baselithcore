@@ -249,6 +249,22 @@ RUN --mount=type=cache,target=/root/.cache/pip \
        fi
 
 # --- The spaCy pipeline ---
+# --- Trim what no import reads ---
+# The wheels ship their own test suites and torch ships its C++ headers.
+# Measured on a built image: 264MB of `tests/` and `test/` directories (torch
+# 91, pandas 37, scipy 32, sympy 32, numpy 16, scikit-learn 15, networkx 8,
+# spaCy 6, ...) plus 64MB under torch/include. No runtime import resolves into
+# a tests package, and the headers serve only torch.utils.cpp_extension and
+# inductor's C++ codegen, both of which need a compiler this image does not
+# ship. Trimmed here, before the spaCy load check and the sentence-transformers
+# pre-cache below, so both of those exercise the trimmed tree and a package
+# that did import from its tests directory would fail the build, not the pod.
+# `-prune` keeps find out of the directories it is about to delete.
+RUN site="/install/lib/python3.12/site-packages" \
+    && find "$site" -type d \( -name tests -o -name test \) -prune -exec rm -rf {} + \
+    && rm -rf "$site/torch/include" \
+    && echo "[docker] site-packages after trim: $(du -sh "$site" | cut -f1)"
+
 # spaCy and its compiled stack (thinc, blis, its slice of numpy) are ~160MB of
 # this image, and without a MODEL they buy nothing: baselith/core/config/processing.py
 # ships `enable_spacy_documents: bool = Field(default=True)` with
@@ -293,7 +309,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Skipped for ML_RUNTIME=remote (there is nothing to load the models with); the
 # directory is still created because the runtime stage copies it.
 RUN mkdir -p /build/models && [ "${ML_RUNTIME}" = "remote" ] || python - <<'PY'
-import os, sys
+import os, sys, threading
 from pathlib import Path
 site = Path("/install") / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 sys.path.insert(0, site.as_posix())
@@ -307,6 +323,19 @@ for name, loader in (
         print(f"[docker] cached model: {name}")
     except Exception as e:
         print(f"[docker] warning: unable to cache {name}: {e}", file=sys.stderr)
+
+# transformers converts a pickled-only repo to safetensors on a background
+# thread (`Thread-auto_conversion`), started by the loader above and not
+# awaited by it. Python waits for that thread only at interpreter exit, which
+# is after the dedupe below. So the same Dockerfile at the same commit built a
+# 2.3GB models layer when the download won the race and a 4.7GB one (both
+# copies kept) when it lost: measured, back to back, on one machine. Wait for
+# it here, so the link step always sees the converted file when there is one.
+for thread in threading.enumerate():
+    if thread.name == "Thread-auto_conversion":
+        thread.join(timeout=900)
+        if thread.is_alive():
+            print("[docker] warning: safetensors conversion still running after 900s", file=sys.stderr)
 
 # One copy of the weights, in safetensors form. A repo whose `main` carries
 # only pytorch_model.bin (bge-m3 does) makes transformers fetch the
@@ -337,6 +366,30 @@ for repo in sorted(cache.glob("models--*")):
         pickled.unlink()
         blob.unlink()
     print(f"[docker] {repo.name}: model.safetensors linked into main; no pickled copy left")
+
+# The invariant, checked rather than assumed: every weight blob in the cache is
+# reachable from the `main` snapshot, the only one read with HF_HUB_OFFLINE=1.
+# A blob that is not (an unlinked conversion, an `.incomplete` download that
+# never finished) is dead weight, so the build fails instead of shipping it.
+orphans = []
+for repo in sorted(cache.glob("models--*")):
+    ref = repo / "refs" / "main"
+    if not ref.is_file():
+        continue
+    main = repo / "snapshots" / ref.read_text().strip()
+    reachable = {p.resolve() for p in main.rglob("*") if p.is_file()}
+    orphans += [
+        blob
+        for blob in (repo / "blobs").iterdir()
+        if blob.stat().st_size > 50 * 2**20 and blob.resolve() not in reachable
+    ]
+if orphans:
+    print(
+        "ERROR: weight blobs the offline cache never reads: "
+        + ", ".join(f"{b.parent.parent.name}/{b.name[:12]} ({b.stat().st_size >> 20}MB)" for b in orphans),
+        file=sys.stderr,
+    )
+    sys.exit(1)
 PY
 
 # ============================================================
@@ -430,6 +483,14 @@ ENV PYTHONUNBUFFERED=1 \
     # Silences the fork warning and the tokenizer's own thread pool, which is
     # useless work in a process that is already one worker of several.
     TOKENIZERS_PARALLELISM=false \
+    # glibc opens up to 8 x cores malloc arenas as threads contend for the
+    # heap, and a process with a thread pool (asyncio.to_thread, torch, the
+    # tokenizers) ends up with a few hundred MB of fragmented, never-returned
+    # arena memory that counts against the container limit. Two arenas is the
+    # usual container setting; the cost is a little lock contention on a
+    # path that is not this service's bottleneck. Honoured only by glibc,
+    # which python:3.12-slim is.
+    MALLOC_ARENA_MAX=2 \
     HOST=0.0.0.0 \
     PORT=8000 \
     WEB_CONCURRENCY=1
@@ -517,9 +578,26 @@ COPY --from=deps --chown=appuser:appuser /build/models /app/models
 # An operator who genuinely wants headed browsing needs a derived image that
 # adds Xvfb anyway, and that image can drop this flag. Shipping the binary here
 # only made the failure 641MB more expensive.
+#
+# BROWSER_RUNTIME, the browser counterpart of ML_RUNTIME above. `bundled`
+# (default) is this layer as it has always been. `none` skips it entirely:
+# no headless shell, none of its shared libraries, no fonts — 615MB measured
+# on a built image — for a deployment that runs the browser agent nowhere, or
+# runs it against a remote browser. The playwright Python package stays
+# (the `web` extra needs it), and a `chromium.launch()` in such an image
+# fails with Playwright's own "Executable doesn't exist" at call time, so
+# disable `browser_agent` in configs/plugins.yaml alongside. Combined with
+# `ML_RUNTIME=remote` this is the smallest image the file produces.
+ARG BROWSER_RUNTIME="bundled"
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
+    case "${BROWSER_RUNTIME}" in \
+      bundled) ;; \
+      none) echo "[docker] BROWSER_RUNTIME=none: no Chromium, libraries or fonts in this image"; \
+            mkdir -p /ms-playwright && chown appuser:appuser /ms-playwright; exit 0 ;; \
+      *) echo "ERROR: BROWSER_RUNTIME must be 'bundled' or 'none', got '${BROWSER_RUNTIME}'" >&2; exit 1 ;; \
+    esac \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
