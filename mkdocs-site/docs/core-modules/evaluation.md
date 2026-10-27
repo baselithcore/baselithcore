@@ -253,7 +253,9 @@ has for it:
 | Prometheus | `mas_eval_online_degraded` | the `AnswerQualityDegraded` alert rules shipped in `deploy/` |
 
 The webhook payload is the event payload above. Delivery (signing, retries,
-dead-lettering — see [Webhooks](webhooks.md)) runs as a background task, so a
+dead-lettering — see [Webhooks](webhooks.md)) runs as a background task and
+goes through the transactional outbox when `WEBHOOK_OUTBOX_ENABLED`, so a
+crash between the transition and the delivery does not lose the alert. A
 slow subscriber never holds up the announcement; a failed emission counts as
 `stage="webhook"`. The alert rules and a Grafana row are described in
 [Observability › Alerting on answer quality](../advanced/observability.md#alerting-on-answer-quality).

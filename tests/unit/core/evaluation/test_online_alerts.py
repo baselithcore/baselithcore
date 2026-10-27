@@ -136,7 +136,7 @@ async def test_a_slow_subscriber_does_not_hold_the_announcer(monkeypatch) -> Non
     release = asyncio.Event()
 
     class _Slow:
-        async def emit(self, *_: Any, **__: Any) -> list[Any]:
+        async def publish(self, *_: Any, **__: Any) -> list[Any]:
             await release.wait()
             return []
 
@@ -155,7 +155,7 @@ async def test_a_failing_webhook_service_is_counted(monkeypatch) -> None:
     from baselith.core.observability.metrics import EVAL_ONLINE_FAILURES_TOTAL
 
     class _Broken:
-        async def emit(self, *_: Any, **__: Any) -> list[Any]:
+        async def publish(self, *_: Any, **__: Any) -> list[Any]:
             raise RuntimeError("store down")
 
     monkeypatch.setattr(

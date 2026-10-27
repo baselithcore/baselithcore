@@ -36,6 +36,10 @@ from baselith.core.webhooks.types import (
 
 logger = get_logger(__name__)
 
+#: Retry jitter only needs to desynchronise clients; SystemRandom keeps
+#: the security scanners quiet without a suppression.
+_JITTER = random.SystemRandom()
+
 
 class WebhookDispatcher:
     """Delivers signed events to endpoints with retry and dead-lettering."""
@@ -176,7 +180,7 @@ class WebhookDispatcher:
 
     def _backoff(self, attempt: int) -> float:
         base: float = self._config.retry_backoff_seconds
-        return min(base * (2.0 ** (attempt - 1)), 60.0) + random.uniform(0, base)
+        return min(base * (2.0 ** (attempt - 1)), 60.0) + _JITTER.uniform(0, base)
 
     async def _finalize_failure(
         self, delivery: WebhookDelivery, *, error: str
