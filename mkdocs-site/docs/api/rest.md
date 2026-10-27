@@ -724,6 +724,13 @@ is fine. The plugin-less fallback route behaves the same way.
     to reconnect, which lands them on a pod that is still serving. See
     [Draining long-lived streams](../core-modules/lifecycle.md#draining-long-lived-streams).
 
+!!! note "Startup heap is frozen"
+    The same lifespan ends startup with `gc.collect()` + `gc.freeze()` and
+    undoes it at shutdown, so full collections during request handling no
+    longer re-walk the ~140k objects startup built (a 16ms gen-2 pause
+    measured on the built app, 0ms after). See
+    [Startup heap freeze](../advanced/runtime-tuning.md#startup-heap-freeze).
+
 ---
 
 ### `GET /status` - System Status

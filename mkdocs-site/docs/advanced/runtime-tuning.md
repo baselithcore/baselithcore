@@ -310,6 +310,21 @@ is deliberately **not** installed inside the FastAPI app: it would replace
 uvicorn's own SIGTERM/SIGINT handlers; it remains available for standalone
 (non-uvicorn) embeddings of the runtime.
 
+## Startup heap freeze
+
+The last thing the lifespan does before it yields is `gc.collect()` followed
+by `gc.freeze()`. Everything startup built — the app and its routers, the
+plugin registries, the config singletons, the pools — lives until shutdown,
+yet every full collection re-walked it: on the built app that is about 140k
+tracked objects, and a gen-2 pass measured 16ms before the call and 0ms
+after. Request-time garbage is collected exactly as before; what the pass no
+longer traverses is the part that was never garbage. The collect first drops
+the garbage startup itself left behind, so the permanent generation holds
+only what lives. The lifespan shutdown calls `gc.unfreeze()`, so a process
+that runs several lifespans — the test suite — is not left with a permanent
+generation it never asked for. Each uvicorn worker runs its own lifespan and
+freezes its own heap.
+
 ## Per-request auth memo (quota + route auth)
 
 When quotas are enabled, `QuotaMiddleware` authenticates the request before the
