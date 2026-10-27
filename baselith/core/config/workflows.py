@@ -59,9 +59,12 @@ class WorkflowsConfig(AliasedSettings):
     run_history_size: int = Field(default=500, alias="WORKFLOWS_RUN_HISTORY_SIZE", ge=1)
 
     # Credentials HTTP nodes may name (``config['credential']``), as one JSON
-    # object: {"crm": {"Authorization": "Bearer ..."}}. A definition only ever
-    # carries the name; the secret stays here, wrapped so it never reaches a
-    # repr, a log line or an exported definition.
+    # object: {"crm": {"hosts": ["api.crm.example"], "headers": {"Authorization":
+    # "Bearer ..."}}}. A definition only ever carries the name; the secret stays
+    # here, wrapped so it never reaches a repr, a log line or an exported
+    # definition. A credential is sent only to the hosts it lists, and only over
+    # https, because the URL of a node is often built from data the workflow does
+    # not control. An entry without hosts is dropped, never widened.
     http_credentials: SecretStr | None = Field(
         default=None, alias="WORKFLOWS_HTTP_CREDENTIALS"
     )

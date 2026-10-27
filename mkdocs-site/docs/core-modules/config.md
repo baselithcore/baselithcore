@@ -601,7 +601,8 @@ Two opt-in surfaces have their own settings classes, both read through a
 - `WorkflowsConfig` (`baselith/core/config/workflows.py`, `WORKFLOWS_` prefix) holds the
   catalog directory, the master secret of the inbound trigger (a `SecretStr`),
   the scheduler switch and interval, the per-run timeout and concurrency cap, the
-  run-history size, the HTTP-node credentials (a `SecretStr` holding JSON),
+  run-history size, the HTTP-node credentials (a `SecretStr` holding JSON, each
+  credential bound to the hosts it may be sent to),
   the outbound-HTTP SSRF override and the `CODE`-node switch. See [Workflow
   Catalog & API](workflow-catalog.md#enabling).
 - `KnowledgeApiConfig` (`baselith/core/config/knowledge.py`, `KNOWLEDGE_` prefix) holds

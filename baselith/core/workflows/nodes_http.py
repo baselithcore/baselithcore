@@ -12,13 +12,25 @@ host and a pooled TLS session is never reused across hostnames.
 Credentials never live in a definition. A node names a credential
 (``config['credential']``) and the operator maps that name to headers when
 building the executor (``services={"http_credentials": {...}}``).
+
+A credential is also bound to the hosts it is for. The URL of a node is often
+built from data the workflow does not control (a webhook payload, a model's
+answer), and a credential that follows whatever URL it is handed is a token
+delivered to whoever can steer the URL. Each credential therefore declares the
+hostnames it may be sent to, and the node refuses, before anything leaves the
+process, to attach it anywhere else - or over plain ``http``::
+
+    {"crm": {"hosts": ["api.crm.example"],
+             "headers": {"Authorization": SecretStr("Bearer ...")}}}
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import SecretStr
@@ -65,24 +77,65 @@ def _clean_headers(raw: Any) -> dict[str, str]:
     }
 
 
-def _credential_headers(
-    executor: WorkflowExecutor, node: WorkflowNode
-) -> dict[str, str]:
+@dataclass(frozen=True)
+class _Credential:
+    """Headers to attach, and the only hosts they may be attached for."""
+
+    name: str
+    headers: dict[str, str]
+    hosts: frozenset[str]
+
+
+def _normalise_host(host: str) -> str:
+    return host.strip().rstrip(".").lower()
+
+
+def _credential(executor: WorkflowExecutor, node: WorkflowNode) -> _Credential | None:
+    """The credential a node names, validated; ``None`` when it names none."""
     name = node.config.get("credential")
     if not name:
-        return {}
-    registry = executor._services.get("http_credentials") or {}
-    entry = registry.get(name)
+        return None
+    entry = (executor._services.get("http_credentials") or {}).get(name)
     if entry is None:
         raise ValueError(
             f"HTTP node {node.id!r}: credential {name!r} is not configured on the executor"
         )
-    return _clean_headers(
+    raw_hosts = entry.get("hosts") if isinstance(entry, dict) else None
+    raw_headers = entry.get("headers") if isinstance(entry, dict) else None
+    hosts = frozenset(
+        _normalise_host(h)
+        for h in (
+            raw_hosts if isinstance(raw_hosts, list | tuple | set | frozenset) else ()
+        )
+        if isinstance(h, str) and h.strip()
+    )
+    if not hosts or not isinstance(raw_headers, dict) or not raw_headers:
+        raise ValueError(
+            f"HTTP node {node.id!r}: credential {name!r} must declare the hosts it "
+            "is for and the headers to send"
+        )
+    headers = _clean_headers(
         {
             k: v.get_secret_value() if isinstance(v, SecretStr) else v
-            for k, v in entry.items()
+            for k, v in raw_headers.items()
         }
     )
+    return _Credential(name=str(name), headers=headers, hosts=hosts)
+
+
+def _check_destination(
+    node: WorkflowNode, credential: _Credential, url: str, host: str, allow_plain: bool
+) -> None:
+    """Refuse to send ``credential`` anywhere but its declared hosts, over https."""
+    if _normalise_host(host) not in credential.hosts:
+        raise ValueError(
+            f"HTTP node {node.id!r}: credential {credential.name!r} is not valid "
+            f"for host {host[:100]!r}"
+        )
+    if urlparse(url).scheme.lower() != "https" and not allow_plain:
+        raise ValueError(
+            f"HTTP node {node.id!r}: credential {credential.name!r} is only sent over https"
+        )
 
 
 def _policy() -> SsrfPolicy:
@@ -124,7 +177,8 @@ async def handle_http(
         query: Query parameters (templated).
         json: JSON request body (templated, types preserved).
         body: Raw text body (templated); ignored when ``json`` is set.
-        credential: Name of an operator-configured credential.
+        credential: Name of an operator-configured credential, sent only to the
+            hosts that credential declares and only over https.
         timeout: Seconds, at most 120 (default 30).
         max_response_bytes: Response cap, at most 10 MiB (default 1 MiB).
         allow_error_status: Return 4xx/5xx instead of failing the node.
@@ -147,10 +201,8 @@ async def handle_http(
     if not isinstance(url, str) or not url:
         raise ValueError(f"HTTP node {node.id!r} needs a config['url']")
 
-    headers = {
-        **_clean_headers(render_value(config.get("headers") or {}, scope)),
-        **_credential_headers(executor, node),
-    }
+    credential = _credential(executor, node)
+    headers = _clean_headers(render_value(config.get("headers") or {}, scope))
     params = render_value(config.get("query") or {}, scope)
     timeout = min(float(config.get("timeout", _DEFAULT_TIMEOUT)), _MAX_TIMEOUT)
     limit = min(
@@ -162,7 +214,14 @@ async def handle_http(
     elif config.get("body") is not None:
         request["content"] = str(render_value(config["body"], scope)).encode("utf-8")
 
-    pinned_url, host = await asyncio.to_thread(resolve_pinned_target, url, _policy())
+    policy = _policy()
+    pinned_url, host = await asyncio.to_thread(resolve_pinned_target, url, policy)
+    if credential is not None:
+        # After the egress screen, before anything is sent: the host compared
+        # is the one the connection is pinned to, parsed exactly as the screen
+        # parsed it (so ``https://api.crm.example@evil.test/`` is evil.test).
+        _check_destination(node, credential, url, host, policy.allow_internal)
+        headers.update(credential.headers)
     client = executor._services.get("http_client")
     owns_client = client is None
     if client is None:

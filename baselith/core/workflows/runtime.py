@@ -121,7 +121,13 @@ def contains_human_gate(workflow: WorkflowDefinition, _depth: int = 0) -> bool:
     return False
 
 
-def _http_credentials(config: WorkflowsConfig) -> dict[str, dict[str, str]]:
+def _http_credentials(config: WorkflowsConfig) -> dict[str, dict[str, Any]]:
+    """Parse ``WORKFLOWS_HTTP_CREDENTIALS``; an entry that is not valid is dropped.
+
+    Each entry is ``{"hosts": [...], "headers": {...}}``. One without hosts is
+    not repaired into "any host": it is left out and named in the log, so a node
+    that uses it fails instead of sending the secret somewhere unintended.
+    """
     if config.http_credentials is None:
         return {}
     try:
@@ -129,15 +135,34 @@ def _http_credentials(config: WorkflowsConfig) -> dict[str, dict[str, str]]:
     except ValueError:
         logger.error("workflows_http_credentials_invalid: not valid JSON")
         return {}
-    if not isinstance(data, dict) or not all(
-        isinstance(v, dict) and all(isinstance(h, str) for h in v.values())
-        for v in data.values()
-    ):
+    if not isinstance(data, dict):
         logger.error(
-            "workflows_http_credentials_invalid: expected {name: {header: value}}"
+            "workflows_http_credentials_invalid: expected "
+            '{name: {"hosts": [...], "headers": {...}}}'
         )
         return {}
-    return data
+    valid: dict[str, dict[str, Any]] = {}
+    for name, entry in data.items():
+        hosts = entry.get("hosts") if isinstance(entry, dict) else None
+        headers = entry.get("headers") if isinstance(entry, dict) else None
+        if (
+            isinstance(hosts, list)
+            and hosts
+            and all(isinstance(h, str) and h.strip() for h in hosts)
+            and isinstance(headers, dict)
+            and headers
+            and all(
+                isinstance(k, str) and isinstance(v, str) for k, v in headers.items()
+            )
+        ):
+            valid[str(name)] = {"hosts": hosts, "headers": headers}
+        else:
+            logger.error(
+                "workflows_http_credential_dropped name=%s: it needs a non-empty "
+                "'hosts' list and a non-empty 'headers' mapping of strings",
+                name,
+            )
+    return valid
 
 
 def default_executor_factory(config: WorkflowsConfig | None = None) -> ExecutorFactory:

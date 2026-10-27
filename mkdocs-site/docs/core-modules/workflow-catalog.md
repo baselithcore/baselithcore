@@ -228,7 +228,8 @@ installed plugin, so the default executor is narrow:
 
 - `TOOL` nodes can call plugin tools that declare `category: read_only`;
 - `AGENT` nodes have no agents by default;
-- `HTTP` nodes use only the credentials in `WORKFLOWS_HTTP_CREDENTIALS` and are
+- `HTTP` nodes use only the credentials in `WORKFLOWS_HTTP_CREDENTIALS`, each sent
+  only to the hosts it lists and only over https, and are
   SSRF-screened (see [HTTP node](workflows.md#http-http-request));
 - `LLM`, `CLASSIFIER` and `RETRIEVE` use the framework's own LLM service and
   vector store.
@@ -266,7 +267,7 @@ print(record.status, record.output)
 | What a node can template | Data only: mapping keys and list indexes, no attribute access, no calls |
 | Unresolved reference | The run fails; nothing renders a half-built prompt or request |
 | Outbound HTTP | Scheme and host screening, DNS pinning, no redirects, no keep-alive, response cap, framing headers dropped |
-| Secrets | Never in a definition; HTTP credentials by name from `WORKFLOWS_HTTP_CREDENTIALS`, wrapped in `SecretStr` |
+| Secrets | Never in a definition; HTTP credentials by name from `WORKFLOWS_HTTP_CREDENTIALS`, wrapped in `SecretStr`, **bound to the hosts they list** and sent over https only, so a URL built from untrusted input cannot collect a token |
 | Model output steering a branch | A `CLASSIFIER` answer is accepted only if it is a declared label; put side effects behind a `HUMAN` gate |
 | Resource use | Concurrency cap with 429, per-run timeout, iteration item cap, body and definition size caps |
 | Plugin reach | Only `read_only` plugin tools by default |

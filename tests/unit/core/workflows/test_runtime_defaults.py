@@ -85,15 +85,48 @@ class TestHttpCredentials:
         config = WorkflowsConfig(WORKFLOWS_HTTP_CREDENTIALS=value)
         return default_executor_factory(config)()._services["http_credentials"]
 
-    def test_valid_json_object(self):
-        raw = json.dumps({"crm": {"Authorization": "Bearer x"}})
-        assert self._creds(raw) == {"crm": {"Authorization": "Bearer x"}}
+    def test_valid_entries_keep_their_hosts(self):
+        raw = json.dumps(
+            {
+                "crm": {
+                    "hosts": ["api.crm.example"],
+                    "headers": {"Authorization": "Bearer x"},
+                }
+            }
+        )
+        assert self._creds(raw) == {
+            "crm": {
+                "hosts": ["api.crm.example"],
+                "headers": {"Authorization": "Bearer x"},
+            }
+        }
 
-    @pytest.mark.parametrize(
-        "raw", ["not json", "[1, 2]", '{"crm": "Bearer x"}', '{"crm": {"H": 1}}']
-    )
-    def test_malformed_credentials_yield_none_rather_than_a_guess(self, raw):
+    @pytest.mark.parametrize("raw", ["not json", "[1, 2]", '"text"'])
+    def test_a_malformed_document_yields_nothing(self, raw):
         assert self._creds(raw) == {}
+
+    def test_an_entry_without_hosts_is_dropped_never_widened_to_any_host(self, caplog):
+        good = {"hosts": ["a.example"], "headers": {"X-Key": "1"}}
+        raw = json.dumps(
+            {
+                "old_shape": {"Authorization": "Bearer x"},
+                "no_hosts": {"headers": {"Authorization": "Bearer x"}},
+                "empty_hosts": {"hosts": [], "headers": {"Authorization": "Bearer x"}},
+                "blank_host": {
+                    "hosts": [" "],
+                    "headers": {"Authorization": "Bearer x"},
+                },
+                "no_headers": {"hosts": ["a.example"]},
+                "bad_header": {"hosts": ["a.example"], "headers": {"K": 1}},
+                "string_entry": "Bearer x",
+                "good": good,
+            }
+        )
+        assert self._creds(raw) == {"good": good}
+        assert "workflows_http_credential_dropped" in caplog.text
+        assert "Bearer x" not in caplog.text, (
+            "a dropped entry's secret must not be logged"
+        )
 
     def test_unset_means_no_credentials(self):
         config = WorkflowsConfig()

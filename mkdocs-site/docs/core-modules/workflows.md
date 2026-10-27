@@ -312,7 +312,7 @@ returning an empty list.
 | `method` | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` |
 | `headers`, `query` | Templated. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection` and similar are dropped |
 | `json` / `body` | Request body (templated; `json` keeps types) |
-| `credential` | Name of an operator-configured credential |
+| `credential` | Name of an operator-configured credential; sent only to its declared hosts, over https |
 | `timeout` | Seconds, at most 120 (default 30) |
 | `max_response_bytes` | At most 10 MiB (default 1 MiB) |
 | `allow_error_status` | Return 4xx/5xx instead of failing the node |
@@ -329,10 +329,34 @@ targets are refused unless `WORKFLOWS_HTTP_ALLOW_INTERNAL` is set (local
 development only).
 
 Credentials never live in a definition. A node names one
-(`credential: crm`) and the operator maps the name to headers: the
-`WORKFLOWS_HTTP_CREDENTIALS` JSON for catalog workflows, or
-`WorkflowExecutor(services={"http_credentials": {"crm": {"Authorization":
-SecretStr("Bearer …")}}})` in code.
+(`credential: crm`) and the operator maps the name to the headers to send *and the
+hosts they are for*:
+
+```json
+{"crm": {"hosts": ["api.crm.example"], "headers": {"Authorization": "Bearer …"}}}
+```
+
+That JSON is `WORKFLOWS_HTTP_CREDENTIALS` for catalog workflows; in code it is
+`WorkflowExecutor(services={"http_credentials": {...}})`, whose header values may
+be `SecretStr`.
+
+A credential is **bound to its hosts**, because the URL of a node is often built
+from data the workflow does not control (a webhook payload, a model's answer),
+and a token that follows whatever URL it is handed is a token delivered to
+whoever can steer the URL:
+
+- the host of the URL, parsed exactly as the egress screen parses it, must be one
+  of the credential's `hosts` (compared whole, case-insensitive, trailing dot
+  ignored, so `api.crm.example.evil.test`, `sub.api.crm.example` and
+  `https://api.crm.example@evil.test/` are all refused);
+- the check runs after the egress screen and before anything is sent, so a refused
+  node sends nothing;
+- a credential is attached only over `https` (plain `http` is allowed only under
+  `WORKFLOWS_HTTP_ALLOW_INTERNAL`, the local-development posture);
+- the credential's headers win over a header of the same name set in the
+  definition;
+- an entry with no `hosts` or no `headers` is **dropped and logged**, never widened
+  to "any host", so a node that uses it fails.
 
 ### TEMPLATE, ASSIGN and ITERATION
 
@@ -496,7 +520,7 @@ nodes; each is optional and falls back to the framework default:
 | --- | ------- | ----- |
 | `llm` | `LLM`, `CLASSIFIER` | An object with `generate_response(prompt, …)` and `generate(prompt, response_format=…, …)`, such as the LLM service |
 | `retriever` | `RETRIEVE` | `async (query, *, top_k, collection) -> list[dict]` |
-| `http_credentials` | `HTTP` | `{name: {header: value}}`; values may be `SecretStr` |
+| `http_credentials` | `HTTP` | `{name: {"hosts": [...], "headers": {header: value}}}`; header values may be `SecretStr` |
 | `http_client` | `HTTP` | An `httpx.AsyncClient` (tests, custom transports) |
 | `code_runner` | `CODE` | `async (code, *, envs, timeout) -> result` with `stdout`, `stderr`, `exit_code`; the sandbox service by default |
 

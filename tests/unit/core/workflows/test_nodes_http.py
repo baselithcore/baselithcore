@@ -1,5 +1,7 @@
 """HTTP node: egress screening, credentials, response handling."""
 
+from urllib.parse import urlparse
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -36,7 +38,7 @@ def seen(monkeypatch):
     monkeypatch.setattr(
         nodes_http,
         "resolve_pinned_target",
-        lambda url, policy: (url, "api.example.com"),
+        lambda url, policy: (url, urlparse(url).hostname),
     )
     return captured
 
@@ -92,14 +94,136 @@ async def test_reserved_headers_in_a_definition_are_dropped(seen):
     assert request.headers["x-ok"] == "1"
 
 
+def _crm(hosts=("api.example.com",), **headers):
+    return {
+        "crm": {
+            "hosts": list(hosts),
+            "headers": headers or {"Authorization": SecretStr("Bearer s3cret")},
+        }
+    }
+
+
 async def test_credential_comes_from_the_operator_not_the_definition(seen):
     ex = _executor(
-        seen,
-        lambda r: httpx.Response(200, text="x"),
-        http_credentials={"crm": {"Authorization": SecretStr("Bearer s3cret")}},
+        seen, lambda r: httpx.Response(200, text="x"), http_credentials=_crm()
     )
     await ex.execute(_wf(url="https://api.example.com/", credential="crm"), "x")
     assert seen["request"].headers["authorization"] == "Bearer s3cret"
+
+
+async def test_the_credential_wins_over_a_header_the_definition_sets(seen):
+    ex = _executor(
+        seen, lambda r: httpx.Response(200, text="x"), http_credentials=_crm()
+    )
+    wf = _wf(
+        url="https://api.example.com/",
+        credential="crm",
+        headers={"Authorization": "Bearer attacker"},
+    )
+    await ex.execute(wf, "x")
+    assert seen["request"].headers["authorization"] == "Bearer s3cret"
+
+
+class TestCredentialsAreBoundToHosts:
+    """A token must not follow a URL somebody else can steer."""
+
+    @staticmethod
+    def _ex(seen, **services):
+        return _executor(
+            seen,
+            lambda r: httpx.Response(200, text="x"),
+            http_credentials=_crm(),
+            **services,
+        )
+
+    async def test_a_url_built_from_input_cannot_redirect_the_token(self, seen):
+        wf = _wf(url="https://{{ input }}/collect", credential="crm")
+        result = await self._ex(seen).execute(wf, "evil.example.org")
+        assert result.status is ExecutionStatus.FAILED
+        assert "not valid for host 'evil.example.org'" in (result.error or "")
+        assert "request" not in seen, "nothing may be sent"
+        assert "s3cret" not in (result.error or "")
+
+    async def test_userinfo_cannot_smuggle_the_allowed_host(self, seen):
+        wf = _wf(url="https://api.example.com@evil.example.org/x", credential="crm")
+        result = await self._ex(seen).execute(wf, "x")
+        assert result.status is ExecutionStatus.FAILED and "request" not in seen
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.example.com.evil.org/",
+            "https://evil-api.example.com.org/",
+            "https://sub.api.example.com/",
+            "https://example.com/",
+        ],
+    )
+    async def test_lookalike_hosts_are_refused(self, seen, url):
+        result = await self._ex(seen).execute(_wf(url=url, credential="crm"), "x")
+        assert result.status is ExecutionStatus.FAILED and "request" not in seen
+
+    async def test_case_and_trailing_dot_do_not_matter(self, seen):
+        ex = _executor(
+            seen,
+            lambda r: httpx.Response(200, text="x"),
+            http_credentials=_crm(hosts=("API.Example.COM.",)),
+        )
+        result = await ex.execute(
+            _wf(url="https://Api.Example.Com/x", credential="crm"), "x"
+        )
+        assert result.status is ExecutionStatus.COMPLETED
+
+    async def test_plain_http_never_carries_a_credential(self, seen):
+        result = await self._ex(seen).execute(
+            _wf(url="http://api.example.com/", credential="crm"), "x"
+        )
+        assert result.status is ExecutionStatus.FAILED
+        assert "only sent over https" in (result.error or "")
+        assert "request" not in seen
+
+    async def test_plain_http_is_allowed_only_in_the_local_development_posture(
+        self, seen, monkeypatch
+    ):
+        from baselith.core.config.workflows import WorkflowsConfig
+
+        monkeypatch.setattr(
+            "baselith.core.config.workflows.get_workflows_config",
+            lambda: WorkflowsConfig(WORKFLOWS_HTTP_ALLOW_INTERNAL="true"),
+        )
+        result = await self._ex(seen).execute(
+            _wf(url="http://api.example.com/", credential="crm"), "x"
+        )
+        assert result.status is ExecutionStatus.COMPLETED
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"headers": {"Authorization": "Bearer x"}},
+            {"hosts": [], "headers": {"Authorization": "Bearer x"}},
+            {"hosts": ["api.example.com"]},
+            {"hosts": ["api.example.com"], "headers": {}},
+            {"Authorization": "Bearer x"},
+            "Bearer x",
+        ],
+    )
+    async def test_a_credential_without_hosts_or_headers_is_unusable(self, seen, entry):
+        ex = _executor(
+            seen,
+            lambda r: httpx.Response(200, text="x"),
+            http_credentials={"crm": entry},
+        )
+        result = await ex.execute(
+            _wf(url="https://api.example.com/", credential="crm"), "x"
+        )
+        assert result.status is ExecutionStatus.FAILED
+        assert "must declare the hosts" in (result.error or "")
+        assert "request" not in seen
+
+    async def test_requests_without_a_credential_are_unaffected(self, seen):
+        result = await self._ex(seen).execute(
+            _wf(url="https://anywhere.example.org/"), "x"
+        )
+        assert result.status is ExecutionStatus.COMPLETED
 
 
 async def test_unknown_credential_fails_without_sending(seen):
