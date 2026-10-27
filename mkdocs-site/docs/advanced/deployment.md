@@ -1106,6 +1106,26 @@ server {
         proxy_connect_timeout 10s;
     }
 
+    # Synchronous workflow runs (POST /workflows/{id}/run and the signed
+    # POST /workflows/{id}/trigger, `wait: true` by default) answer once the
+    # run is finished, up to WORKFLOWS_RUN_TIMEOUT_SECONDS (300s default).
+    # Under `location /` the edge cut them into a 504 after 60s while the
+    # run kept going, and a trigger cannot be retried: its signature is
+    # accepted once. Keep this timeout at the run timeout.
+    location ~ ^(/v1)?/workflows/[^/]+/(run|trigger)$ {
+        proxy_pass http://backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header Accept-Encoding "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $req_id;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 10s;
+    }
+
     # SSE / chat streaming: disable proxy buffering to preserve token-by-token
     # delivery. Regex so the versioned alias /v1/chat/stream is covered too —
     # a plain prefix location would let it fall through to `location /` and
