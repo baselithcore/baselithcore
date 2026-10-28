@@ -1520,9 +1520,14 @@
       "VoiceRequest",
       "VoiceResponse",
       "VoiceService",
+      "VoiceStream",
       "VoiceTimeoutError",
       "VoiceUnavailableError",
-      "VoiceUpstreamError"
+      "VoiceUpstreamError",
+      "supports_language",
+      "supports_speed",
+      "supports_stitching",
+      "supports_tags"
     ],
     "baselith.core.skill_evolution": [
       "EvidenceRef",

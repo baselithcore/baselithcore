@@ -1519,6 +1519,6 @@ origin (`microphone=(self)`). See [Services: Voice](services.md#voice-service).
 speech-to-text, plus the account's voice list). New: `VOICE_ELEVENLABS_BASE_URL` (https only, default
 `https://api.elevenlabs.io`; the egress guard allows that host alone and follows no redirect),
 `VOICE_ELEVENLABS_TTS_MODEL` (default `eleven_flash_v2_5`; the old `VOICE_ELEVENLABS_MODEL_ID` still binds),
-`VOICE_ELEVENLABS_STT_MODEL` (`scribe_v1`), `VOICE_ELEVENLABS_VOICE_ID`, `VOICE_ELEVENLABS_OUTPUT_FORMAT`
-(MP3 only), `VOICE_ELEVENLABS_STYLE` and `VOICE_ELEVENLABS_RETRIES`. The key stays `VOICE_ELEVENLABS_API_KEY`
+`VOICE_ELEVENLABS_STT_MODEL` (`scribe_v2`), `VOICE_ELEVENLABS_VOICE_ID`, `VOICE_ELEVENLABS_OUTPUT_FORMAT`
+(MP3 only; a streamed synthesis names its own format per call), `VOICE_ELEVENLABS_STYLE` and `VOICE_ELEVENLABS_RETRIES`. The key stays `VOICE_ELEVENLABS_API_KEY`
 (`SecretStr`). An unknown `VOICE_PROVIDER` is refused. See [Services: Voice](services.md#elevenlabs-native-provider).

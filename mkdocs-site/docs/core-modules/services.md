@@ -2045,8 +2045,12 @@ override it per instance.
 baselith/core/services/voice/
 ├── __init__.py
 ├── service.py              # VoiceService
-├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429)
-├── _elevenlabs_calls.py    # ElevenLabs TTS / Scribe STT / voice list / key check
+├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429; whole and streamed speech)
+├── _elevenlabs_catalog.py  # ElevenLabs voice list / key check / usage read
+├── _elevenlabs_stt.py      # ElevenLabs Scribe speech-to-text
+├── _elevenlabs_payload.py  # the request body per model capability (supports_* predicates)
+├── _elevenlabs_calls.py    # ElevenLabs TTS (whole, stream) / STT / voice list / key check
+├── _openai_sdk.py          # the OpenAI SDK paths (tts-1, whisper-1)
 ├── _openai_wire.py         # OpenAI-compatible wire client (sidecars, governed pin)
 ├── _routing.py             # which backend serves a call
 ├── _usage.py               # usage-seam reporting
@@ -2142,17 +2146,17 @@ TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
 
 ElevenLabs is not OpenAI-compatible, so `VOICE_PROVIDER=elevenlabs` has its own adapter in
 `baselith/core/services/voice/_elevenlabs*.py`. It serves **both directions**: text-to-speech
-(ElevenLabs' `/v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
+(ElevenLabs' `/v1/text-to-speech/{voice_id}`, whole or on its `/stream` twin) and speech-to-text with Scribe
 (ElevenLabs' `/v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `VOICE_ELEVENLABS_API_KEY` (or `ELEVENLABS_API_KEY`) | unset | The API key (`SecretStr`) |
 | `VOICE_ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io` | API root; **https only** (a data-residency endpoint such as `https://api.eu.residency.elevenlabs.io` goes here). `http` is accepted only together with `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`, for a local fake |
-| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency (an assistant speaks sentence by sentence) and cost (about half the credits per character), and is multilingual, Italian included; use `eleven_multilingual_v2` or `eleven_v3` for richer prosody |
-| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v1` | Scribe model (`scribe_v2` is available) |
+| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency and cost (about half the credits per character), and is multilingual, Italian included. `eleven_v4_turbo` is the vendor's choice for conversational assistants (the most expressive delivery, about 100 ms) and `eleven_v4` its studio-quality sibling; `eleven_multilingual_v2` and `eleven_v3` are the previous generation. A host's per-call `SpeechTuning` may choose instead |
+| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v2` | Scribe model (the current one; `scribe_v1` still works) |
 | `VOICE_ELEVENLABS_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` | Default voice (the premade "Rachel"); a call may name another id |
-| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play) |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play), for a whole-body synthesis; a streamed one names its format per call |
 | `VOICE_ELEVENLABS_STABILITY` / `_SIMILARITY_BOOST` / `_STYLE` | `0.5` / `0.75` / `0.0` | Voice settings |
 | `VOICE_ELEVENLABS_RETRIES` | `2` | Retries after an HTTP 429, inside the request deadline |
 
@@ -2167,11 +2171,30 @@ subclasses, so `except VoiceUpstreamError` still works): `key_invalid` (401/403)
 `rate_limited` (429 after the retries), `provider_unavailable` (5xx, redirect, unreachable).
 
 **Latency.** The adapter keeps its connection pool alive (idle connections are kept for 45 s), so a
-voice assistant that speaks sentence by sentence does not pay a DNS lookup, a TCP handshake and a TLS
-handshake for every sentence. The hardened client disables keep-alive by default so that one pool never
+voice assistant that speaks passage by passage does not pay a DNS lookup, a TCP handshake and a TLS
+handshake for every passage. The hardened client disables keep-alive by default so that one pool never
 coalesces two validated hostnames behind a shared pinned IP; this adapter's egress policy admits exactly
 one host, so there is nothing to coalesce. For a smaller payload at the same cost per character set
 `VOICE_ELEVENLABS_OUTPUT_FORMAT=mp3_24000_48`.
+
+**Streaming.** `text_to_speech_stream(text, voice, speed, *, language, context, tuning, output_format)`
+returns a `VoiceStream`: `chunks` (an async iterator of the audio as the provider generates it, under
+`VOICE_MAX_RESPONSE_BYTES` and with `VOICE_TIMEOUT_SECONDS` as an idle deadline per chunk), `provider`,
+`model`, `content_type`, `sample_rate` (for raw PCM) and `metadata` (`request_id`, `stitched`). With
+ElevenLabs it is the `/stream` endpoint; `output_format` names the provider format for this call
+(`pcm_24000`: 16-bit mono PCM a player can schedule chunk by chunk, available on every tier; `pcm_44100` needs
+Pro), else `VOICE_ELEVENLABS_OUTPUT_FORMAT`. A refusal is raised before the stream exists (the status is
+known), and a failure mid-stream ends the iterator with a `VoiceError`. Every other provider answers whole, as
+one chunk, so a caller can always consume a `VoiceStream`. Iterate it to the end or `aclose()` it so the
+connection returns to the pool. The model and the characters are billed at the request, whatever the stream
+then does.
+
+**Model capabilities.** What a model takes is decided once, in `_elevenlabs_payload.py`, and exported as
+predicates a host can read for the model in force: `supports_stitching(model)` (false for the v3 family),
+`supports_language(model)` (`language_code`: Flash, Turbo, the v3 and v4 families; `eleven_multilingual_v2`
+infers it), `supports_speed(model)` (false for the v4 family, which takes only `stability` and
+`similarity_boost`; `speed` and `style` are then not sent) and `supports_tags(model)` (audio tags such as
+`[warmly]`: the v3 and v4 families).
 
 **Continuity and tuning per call.** `text_to_speech(..., language=, context=, tuning=)` accepts three
 optional, provider-neutral arguments that only the ElevenLabs path uses:
@@ -2179,12 +2202,13 @@ optional, provider-neutral arguments that only the ElevenLabs path uses:
 - `context=SpeechContext(previous_text, next_text, previous_request_ids, normalization)` is the
   neighbourhood of the passage. The adapter sends it as ElevenLabs request stitching: `previous_request_ids`
   (at most three, validated, taking precedence) else `previous_text`, `next_text` (each cut to 600
-  characters) and `apply_text_normalization`. `eleven_v3` has no stitching, so those fields are dropped
+  characters) and `apply_text_normalization`. The v3 family has no stitching, so those fields are dropped
   silently; a caller can always ask for the best continuity. The provider's `request-id` response header comes
   back in `VoiceResponse.metadata["request_id"]` (with `stitched`), which is what the next passage chains to.
   Ids are valid for about two hours; the chain itself (who owns it, how long it lives) is the host's job.
 - `language` becomes `language_code` for the models that take it (`eleven_flash_v2_5`, `eleven_turbo_v2_5`,
-  `eleven_v3`); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to 0.7-1.2.
+  the v3 and v4 families); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to
+  0.7-1.2 and not sent to the v4 family, which ignores it.
 - `tuning=SpeechTuning(model, stability, similarity_boost, style)` states preferred values for this call. A
   value the operator set explicitly (`VOICE_ELEVENLABS_*` in the environment, or a host override's model)
   always wins; `VoiceService.elevenlabs_explicit()` says which ones those are, so a host can show the source.

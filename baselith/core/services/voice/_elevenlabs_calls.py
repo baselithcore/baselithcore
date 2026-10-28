@@ -16,6 +16,11 @@ from typing import Any
 from baselith.core.observability.logging import get_logger
 from baselith.core.services.voice import _usage
 from baselith.core.services.voice._elevenlabs import ElevenLabsClient, ElevenLabsTarget
+from baselith.core.services.voice._elevenlabs_payload import (
+    content_type_of,
+    sample_rate_of,
+    valid_output_format,
+)
 from baselith.core.services.voice.errors import (
     VoiceError,
     VoiceInputError,
@@ -30,6 +35,7 @@ from baselith.core.services.voice.models import (
     VoiceOverrides,
     VoiceProbe,
     VoiceResponse,
+    VoiceStream,
 )
 
 logger = get_logger(__name__)
@@ -210,6 +216,71 @@ class ElevenLabsCalls:
                 "format": "mp3",
                 "request_id": result.request_id,
                 "stitched": result.stitched,
+            },
+        )
+
+    async def _tts_elevenlabs_stream(
+        self,
+        text: str,
+        voice: str | None,
+        speed: float,
+        *,
+        language: str | None = None,
+        context: SpeechContext | None = None,
+        tuning: SpeechTuning | None = None,
+        output_format: str | None = None,
+    ) -> VoiceStream:
+        """Synthesize with ElevenLabs on its streaming endpoint.
+
+        ``output_format`` is the provider's name for the audio (``pcm_24000``: 16-bit mono PCM
+        a player can schedule chunk by chunk); unset, ``VOICE_ELEVENLABS_OUTPUT_FORMAT``.
+        """
+        target = self._eleven_target()
+        cfg = self._config()
+        if not text.strip():
+            raise VoiceInputError("text is empty")
+        if len(text) > cfg.max_tts_chars:
+            raise VoiceLimitError("text exceeds the synthesis cap")
+        fmt = output_format or str(cfg.elevenlabs_output_format)
+        if not valid_output_format(fmt):
+            raise VoiceInputError("the output format is not valid")
+        voice_id = voice or self._eleven_default_voice()
+        tuned = self._eleven_tuned(tuning)
+        model = tuned["model"]
+        logger.info(
+            "tts_start",
+            provider="elevenlabs",
+            text_length=len(text),
+            model=model,
+            stitched=context is not None,
+            streamed=True,
+        )
+        stream = await self._eleven_client().speech_stream(
+            target,
+            text,
+            voice_id=voice_id,
+            model=model,
+            output_format=fmt,
+            stability=tuned["stability"],
+            similarity_boost=tuned["similarity_boost"],
+            style=tuned["style"],
+            speed=speed,
+            language=language,
+            context=context,
+        )
+        # Billed characters: known at the request, whatever the stream then does.
+        _usage.report_tts_characters(model, len(text))
+        return VoiceStream(
+            chunks=stream.chunks,
+            provider="elevenlabs",
+            model=model,
+            content_type=content_type_of(fmt),
+            sample_rate=sample_rate_of(fmt) if fmt.startswith("pcm_") else None,
+            metadata={
+                "voice": voice_id,
+                "format": fmt,
+                "request_id": stream.request_id,
+                "stitched": stream.stitched,
             },
         )
 

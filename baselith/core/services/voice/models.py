@@ -7,6 +7,7 @@ Data models for voice service requests and responses.
 from __future__ import annotations
 
 import base64
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -176,6 +177,44 @@ class VoiceResponse:
             str: Base64 representation of the audio bytes.
         """
         return base64.b64encode(self.audio_bytes).decode("utf-8")
+
+
+@dataclass
+class VoiceStream:
+    """Synthesised audio as it is generated (``VoiceService.text_to_speech_stream``).
+
+    The provider has already answered when this exists, so a refusal was raised before it;
+    ``chunks`` yields the audio under the response cap and raises a ``VoiceError`` on a
+    failure mid-stream. Iterate it to the end, or close it, so the connection is released.
+
+    Attributes:
+        chunks: The audio bytes, in order.
+        provider: Which provider spoke.
+        model: Which model spoke (``""`` when the provider does not say).
+        content_type: Media type of the audio (``audio/pcm`` for raw PCM, ``audio/mpeg``).
+        sample_rate: Sample rate of raw PCM audio (16-bit little-endian mono), else None.
+        metadata: Provider facts (``request_id`` and ``stitched`` for ElevenLabs).
+    """
+
+    chunks: AsyncIterator[bytes]
+    provider: str
+    model: str = ""
+    content_type: str = "audio/mpeg"
+    sample_rate: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    async def read(self) -> bytes:
+        """The whole audio, read to the end."""
+        out = bytearray()
+        async for chunk in self.chunks:
+            out += chunk
+        return bytes(out)
+
+    async def aclose(self) -> None:
+        """Stop reading; releases the provider connection."""
+        close = getattr(self.chunks, "aclose", None)
+        if close is not None:
+            await close()
 
 
 @dataclass

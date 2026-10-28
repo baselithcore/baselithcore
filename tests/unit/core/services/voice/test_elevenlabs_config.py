@@ -21,7 +21,7 @@ class TestConfig:
         cfg = self._env(monkeypatch)
         assert cfg.elevenlabs_base_url == "https://api.elevenlabs.io"
         assert cfg.elevenlabs_tts_model == "eleven_flash_v2_5"
-        assert cfg.elevenlabs_stt_model == "scribe_v1"
+        assert cfg.elevenlabs_stt_model == "scribe_v2"
         assert cfg.elevenlabs_output_format == "mp3_44100_128"
         assert cfg.elevenlabs_voice_id == VOICE
         assert cfg.provider == "openai"  # the sidecar default is untouched
