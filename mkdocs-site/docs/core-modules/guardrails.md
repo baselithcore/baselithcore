@@ -780,7 +780,7 @@ It catches:
 
 | Finding kind     | What it detects |
 | ---------------- | --------------- |
-| `zero_width`     | Zero-width / invisible characters (U+200B, U+200C, U+2060, BOM, …) used to hide text |
+| `zero_width`     | Zero-width / invisible characters (U+200B, U+200C, U+2060, BOM, …) used to hide text, and **Unicode tag characters** (U+E0000 block) and variation selectors (U+E0100 block), which spell ASCII invisibly ("ASCII smuggling"): the decoded text is scanned like visible text, so a smuggled directive is also reported as `ai_directive`, and `sanitize` removes the carriers. A subdivision-flag emoji (England, Scotland, Wales) is legitimate use of the same block and is left alone |
 | `bidi_override`  | Bidirectional text-direction override / isolate characters (text spoofing) |
 | `html_comment`   | HTML comments whose body reads as an agent instruction |
 | `hidden_css`     | CSS that visually hides text while keeping it in the source (`display:none`, `font-size:0`, white-on-white, off-screen) |
@@ -815,11 +815,11 @@ Indirect injections rarely say "ignore previous instructions" any more; they tal
 | Precedence | a step the agent *must* take before it answers the user |
 | Concealment | keep it from the user; text the user cannot see |
 | Role markup | a closing `tool_result`, an opening `system_message` or `assistant_instructions` tag, ChatML tokens |
-| Encoded lure | decode this base64 / hex block and follow it |
+| Encoded lure | decode this base64 / hex / ROT13 block and follow it, the encoding named before or after the instruction to decode |
 | Silent execution | perform it silently |
 | Carry-over | append something to the agent's next outgoing message |
 
-The families are written in English and Italian; the override families of every language in `multilingual.py` are matched too, so the scanner reads fetched content in the same languages `InputGuard` reads the prompt in. Findings are reported as `ai_directive`, at most five phrases per scan. A bare mention of "system prompt" is no longer a finding: only directive forms ("override the system prompt", "System prompt:") are, because documentation about prompts is ordinary content.
+The families are written in English and Italian; the override families of every language in `multilingual.py` are matched too, so the scanner reads fetched content in the same languages `InputGuard` reads the prompt in. Findings are reported as `ai_directive`, at most five phrases per scan. The patterns span whitespace, so scan the text the model reads: a tool result serialized as JSON turns a line break into the two characters `\n` and would hide a directive split over two lines (resolve the JSON first and scan its string values). A bare mention of "system prompt" is no longer a finding: only directive forms ("override the system prompt", "System prompt:") are, because documentation about prompts is ordinary content.
 
 Benign sentences that must stay clean (business mail, documentation about assistants and encodings, support macros, in both languages) are pinned in `tests/unit/core/guardrails/test_indirect_agent_directives.py`, next to positive cases worded independently of any one payload set. The scanner is still a pattern matcher: an adaptive attacker rewrites around fixed phrases, so treat it as one layer, not the boundary.
 

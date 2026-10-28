@@ -1031,6 +1031,42 @@ cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
 the plugin's *default* provider/model; explicit per-call/per-role overrides
 inside the plugin remain the plugin's choice.
 
+#### Endpoints for clients that speak the wire protocol directly
+
+`api_base` above is `None` for a hosted provider, because an SDK fills in its
+own default. A component with no SDK at all — it talks HTTP itself because it
+must see the provider's answer verbatim, like an evaluation bench recording raw
+reasoning — has nothing to fill that gap, and copying the public API hosts into
+a plugin is the second path to a provider that `check_no_plugin_llm_keys.py`
+forbids. `direct_endpoint` resolves every provider in one place:
+
+```python
+from baselith.core.config import get_llm_config
+from baselith.core.services.llm import direct_endpoint
+from baselith.core.services.llm.runtime import api_key_for
+
+config = get_llm_config()
+endpoint = direct_endpoint(config, "vllm", "qwen")   # None ⇒ not reachable here
+if endpoint is not None:
+    # endpoint.protocol: "chat_completions" or "anthropic_messages"
+    # endpoint.base_url: ".../v1" root, or the Anthropic API root
+    key = api_key_for(config, endpoint.provider)     # read at call time
+```
+
+| Provider | `base_url` | Protocol |
+| --- | --- | --- |
+| `openai` | `LLM_API_BASE` when OpenAI is the default provider, else the public API | `chat_completions` |
+| `anthropic` | `LLM_API_BASE` when Anthropic is the default provider, else the public API; `None` on `bedrock`/`vertex` | `anthropic_messages` |
+| `gemini` | Gemini's OpenAI-compatible endpoint (the native SDK base is never used) | `chat_completions` |
+| `huggingface` | The Inference Providers router | `chat_completions` |
+| `ollama` | `ollama_root(config)` + `/v1`, resolved like `api_base_for` (default `http://localhost:11434`) | `chat_completions` |
+| `vllm` | The server serving `model` among `LLM_VLLM_ENDPOINTS` (same registry as the provider), else the single server; `None` when none is configured | `chat_completions` |
+
+The answer never carries a credential and never comes from a caller: the caller
+picks a provider id from `SUPPORTED_PROVIDERS` and, for vLLM, a model the
+configured servers are asked about. With several vLLM servers the call blocks
+on their catalogs (cached), so run it off the event loop on a request path.
+
 #### Named LLM scopes (per-pipeline governance)
 
 A plugin with more than one distinct LLM pipeline can expose each for

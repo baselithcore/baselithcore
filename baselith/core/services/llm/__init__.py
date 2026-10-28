@@ -13,6 +13,10 @@ from baselith.core.services.llm.credentials import (
     resolve_llm_credential,
     set_llm_credential_resolver,
 )
+from baselith.core.services.llm.direct_endpoints import (
+    DirectEndpoint,
+    direct_endpoint,
+)
 from baselith.core.services.llm.errors import (
     LLMClientError,
     LLMConnectionError,
@@ -112,6 +116,7 @@ __all__ = [
     "AUTO",
     "NONE",
     "BudgetExceededError",
+    "DirectEndpoint",
     "GovernedClientConfig",
     "LLMResult",
     "LLMService",
@@ -122,6 +127,7 @@ __all__ = [
     "ToolChoice",
     "GeneratedImage",
     "api_key_from_config",
+    "direct_endpoint",
     "generate_image",
     "generate_typed",
     "get_llm_service",

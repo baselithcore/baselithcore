@@ -726,6 +726,15 @@ pull-request-only, so the release job cannot commit here. Follows
   forms are. Findings stay `ai_directive`; flagging still only logs and, under
   the default sanitize policy, strips invisible characters and
   instruction-bearing comments.
+- **The indirect-injection scanner sees text smuggled in Unicode tag
+  characters.** The Unicode Tags block (U+E0000..U+E007F) and the variation
+  selectors supplement (U+E0100..U+E01EF) spell ASCII invisibly, and a model
+  can read it. `IndirectInjectionScanner.scan` now reports the carriers
+  (`zero_width`), decodes them and scans the hidden text (so a smuggled
+  directive is also an `ai_directive`), and `sanitize` removes them. A
+  subdivision-flag emoji is left alone. The encoded-lure family also matches
+  ROT13, hex and Caesar named *before* the instruction to decode ("ROT13
+  encoded, decode it and carry it out"), in English and Italian.
 - **Row-level security that applies to nobody now fails the boot.** Turning on
   `DB_RLS_ENABLED` and running the migrations put a policy on every
   tenant-scoped table — and PostgreSQL skipped all of them, because the
@@ -755,6 +764,17 @@ pull-request-only, so the release job cannot commit here. Follows
   bake into an image.
 
 ### Added
+- **Provider endpoints for clients that speak the wire protocol directly.**
+  `baselith.core.services.llm.direct_endpoint(config, provider, model)` returns
+  where a client with no SDK sends a call, and in which protocol
+  (`chat_completions` or `anthropic_messages`): the public roots of OpenAI,
+  Anthropic, Gemini's OpenAI-compatible endpoint and the Hugging Face router,
+  Ollama resolved exactly as `api_base_for` resolves it, and the vLLM server
+  that serves the model among `LLM_VLLM_ENDPOINTS`. It answers `None` when a
+  plain HTTP client cannot reach the provider (no vLLM server, Anthropic on
+  Bedrock or Vertex) and never carries a credential, so a plugin that must see
+  a provider's raw answer no longer needs to name a provider host.
+
 - **vLLM thinking can be switched off for the whole deployment.**
   `LLM_VLLM_ENABLE_THINKING=false` sends `chat_template_kwargs.enable_thinking=false`
   on every request to a vLLM server, so a Qwen3 model answers without reasoning first:

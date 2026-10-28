@@ -15,7 +15,8 @@ ordinary business text does not trip them:
 * **concealment** - keep the act from the user, or text the user cannot see;
 * **role markup** - closing ``tool_result`` / opening ``system`` or
   ``assistant_instructions`` tags, ChatML tokens;
-* **encoded lure** - decode a base64 / hex block and follow it;
+* **encoded lure** - decode a base64 / hex / ROT13 block and follow it, the
+  encoding named before or after the instruction to decode;
 * **silent execution** - perform it silently;
 * **carry-over** - append something to the agent's next outgoing message.
 
@@ -59,6 +60,9 @@ AGENT_DIRECTIVE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bdecode\s+(?:it|this|that|the\s+(?:block|text|string|message|following))\b"
         r"[^.\n]{0,40}\b(?:base64|hex|rot13)\b[^.\n]{0,40}"
         r"\b(?:follow|execute|obey|perform|carry\s+(?:it\s+)?out)\b",
+        r"\b(?:base64|hex(?:adecimal)?|rot13|caesar|cipher)\b"
+        r"[^.\n]{0,40}\bdecode\s+(?:it|this|that|the\s+(?:block|text|string|message))\b"
+        r"[^.\n]{0,40}\b(?:follow|execute|obey|perform|carry\s+(?:it\s+)?out)\b",
         r"\b(?:perform|execute|complete|do)\s+(?:it|this|that|them)\s+silently\b",
         r"\bsilently\s+(?:perform|execute|carry\s+out|complete)\b",
         r"\b(?:append|insert)\b[^.\n]{0,60}\bto\s+your\s+next\s+"
@@ -73,6 +77,8 @@ AGENT_DIRECTIVE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bsenza\s+(?:dirlo|avvisare|informare)\s+(?:all['’]\s*|l['’]\s*)?utente\b",
         r"\bdecodifica(?:lo|la|\s+(?:questo|questa|il\s+blocco|il\s+testo))\b"
         r"[^.\n]{0,40}\b(?:base64|esadecimale|hex)\b[^.\n]{0,40}\b(?:esegui|segui|applica)\b",
+        r"\b(?:base64|esadecimale|hex|rot13)\b[^.\n]{0,40}"
+        r"\bdecodific(?:alo|ala)\b[^.\n]{0,40}\b(?:esegui|segui|applica)\b",
         r"\b(?:eseguilo|eseguila|fallo)\s+in\s+silenzio\b",
     ),
 }
