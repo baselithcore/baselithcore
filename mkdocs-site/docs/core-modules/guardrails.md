@@ -44,6 +44,7 @@ baselith/core/guardrails/
 ├── output_guard.py     # OutputGuard, OutputFilterResult
 ├── moderation.py       # ModerationVerdict, OpenAIModerator, get_moderator
 ├── pii.py              # Optional NER redaction engine (PIIEngine, PresidioEngine)
+├── agent_directives.py # agent-directed phrasing inside fetched content (en, it + override families)
 └── indirect.py         # IndirectInjectionScanner, scan_external_content
 ```
 
@@ -783,7 +784,7 @@ It catches:
 | `bidi_override`  | Bidirectional text-direction override / isolate characters (text spoofing) |
 | `html_comment`   | HTML comments whose body reads as an agent instruction |
 | `hidden_css`     | CSS that visually hides text while keeping it in the source (`display:none`, `font-size:0`, white-on-white, off-screen) |
-| `ai_directive`   | Agent-directed phrases ("ignore all previous instructions", "forward … to …@…", `send_email`, …) |
+| `ai_directive`   | Agent-directed phrases: the classic override ("ignore all previous instructions", "forward … to …@…", `send_email`, …) and the phrasing of `agent_directives.py` (see below) |
 | `exfil_link`     | Zero-click exfiltration channels: a markdown *image* whose URL carries a query string (fetched by any renderer), or a markdown link whose query names a sensitive value (`secret=`, `token=`, `conversation=`, …) |
 
 ```python
@@ -803,6 +804,24 @@ clean = scanner.sanitize(fetched_html)
 
 !!! tip "Where to run it"
     Run the scanner on **every** web page, email, or document the agent ingests via a tool — that is where indirect injection lives. The direct-input `InputGuard` will not catch these because it scans the user prompt, not the fetched data.
+
+### Agent-directed phrasing (`agent_directives.py`)
+
+Indirect injections rarely say "ignore previous instructions" any more; they talk to the agent the way an operator would. `agent_directives.py` carries the families a human reader is never the audience of, each anchored to the agent or to the user it serves so ordinary business text stays clean:
+
+| Family | Example shape |
+| --- | --- |
+| Addressing | a note, message or instruction *for the AI / LLM* |
+| Precedence | a step the agent *must* take before it answers the user |
+| Concealment | keep it from the user; text the user cannot see |
+| Role markup | a closing `tool_result`, an opening `system_message` or `assistant_instructions` tag, ChatML tokens |
+| Encoded lure | decode this base64 / hex block and follow it |
+| Silent execution | perform it silently |
+| Carry-over | append something to the agent's next outgoing message |
+
+The families are written in English and Italian; the override families of every language in `multilingual.py` are matched too, so the scanner reads fetched content in the same languages `InputGuard` reads the prompt in. Findings are reported as `ai_directive`, at most five phrases per scan. A bare mention of "system prompt" is no longer a finding: only directive forms ("override the system prompt", "System prompt:") are, because documentation about prompts is ordinary content.
+
+Benign sentences that must stay clean (business mail, documentation about assistants and encodings, support macros, in both languages) are pinned in `tests/unit/core/guardrails/test_indirect_agent_directives.py`, next to positive cases worded independently of any one payload set. The scanner is still a pattern matcher: an adaptive attacker rewrites around fixed phrases, so treat it as one layer, not the boundary.
 
 ### `scan_external_content` — the ingestion-boundary helper
 

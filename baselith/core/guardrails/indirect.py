@@ -11,6 +11,12 @@ This module scans any blob of *untrusted external content* before it enters
 the model's context window. It is detection-first and additive: callers run
 ``IndirectInjectionScanner.scan(...)`` on fetched content and decide whether
 to block, redact (``sanitize``), or flag for review.
+
+Agent-directed phrasing beyond the classic override ("ignore previous
+instructions") - notes for the AI, steps to take before answering the user,
+concealment from the user, fake role markup, decode-and-follow lures, in
+English, Italian and the override families of every language the guards
+carry - comes from :mod:`baselith.core.guardrails.agent_directives`.
 """
 
 from __future__ import annotations
@@ -22,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from baselith.core.observability.logging import get_logger
+
+from .agent_directives import agent_directive_matches
 
 logger = get_logger(__name__)
 
@@ -98,7 +106,10 @@ _AI_DIRECTIVE_PATTERNS = [
     r"forget\s+(everything|all|your)\s+(instructions?|training)",
     r"new\s+(system\s+)?instructions?\s*:",
     r"you\s+are\s+now\s+(a|an|the)",
-    r"system\s+prompt",
+    # Directive forms only: a page that merely talks about system prompts is
+    # ordinary documentation, not an instruction to the agent.
+    r"(override|replace|update|ignore|reveal|print)\s+(the\s+|your\s+)?system\s+prompt",
+    r"system\s+prompt\s*(override|update)?\s*:",
     r"\bAI\b[^.\n]{0,40}\b(must|should|forward|send|execute|run)\b",
     r"forward\s+.{0,40}\bto\s+\S+@\S+",
     r"\bsend_email\b|\bexec\b|\bsubprocess\b",
@@ -186,15 +197,20 @@ class IndirectInjectionScanner:
                 )
             )
         normalized = self._strip_invisibles(content)
+        phrases: list[str] = []
         for pattern in _COMPILED_AI_DIRECTIVES:
             match = pattern.search(normalized)
             if match:
-                findings.append(
-                    IndirectFinding(
-                        IndirectFindingKind.AI_DIRECTIVE,
-                        f"agent-directed phrase: {match.group(0)[:80]!r}",
-                    )
-                )
+                phrases.append(match.group(0)[:80])
+        for phrase in agent_directive_matches(normalized):
+            if phrase not in phrases:
+                phrases.append(phrase)
+        findings.extend(
+            IndirectFinding(
+                IndirectFindingKind.AI_DIRECTIVE, f"agent-directed phrase: {phrase!r}"
+            )
+            for phrase in phrases
+        )
 
         if findings:
             logger.warning(
@@ -230,7 +246,9 @@ class IndirectInjectionScanner:
     def _looks_like_directive(text: str) -> bool:
         """Heuristic: does a comment body read as an agent instruction?"""
         normalized = unicodedata.normalize("NFKC", text)
-        return any(p.search(normalized) for p in _COMPILED_AI_DIRECTIVES)
+        return any(p.search(normalized) for p in _COMPILED_AI_DIRECTIVES) or bool(
+            agent_directive_matches(normalized)
+        )
 
 
 # Shared stateless scanner; reused across ingestion boundaries to avoid

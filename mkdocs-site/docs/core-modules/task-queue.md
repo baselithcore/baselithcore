@@ -266,8 +266,15 @@ tracker.mark_completed(job_id, result={"chunks": 42})
 tracker.mark_failed(job_id, error="boom")
 ```
 
-`TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`,
-`FAILED`, `CANCELLED`.
+`TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `RETRYING`,
+`COMPLETED`, `FAILED`, `CANCELLED`.
+
+!!! warning "Pass `result` and `message` by keyword"
+    `mark_completed(task_id, result=None, message="Task completed")` takes the
+    **result before the message**. A positional message such as
+    `mark_completed(job_id, "done", result=data)` binds `"done"` to `result` and
+    raises `TypeError: got multiple values for argument 'result'` after the job
+    has already succeeded. Write `mark_completed(job_id, result=data, message="done")`.
 
 ### Tenant ownership
 

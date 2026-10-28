@@ -98,8 +98,8 @@ async def notify_resumed_run(spec: dict[str, Any], result: dict[str, Any]) -> No
     await asyncio.to_thread(
         tracker.mark_completed,
         task_id,
-        "Agent run completed (resumed by recovery)",
         result=payload,
+        message="Agent run completed (resumed by recovery)",
     )
     await _emit(AGENT_COMPLETED_EVENT, {"task_id": task_id, **payload})
 
@@ -194,7 +194,7 @@ def run_agent_task(
         else:
             tracker.mark_failed(job_id, str(exc))
         raise
-    tracker.mark_completed(job_id, "Agent run completed", result=result)
+    tracker.mark_completed(job_id, result=result, message="Agent run completed")
     return result
 
 

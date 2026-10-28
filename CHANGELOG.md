@@ -712,6 +712,20 @@ pull-request-only, so the release job cannot commit here. Follows
 ## [Unreleased]
 
 ### Security
+- **The indirect-injection scanner reads agent-directed phrasing, not only
+  the classic override.** `IndirectInjectionScanner` (and so
+  `scan_external_content` on MCP results, tool output, chat context and
+  skills) now flags a note *for the AI*, a step the agent must take *before
+  answering the user*, a request to keep something *from the user*, fake role
+  markup (a closing `tool_result`, an opening `system_message`, ChatML
+  tokens), *decode-and-follow* lures and silent execution, in English and
+  Italian, plus the override families of every language `InputGuard` reads
+  (`baselith.core.guardrails.agent_directives`). Measured against an
+  eight-framing injection library, coverage went from one framing to eight.
+  A bare mention of "system prompt" is no longer a finding; only directive
+  forms are. Findings stay `ai_directive`; flagging still only logs and, under
+  the default sanitize policy, strips invisible characters and
+  instruction-bearing comments.
 - **Row-level security that applies to nobody now fails the boot.** Turning on
   `DB_RLS_ENABLED` and running the migrations put a policy on every
   tenant-scoped table — and PostgreSQL skipped all of them, because the
