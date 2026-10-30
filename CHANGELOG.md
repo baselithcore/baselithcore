@@ -711,6 +711,18 @@ pull-request-only, so the release job cannot commit here. Follows
 
 ## [Unreleased]
 
+### Fixed
+- **Usage a queue-worker job bills is no longer lost to per-plugin ledgers.** A
+  worker hosts no plugins, so a plugin's usage sink never ran there: a plugin
+  whose AI work happens in its background jobs showed no AI calls, no last use
+  and no cost on a dashboard, however much it had spent. The work horse now
+  collects the turns a job bills, tagged with the tenant, user and plugin the job
+  was enqueued under, and pushes them to a capped Redis outbox
+  (`baselith.core.services.llm.usage_outbox`); a process that runs sinks calls
+  `deliver_worker_usage()` to replay them under that identity. Bounded at
+  100,000 records and 14 days; `BASELITH_WORKER_USAGE_OUTBOX=false` turns it
+  off.
+
 ### Security
 - **The indirect-injection scanner reads agent-directed phrasing, not only
   the classic override.** `IndirectInjectionScanner` (and so

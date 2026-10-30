@@ -21,6 +21,11 @@ Two properties of this module are load-bearing and easy to lose:
   plugin pinned to one provider had its HTTP calls served by that provider
   and its background work by the deployment default — the same plugin
   answering from two different models, with nothing on screen to say so.
+* **What a job bills is handed off.** A worker hosts no plugins, so a plugin's
+  usage sink never runs in it: the usage a job billed (and so the per-plugin
+  cost a dashboard attributes) was lost. The work horse collects the turns the
+  job billed and pushes them to Redis before it exits; see
+  :mod:`baselith.core.services.llm.usage_outbox` for the other half.
 """
 
 import os
@@ -45,6 +50,7 @@ from baselith.core.context import (
     set_user_context,
 )
 from baselith.core.observability.logging import get_logger, redact_url_credentials
+from baselith.core.services.llm.usage_outbox import collect_job_usage
 from baselith.core.task_queue.trace_context import consumer_span
 
 logger = get_logger(__name__)
@@ -109,7 +115,7 @@ class TenantAwareWorker(Worker):
     def perform_job(self, job: Any, queue: Any) -> bool:
         """Wraps job execution with the context it was enqueued under.
 
-        Three things happen around ``super().perform_job``:
+        Four things happen around ``super().perform_job``:
 
         1. **Identity** — tenant, user, plugin and the plugin's pinned LLM
            policy are restored from the job's metadata; see :func:`_tenant_for`
@@ -117,7 +123,10 @@ class TenantAwareWorker(Worker):
         2. **Trace** — a ``CONSUMER`` span parented on the ``traceparent`` the
            enqueuer left in the metadata, so the job appears inside the trace
            that asked for it instead of starting an orphan.
-        3. **Teardown** — every context token is released in ``finally``, in
+        3. **Usage** — every turn the job bills is collected and handed off to
+           the outbox when it ends, whether it succeeded or raised; see
+           :mod:`baselith.core.services.llm.usage_outbox`.
+        4. **Teardown** — every context token is released in ``finally``, in
            reverse order, even when the job raises.
         """
         from baselith.core.context import reset_plugin_context, set_plugin_context
@@ -143,7 +152,10 @@ class TenantAwareWorker(Worker):
         )
         try:
             with system_scope or nullcontext():
-                with consumer_span(job, queue_name):
+                with (
+                    consumer_span(job, queue_name),
+                    collect_job_usage(getattr(self, "connection", None)),
+                ):
                     # RQ ships no py.typed, so the base method is `Any`.
                     performed: bool = super().perform_job(job, queue)
                     return performed

@@ -1270,6 +1270,33 @@ the call** — per-plugin and per-user attribution comes from that request's
 context, so a report made on a bare worker thread is filed as unattributable
 unless the spawn carries the caller's context across (`contextvars.copy_context`).
 
+#### Usage billed in a queue worker
+
+A queue worker hosts no plugins, so a sink a plugin registers never runs in it:
+whatever a job bills (a plugin calling the funnel from its job, or a model
+measured outside it and reported with `report_external_usage`) was invisible to
+every per-plugin ledger, and a plugin whose AI work runs in jobs read as having
+spent nothing. `baselith.core.services.llm.usage_outbox` hands that usage to the
+process that does run sinks, in two halves:
+
+- **Worker side.** `TenantAwareWorker.perform_job` wraps each job in
+  `collect_job_usage(connection)`. The work horse collects every billed turn,
+  with the tenant, user and plugin the job was enqueued under, and pushes them
+  to the Redis list `baselith:llm:usage_outbox` when the job ends, success or
+  failure, before the work horse exits (it leaves by `os._exit`, so anything
+  held only in memory would be lost). The list keeps at most 100,000 records and
+  expires after 14 days, so a deployment with no consumer cannot grow Redis.
+  `BASELITH_WORKER_USAGE_OUTBOX=false` turns the hand-off off.
+- **Consumer side.** A process that runs sinks calls
+  `deliver_worker_usage()` on a timer. It drains the list (one transaction, so
+  several processes share it and each turn is delivered once) and re-emits each
+  turn through the ordinary sink seam with the recorded tenant, user and plugin
+  bound, so a sink sees it as if the call had been made in-process.
+
+Nothing is priced or interpreted on the way: the record is the four-bucket
+`Usage` the funnel metered. A Redis failure at either end is logged and
+swallowed; usage is an observation and must never fail a job or a request.
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM

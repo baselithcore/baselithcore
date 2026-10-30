@@ -391,6 +391,20 @@ calling process becomes a `WorkerSupervisor` over `N` child workers:
   `socket_timeout` is left to RQ, which raises it to `dequeue_timeout + 10` so
   the blocking dequeue (BLPOP) is never cut short.
 
+### Usage a job bills
+
+A worker hosts no plugins, so a plugin's usage sink (the observer a per-plugin
+cost ledger subscribes with) never runs in it. `TenantAwareWorker.perform_job`
+therefore collects every LLM turn the job bills, with the tenant, user and plugin
+the job was enqueued under (`meta["plugin"]`), and pushes them to a capped Redis
+list (`baselith:llm:usage_outbox`: at most 100,000 records, expiring after 14
+days) when the job ends, success or failure, before the work horse exits. A
+process that runs sinks calls `deliver_worker_usage()` on a timer to replay them
+under that identity. Enqueue a plugin's job with `meta["plugin"]` set, or its
+usage arrives unattributed. `BASELITH_WORKER_USAGE_OUTBOX=false` turns the
+hand-off off at the workers; see
+[Services › Usage billed in a queue worker](services.md#usage-billed-in-a-queue-worker).
+
 ## Worker Monitoring
 
 `WorkerMonitor` (in `baselith.core.task_queue.monitor`) inspects RQ workers and queues.
