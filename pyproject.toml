@@ -66,9 +66,9 @@ dependencies = [
   "openai>=2.2.0,<3.0",
   "opentelemetry-api>=1.21.0",
   "opentelemetry-exporter-otlp>=1.21.0",
-  "opentelemetry-instrumentation-fastapi>=0.42b0",
-  "opentelemetry-instrumentation-httpx>=0.42b0",
-  "opentelemetry-instrumentation-redis>=0.42b0",
+  "opentelemetry-instrumentation-fastapi>=0.64b0",
+  "opentelemetry-instrumentation-httpx>=0.64b0",
+  "opentelemetry-instrumentation-redis>=0.64b0",
   "opentelemetry-sdk>=1.21.0",
   # Declared rather than left transitive. baselith/core/observability/otel.py spells the
   # resource attribute keys out as plain strings precisely so the *bootstrap*
