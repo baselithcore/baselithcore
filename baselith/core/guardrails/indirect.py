@@ -11,6 +11,12 @@ This module scans any blob of *untrusted external content* before it enters
 the model's context window. It is detection-first and additive: callers run
 ``IndirectInjectionScanner.scan(...)`` on fetched content and decide whether
 to block, redact (``sanitize``), or flag for review.
+
+Agent-directed phrasing beyond the classic override ("ignore previous
+instructions") - notes for the AI, steps to take before answering the user,
+concealment from the user, fake role markup, decode-and-follow lures, in
+English, Italian and the override families of every language the guards
+carry - comes from :mod:`baselith.core.guardrails.agent_directives`.
 """
 
 from __future__ import annotations
@@ -22,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from baselith.core.observability.logging import get_logger
+
+from .agent_directives import agent_directive_matches
 
 logger = get_logger(__name__)
 
@@ -75,6 +83,20 @@ _BIDI_CHARS = "".join(
     chr(cp) for cp in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
 )
 
+# Unicode Tags block, U+E0000..U+E007F: each tag character mirrors one ASCII
+# character (``chr(0xE0000 + ord(c))``), renders as nothing in a browser or an
+# editor, and is read by many models ("ASCII smuggling"). The variation
+# selectors supplement, U+E0100..U+E01EF, is the second invisible carrier.
+# Written as escapes so the source stays pure ASCII.
+_TAG_CLASS = "[\\U000E0000-\\U000E007F\\U000E0100-\\U000E01EF]"
+# A subdivision flag (England, Scotland, Wales) is legitimate content that
+# really is a black flag followed by tag characters and a cancel tag.
+_FLAG_SEQUENCE = "\\U0001F3F4[\\U000E0061-\\U000E007A]{2,7}\\U000E007F"
+_TAG_CHARS_RE = re.compile(_TAG_CLASS)
+_FLAG_OR_TAG_RE = re.compile(f"({_FLAG_SEQUENCE})|{_TAG_CLASS}")
+_TAG_BASE = 0xE0000
+_TAG_PRINTABLE = range(_TAG_BASE + 0x20, _TAG_BASE + 0x7F)
+
 _ZERO_WIDTH_RE = re.compile(f"[{_ZERO_WIDTH_CHARS}]")
 _BIDI_RE = re.compile(f"[{_BIDI_CHARS}]")
 _HTML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.DOTALL)
@@ -98,7 +120,10 @@ _AI_DIRECTIVE_PATTERNS = [
     r"forget\s+(everything|all|your)\s+(instructions?|training)",
     r"new\s+(system\s+)?instructions?\s*:",
     r"you\s+are\s+now\s+(a|an|the)",
-    r"system\s+prompt",
+    # Directive forms only: a page that merely talks about system prompts is
+    # ordinary documentation, not an instruction to the agent.
+    r"(override|replace|update|ignore|reveal|print)\s+(the\s+|your\s+)?system\s+prompt",
+    r"system\s+prompt\s*(override|update)?\s*:",
     r"\bAI\b[^.\n]{0,40}\b(must|should|forward|send|execute|run)\b",
     r"forward\s+.{0,40}\bto\s+\S+@\S+",
     r"\bsend_email\b|\bexec\b|\bsubprocess\b",
@@ -151,6 +176,18 @@ class IndirectInjectionScanner:
                     f"{len(zw)} zero-width/invisible character(s)",
                 )
             )
+        smuggled = _FLAG_OR_TAG_RE.sub(
+            lambda m: "" if m.group(1) else m.group(0), content
+        )
+        hidden = self._decode_tag_text(smuggled)
+        tags = _TAG_CHARS_RE.findall(smuggled)
+        if tags:
+            findings.append(
+                IndirectFinding(
+                    IndirectFindingKind.ZERO_WIDTH,
+                    f"{len(tags)} invisible Unicode tag character(s)",
+                )
+            )
 
         if _BIDI_RE.search(content):
             findings.append(
@@ -186,15 +223,22 @@ class IndirectInjectionScanner:
                 )
             )
         normalized = self._strip_invisibles(content)
+        if hidden:  # what the smuggled text says is scanned like visible text
+            normalized = f"{normalized}\n{hidden}"
+        phrases: list[str] = []
         for pattern in _COMPILED_AI_DIRECTIVES:
             match = pattern.search(normalized)
             if match:
-                findings.append(
-                    IndirectFinding(
-                        IndirectFindingKind.AI_DIRECTIVE,
-                        f"agent-directed phrase: {match.group(0)[:80]!r}",
-                    )
-                )
+                phrases.append(match.group(0)[:80])
+        for phrase in agent_directive_matches(normalized):
+            if phrase not in phrases:
+                phrases.append(phrase)
+        findings.extend(
+            IndirectFinding(
+                IndirectFindingKind.AI_DIRECTIVE, f"agent-directed phrase: {phrase!r}"
+            )
+            for phrase in phrases
+        )
 
         if findings:
             logger.warning(
@@ -211,7 +255,8 @@ class IndirectInjectionScanner:
         """
         Return a neutralized copy of ``content``.
 
-        Strips zero-width / bidi characters and removes HTML comments so the
+        Strips zero-width / bidi / Unicode tag characters and removes HTML
+        comments so the
         remaining visible text is what a human reader would actually see.
         Does not rewrite visible directive phrases — blocking those is a
         caller policy decision based on ``scan``.
@@ -222,15 +267,25 @@ class IndirectInjectionScanner:
 
     @staticmethod
     def _strip_invisibles(content: str) -> str:
-        """Remove zero-width and bidi-override characters."""
+        """Remove zero-width, bidi-override and Unicode tag characters."""
         cleaned = _ZERO_WIDTH_RE.sub("", content)
+        cleaned = _FLAG_OR_TAG_RE.sub(lambda m: m.group(1) or "", cleaned)
         return _BIDI_RE.sub("", cleaned)
+
+    @staticmethod
+    def _decode_tag_text(content: str) -> str:
+        """The ASCII text a run of Unicode tag characters spells, if any."""
+        return "".join(
+            chr(ord(ch) - _TAG_BASE) for ch in content if ord(ch) in _TAG_PRINTABLE
+        )
 
     @staticmethod
     def _looks_like_directive(text: str) -> bool:
         """Heuristic: does a comment body read as an agent instruction?"""
         normalized = unicodedata.normalize("NFKC", text)
-        return any(p.search(normalized) for p in _COMPILED_AI_DIRECTIVES)
+        return any(p.search(normalized) for p in _COMPILED_AI_DIRECTIVES) or bool(
+            agent_directive_matches(normalized)
+        )
 
 
 # Shared stateless scanner; reused across ingestion boundaries to avoid

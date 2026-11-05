@@ -686,6 +686,14 @@ server executes a different body value is the confused deputy this closes.
 Integers compare numerically, and a parameter absent from the arguments must
 carry no header.
 
+## Workflows as tools
+
+A [catalog workflow](workflow-catalog.md#mcp-tools) that sets
+`metadata.mcp.expose: true` is registered as the tool `workflow.<id>` and kept
+in step as the catalog changes. Its autonomy category defaults to
+`destructive`, so it stays behind the server's approval gate until its author
+declares what it does.
+
 ## Concurrency, cancellation and progress
 
 `run_stdio()` serves each request as its own task via `RequestDispatcher`

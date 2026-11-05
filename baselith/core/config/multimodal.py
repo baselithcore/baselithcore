@@ -215,14 +215,18 @@ class VoiceConfig(AliasedSettings):
         ),
         description=(
             "ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency "
-            "and half the credit cost, multilingual (Italian included), which suits a voice "
-            "assistant that speaks sentence by sentence. eleven_multilingual_v2 trades "
-            "latency for richer prosody; eleven_v3 is the most expressive."
+            "and half the credit cost, multilingual (Italian included). eleven_v4_turbo is "
+            "the vendor's choice for conversational assistants (expressive, about 100 ms); "
+            "eleven_v4 is its studio-quality sibling; eleven_multilingual_v2 and eleven_v3 "
+            "are the previous generation. A host's preset may choose per call."
         ),
     )
     elevenlabs_stt_model: str = Field(
-        default="scribe_v1",
-        description="ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL).",
+        default="scribe_v2",
+        description=(
+            "ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL); "
+            "scribe_v2 is the current one, scribe_v1 still works."
+        ),
     )
     elevenlabs_voice_id: str = Field(
         default="21m00Tcm4TlvDq8ikWAM",
@@ -242,8 +246,10 @@ class VoiceConfig(AliasedSettings):
     ] = Field(
         default="mp3_44100_128",
         description=(
-            "ElevenLabs output_format (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is "
-            "what browsers play; mp3_44100_192 needs a paid tier."
+            "ElevenLabs output_format of a whole-body synthesis (VOICE_ELEVENLABS_OUTPUT_FORMAT). "
+            "MP3 only: that is what browsers play; mp3_44100_192 needs a paid tier. A streamed "
+            "synthesis names its own format per call (pcm_24000 for a player that schedules "
+            "chunks as they arrive)."
         ),
     )
     elevenlabs_stability: float = Field(

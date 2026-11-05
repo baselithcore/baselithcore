@@ -23,6 +23,9 @@ Current services:
   of its release mirrors are reported.
 * **Update boot report** (``UPDATE_APPLY_ENABLED``) — each worker records the
   plugins it loaded so the one-click updater can verify a restart.
+* **Workflows** (``WORKFLOWS_ENABLED``) - the workflow catalog, its cron
+  scheduler and the MCP tools of exposed workflows
+  (:class:`baselith.core.workflows.service.WorkflowService`).
 * **Online evaluation** (``EVAL_ENABLED`` + ``EVAL_ONLINE_ENABLED``) — the
   sampled evaluation of production flows
   (:class:`baselith.core.evaluation.EvaluationService`), started through the
@@ -96,6 +99,7 @@ async def start_runtime_services(app: Any) -> None:
 
     await _start_webhook_outbox(app)
     await _start_online_evaluation(app)
+    await _start_workflows(app)
     await _write_update_boot_report()
 
 
@@ -113,6 +117,16 @@ async def _start_webhook_outbox(app: Any) -> None:
         await app.state.webhook_outbox_relay.start()
     except Exception as exc:
         logger.warning("webhook_outbox_start_failed: %s", exc)
+
+
+async def _start_workflows(app: Any) -> None:
+    """Start the workflow catalog, scheduler and MCP sync when enabled."""
+    try:
+        from baselith.core.workflows.service import start_workflow_service
+
+        await start_workflow_service(app)
+    except Exception as exc:
+        logger.warning("workflow_service_start_failed: %s", exc)
 
 
 async def _start_online_evaluation(app: Any) -> None:
@@ -198,6 +212,13 @@ async def stop_runtime_services(app: Any) -> None:
             await evaluation.shutdown()
         except Exception as exc:
             logger.warning("evaluation_service_stop_failed: %s", exc)
+
+    try:
+        from baselith.core.workflows.service import stop_workflow_service
+
+        await stop_workflow_service(app)
+    except Exception as exc:
+        logger.warning("workflow_service_stop_failed: %s", exc)
 
     plugin_updates = getattr(app.state, "plugin_updates", None)
     if plugin_updates is not None:

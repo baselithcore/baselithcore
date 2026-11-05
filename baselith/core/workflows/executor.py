@@ -114,6 +114,7 @@ class WorkflowExecutor:
         max_steps: int = 1000,
         agents: dict[str, Any] | None = None,
         tools: dict[str, Callable[..., Any]] | None = None,
+        services: dict[str, Any] | None = None,
     ):
         """Initialize executor.
 
@@ -125,29 +126,25 @@ class WorkflowExecutor:
                 :class:`baselith.core.agent.Agent`).
             tools: Registry resolving TOOL nodes' ``tool_id`` to a callable
                 (sync or async) invoked with the last output.
+            services: Collaborators of the model and I/O nodes, all optional:
+                ``llm`` (an LLM service), ``retriever`` (async callable
+                ``(query, top_k=, collection=) -> list[dict]``),
+                ``http_credentials`` (``{name: {header: value}}`` for HTTP
+                nodes) and ``http_client`` (an ``httpx.AsyncClient``). Each
+                falls back to the framework default when absent.
         """
         self.max_steps = max_steps
         self._agents = agents or {}
         self._tools = tools or {}
+        self._services = services or {}
         self._handlers: dict[NodeType, NodeHandler] = {}
         self._setup_default_handlers()
 
     def _setup_default_handlers(self) -> None:
         """Setup default node type handlers (bodies in ``node_handlers``)."""
-        from functools import partial
+        from . import node_handlers
 
-        from . import node_handlers as h
-
-        self._handlers[NodeType.START] = h.handle_start
-        self._handlers[NodeType.END] = h.handle_end
-        self._handlers[NodeType.HUMAN] = h.handle_human
-        self._handlers[NodeType.LOOP] = h.handle_loop
-        self._handlers[NodeType.TRANSFORM] = h.handle_transform
-        self._handlers[NodeType.CONDITION] = h.handle_condition
-        self._handlers[NodeType.MERGE] = h.handle_merge
-        self._handlers[NodeType.SUBGRAPH] = partial(h.handle_subgraph, self)
-        self._handlers[NodeType.AGENT] = partial(h.handle_agent, self)
-        self._handlers[NodeType.TOOL] = partial(h.handle_tool, self)
+        node_handlers.install_defaults(self)
 
     def register_handler(self, node_type: NodeType, handler: NodeHandler) -> None:
         """
@@ -284,6 +281,12 @@ class WorkflowExecutor:
             if node.type == NodeType.CONDITION:
                 edge = self._pick_condition_edge(output, outgoing_edges)
                 node = workflow.get_node(edge.target_id) if edge else None
+            elif node.type == NodeType.CLASSIFIER:
+                from .nodes_ai import pick_class_edge
+
+                node = workflow.get_node(
+                    pick_class_edge(output, outgoing_edges).target_id
+                )
             elif node.type == NodeType.PARALLEL:
                 # Fan-out: each branch is its own iterative chain; continue
                 # from the convergence MERGE node (None when branches ran to

@@ -287,6 +287,9 @@ class TestCoverage:
             "doctor",
             "info",
             "plugin-updater",
+            # ``workflow run`` can reach the vector store through a RETRIEVE
+            # node, so the command stays in the fail-closed default.
+            "workflow",
         }
 
     def test_every_subcommand_exemption_names_a_scoped_command(self):

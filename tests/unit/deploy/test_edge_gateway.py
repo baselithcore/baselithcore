@@ -201,6 +201,19 @@ def test_metrics_never_leave_through_the_edge() -> None:
     assert "proxy_pass" not in location
 
 
+def test_synchronous_workflow_runs_get_the_run_timeout() -> None:
+    """``POST /workflows/{id}/run`` and ``/trigger`` block until the run is
+    done (up to WORKFLOWS_RUN_TIMEOUT_SECONDS, 300s default); under
+    ``location /`` the 60s read timeout cut them into a 504, and a trigger
+    cannot be retried because its signature is accepted once."""
+    location = _block(
+        _code(_conf()), "location ~ ^(/v1)?/workflows/[^/]+/(run|trigger)$"
+    )
+    assert "proxy_read_timeout 300s;" in location
+    assert "limit_req zone=api_req" in location
+    assert "proxy_buffering off" not in location  # a JSON answer, not a stream
+
+
 def test_gateway_serves_its_own_liveness() -> None:
     assert "return 204;" in _block(_code(_conf()), "location = /__gateway/healthz")
 

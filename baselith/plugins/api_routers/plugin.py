@@ -13,7 +13,8 @@ class ApiRoutersPlugin(Plugin):
     mounting path (``get_routers``) so they attach at startup without the app
     factory taking a ``core -> plugins`` import: prompts, the WebSocket chat
     channel, the async-agent API, and — behind their feature flags — webhooks,
-    privacy, compliance, approvals, runs and the online-evaluation summary.
+    privacy, compliance, approvals, runs, the workflow catalog, the knowledge API and the
+    online-evaluation summary.
     Every API router is served under ``/v1`` and, deprecated, at its
     unprefixed path (:mod:`baselith.core.api.versioning`).
     """
@@ -111,6 +112,28 @@ class ApiRoutersPlugin(Plugin):
 
             routers.append(approvals_router)
             routers.append(runs_router)
+
+        from baselith.core.config.knowledge import get_knowledge_config
+
+        if get_knowledge_config().enabled:
+            from baselith.plugins.api_routers.routes.knowledge import (
+                router as knowledge_router,
+            )
+
+            routers.append(knowledge_router)
+
+        from baselith.core.config.workflows import get_workflows_config
+
+        if get_workflows_config().enabled:
+            from baselith.plugins.api_routers.routes.workflows import (
+                router as workflows_router,
+            )
+            from baselith.plugins.api_routers.routes.workflows import (
+                trigger_router as workflows_trigger_router,
+            )
+
+            routers.append(workflows_router)
+            routers.append(workflows_trigger_router)
 
         from baselith.core.config.evaluation import get_evaluation_config
 

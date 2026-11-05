@@ -266,8 +266,15 @@ tracker.mark_completed(job_id, result={"chunks": 42})
 tracker.mark_failed(job_id, error="boom")
 ```
 
-`TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`,
-`FAILED`, `CANCELLED`.
+`TaskStatus` is a `str` enum: `PENDING`, `QUEUED`, `RUNNING`, `RETRYING`,
+`COMPLETED`, `FAILED`, `CANCELLED`.
+
+!!! warning "Pass `result` and `message` by keyword"
+    `mark_completed(task_id, result=None, message="Task completed")` takes the
+    **result before the message**. A positional message such as
+    `mark_completed(job_id, "done", result=data)` binds `"done"` to `result` and
+    raises `TypeError: got multiple values for argument 'result'` after the job
+    has already succeeded. Write `mark_completed(job_id, result=data, message="done")`.
 
 ### Tenant ownership
 
@@ -383,6 +390,20 @@ calling process becomes a `WorkerSupervisor` over `N` child workers:
   task-queue `socket_connect_timeout` and `health_check_interval`. Its
   `socket_timeout` is left to RQ, which raises it to `dequeue_timeout + 10` so
   the blocking dequeue (BLPOP) is never cut short.
+
+### Usage a job bills
+
+A worker hosts no plugins, so a plugin's usage sink (the observer a per-plugin
+cost ledger subscribes with) never runs in it. `TenantAwareWorker.perform_job`
+therefore collects every LLM turn the job bills, with the tenant, user and plugin
+the job was enqueued under (`meta["plugin"]`), and pushes them to a capped Redis
+list (`baselith:llm:usage_outbox`: at most 100,000 records, expiring after 14
+days) when the job ends, success or failure, before the work horse exits. A
+process that runs sinks calls `deliver_worker_usage()` on a timer to replay them
+under that identity. Enqueue a plugin's job with `meta["plugin"]` set, or its
+usage arrives unattributed. `BASELITH_WORKER_USAGE_OUTBOX=false` turns the
+hand-off off at the workers; see
+[Services › Usage billed in a queue worker](services.md#usage-billed-in-a-queue-worker).
 
 ## Worker Monitoring
 

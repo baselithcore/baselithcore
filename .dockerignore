@@ -121,3 +121,28 @@ htmlcov/
 __pycache__/
 docs/
 examples/
+
+# Trees no stage COPYs. The whole context is tarred and uploaded before the
+# first instruction runs, so every entry here is pure transfer: the docs site
+# (49MB), setuptools' build/ output (14MB), the Backstage portal, demo media,
+# the SDK clients, CI and agent tooling, the evals corpora and the hypothesis
+# and superpowers caches (37MB of dotdirs). Measured with a `COPY . /ctx`
+# probe: 123MB of context before this block, under 20MB after. A tree that a
+# stage starts to COPY must come off this list in the same change.
+/mkdocs-site/
+/build/
+/backstage-portal/
+/media/
+/sdk/
+/scripts/
+/evals/
+/benchmarks/
+/grafana/
+/packages/
+/migrations/
+/logs/
+/.github/
+/.claude/
+/.hypothesis/
+/.superpowers/
+/.coverage*

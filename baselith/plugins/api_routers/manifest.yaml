@@ -1,9 +1,10 @@
 name: api-routers
-version: 0.3.1
+version: 0.4.0
 description: Opt-in HTTP routers mounted through the plugin contract - prompt catalog,
   WebSocket chat, async runs, and feature-gated webhooks, privacy (DSR), compliance,
-  approvals and run controls. The core chat and admin routers are mounted by the app
-  factory.
+  approvals, run controls, the workflow catalog (run, trigger, resume) and the
+  knowledge API (ingest, delete, hit testing). The core chat and admin routers are
+  mounted by the app factory.
 author: Baselith
 tags:
 - api
@@ -19,5 +20,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: 6c69248ea78781cca4a72bcedd448a082daac15005a6b99ac13d787e08637035
+integrity_sha256: 6f0b3188838b0880da81c82188c306f1d4a7c112dd4e773c1ee5d30688cd47fa
 hash_surface_version: 5

@@ -339,6 +339,27 @@ instead of succeeding.
 
 ---
 
+### Vector point ids are tenant-scoped
+
+A chunk's point id used to be derived from the document id and the chunk
+position only. The id is the point's primary key, and an upsert on an existing id
+replaces the stored payload, tenant included, so two tenants that used the same
+document id (a file name, an id a client chose) wrote over each other's chunks,
+and the later writer then owned them.
+
+The id now includes the tenant for every tenant other than `default`. The
+`default` tenant keeps the original derivation byte for byte, so a single-tenant
+deployment is unaffected and re-indexing lands on the points it already has.
+
+**What changes for a multi-tenant deployment:** chunks indexed before the upgrade
+keep their old ids. Re-indexing such a document writes a second copy under the
+new ids; delete the document first (`VectorStoreService.delete_document`, or
+`DELETE /knowledge/documents/{id}`), which removes both, and index it again.
+Documents that were never indexed under the same id by two tenants lost nothing
+and can simply be left alone.
+
+---
+
 ## Supply chain
 
 ### Hash surface V5 — the plugin manifest is now signed

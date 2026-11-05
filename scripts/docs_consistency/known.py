@@ -25,6 +25,8 @@ ROUTE_GATES = (
     "ENABLE_FEEDBACK",
     "ORCHESTRATOR_CHECKPOINT_ENABLED",
     "DOCS_ENABLED",
+    "WORKFLOWS_ENABLED",
+    "KNOWLEDGE_API_ENABLED",
 )
 
 LITERAL_SCAN = (
@@ -240,17 +242,26 @@ def known_routes(repo_root: Path) -> set[str] | None:
             module = importlib.import_module(module_name)
         except Exception:
             continue
-        router = getattr(module, "router", None)
-        if router is None:
-            continue
-        # Nested include_router() calls stay lazy on an APIRouter; including
-        # it into a throwaway app materialises every path with its prefix.
-        scratch = FastAPI()
-        try:
-            scratch.include_router(router)
-        except Exception:
-            continue
-        add_app(scratch)
+        # ``router`` is the module's main router; a module that serves two
+        # audiences (admin routes and a signed public one) exports the second
+        # as ``<name>_router``.
+        routers = [getattr(module, "router", None)] + [
+            value
+            for attr, value in vars(module).items()
+            if attr.endswith("_router") and type(value).__name__ == "APIRouter"
+        ]
+        for router in routers:
+            if router is None:
+                continue
+            # Nested include_router() calls stay lazy on an APIRouter;
+            # including it into a throwaway app materialises every path with
+            # its prefix.
+            scratch = FastAPI()
+            try:
+                scratch.include_router(router)
+            except Exception:
+                continue
+            add_app(scratch)
     return routes
 
 

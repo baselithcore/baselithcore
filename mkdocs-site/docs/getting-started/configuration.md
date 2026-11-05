@@ -373,6 +373,17 @@ Declared in `baselith.core.config.inference`.
 | `BASELITH_RERANK_TRUNCATE_PROMPT_TOKENS` | `int \| None` | *empty* | vLLM only (api='cohere'): ask the server to cut each query+passage pair to this many tokens, -1 = the model's maximum. TEI truncates by itself; vLLM otherwise answers 400 to an over-long pair. Leave empty for Cohere, Jina and other servers. |
 | `BASELITH_RERANK_URL` | `str \| None` | *empty* | Base URL of the TEI server (remote backend). |
 
+## Knowledge API configuration
+
+Declared in `baselith.core.config.knowledge`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `KNOWLEDGE_API_ENABLED` | `bool` | `False` | Master switch: mounts /knowledge (ingest, upload, delete, search). |
+| `KNOWLEDGE_COLLECTIONS` | `Annotated[tuple[str, ...], NoDecode]` | `()` | Collections a client may name besides the configured default one. A client that could name any collection could write into the ones that hold agent memory, or create new ones at will; the default collection is always available, everything else is opt-in here. |
+| `KNOWLEDGE_MAX_TEXT_CHARS` | `int` | `2000000` | Largest document text accepted, in characters, whether it was posted as text or extracted from a file (a small PDF can hold a lot of text). |
+| `KNOWLEDGE_MAX_UPLOAD_BYTES` | `int` | `10 * 1024 * 1024` | Largest upload accepted, in bytes. Checked while the body streams in, not after it has been buffered. |
+
 ## MCP Configuration
 
 Declared in `baselith.core.config.mcp`.
@@ -468,13 +479,13 @@ Declared in `baselith.core.config.multimodal`.
 | `VOICE_COMPAT_API_KEY` :material-key: | `SecretStr \| None` | *empty* | Optional bearer key for the OpenAI-compatible servers (most sidecars are keyless). |
 | `VOICE_ELEVENLABS_API_KEY` :material-key:<br>also accepts `ELEVENLABS_API_KEY` | `SecretStr \| None` | *empty* | Prefixed name first, bare vendor name as fallback — see VisionConfig. |
 | `VOICE_ELEVENLABS_BASE_URL` | `str` | `https://api.elevenlabs.io` | ElevenLabs API root (VOICE_ELEVENLABS_BASE_URL). https only; the egress guard allows exactly this host and follows no redirect. Change it for a data-residency or enterprise endpoint (e.g. `https://api.eu.residency.elevenlabs.io`). |
-| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `Literal['mp3_22050_32', 'mp3_24000_48', 'mp3_44100_32', 'mp3_44100_64', 'mp3_44100_96', 'mp3_44100_128', 'mp3_44100_192']` | `mp3_44100_128` | ElevenLabs output_format (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is what browsers play; mp3_44100_192 needs a paid tier. |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `Literal['mp3_22050_32', 'mp3_24000_48', 'mp3_44100_32', 'mp3_44100_64', 'mp3_44100_96', 'mp3_44100_128', 'mp3_44100_192']` | `mp3_44100_128` | ElevenLabs output_format of a whole-body synthesis (VOICE_ELEVENLABS_OUTPUT_FORMAT). MP3 only: that is what browsers play; mp3_44100_192 needs a paid tier. A streamed synthesis names its own format per call (pcm_24000 for a player that schedules chunks as they arrive). |
 | `VOICE_ELEVENLABS_RETRIES` | `int` | `2` | Retries after an HTTP 429 (bounded by the request deadline). |
 | `VOICE_ELEVENLABS_SIMILARITY_BOOST` | `float` | `0.75` | ElevenLabs similarity boost |
 | `VOICE_ELEVENLABS_STABILITY` | `float` | `0.5` | ElevenLabs voice stability |
-| `VOICE_ELEVENLABS_STT_MODEL` | `str` | `scribe_v1` | ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL). |
+| `VOICE_ELEVENLABS_STT_MODEL` | `str` | `scribe_v2` | ElevenLabs speech-to-text (Scribe) model (VOICE_ELEVENLABS_STT_MODEL); scribe_v2 is the current one, scribe_v1 still works. |
 | `VOICE_ELEVENLABS_STYLE` | `float` | `0.0` | ElevenLabs style exaggeration |
-| `VOICE_ELEVENLABS_TTS_MODEL`<br>also accepts `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_flash_v2_5` | ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency and half the credit cost, multilingual (Italian included), which suits a voice assistant that speaks sentence by sentence. eleven_multilingual_v2 trades latency for richer prosody; eleven_v3 is the most expressive. |
+| `VOICE_ELEVENLABS_TTS_MODEL`<br>also accepts `VOICE_ELEVENLABS_MODEL_ID` | `str` | `eleven_flash_v2_5` | ElevenLabs text-to-speech model. eleven_flash_v2_5 is the default: low latency and half the credit cost, multilingual (Italian included). eleven_v4_turbo is the vendor's choice for conversational assistants (expressive, about 100 ms); eleven_v4 is its studio-quality sibling; eleven_multilingual_v2 and eleven_v3 are the previous generation. A host's preset may choose per call. |
 | `VOICE_ELEVENLABS_VOICE_ID` | `str` | `21m00Tcm4TlvDq8ikWAM` | Default ElevenLabs voice id (VOICE_ELEVENLABS_VOICE_ID); the premade 'Rachel', which every account can use. |
 | `VOICE_EMBEDDING_MODEL` | `str` | `all-MiniLM-L6-v2` | Sentence-transformer model for semantic voice cache |
 | `VOICE_GOOGLE_API_KEY` :material-key:<br>also accepts `GOOGLE_API_KEY` | `SecretStr \| None` | *empty* |  |
@@ -639,6 +650,9 @@ Declared in `baselith.core.config.processing`.
 | `MINERU_SERVER_URL` | `str \| None` | *empty* | Remote inference server for the *-http-client backends (e.g. `http://mineru:30000`). |
 | `MINERU_TABLE_ENABLE` | `bool` | `True` |  |
 | `MINERU_TIMEOUT_SECONDS` | `float` | `300.0` |  |
+| `NOTION_API_TOKEN` :material-key: | `SecretStr \| None` | *empty* | The Notion document source is inert until a token is set. The token is an integration secret: it can read every page shared with that integration. |
+| `NOTION_MAX_PAGES` | `int` | `200` |  |
+| `NOTION_ROOT_PAGE_IDS` | `Annotated[tuple[str, ...], NoDecode]` | `()` | Pages to index with their sub-pages. Empty = every page shared with the integration. |
 | `PDF_OCR_BACKEND` | `Literal['auto', 'mineru', 'tesseract']` | `mineru` | OCR backend. MinerU is the default and needs the extra (pip install -e ".[mineru]") — heavy, and it downloads models on first use, so pre-fetch with `mineru-models-download`. Selected but not installed, OCR falls back to tesseract automatically; set 'tesseract' to avoid pulling the mineru/transformers stack at all. |
 | `SPACY_FALLBACK_LANGUAGE` | `str \| None` | *empty* |  |
 | `SPACY_MODEL` | `str` | `en_core_web_sm` |  |
@@ -1036,6 +1050,25 @@ Declared in `baselith.core.config.webhooks`.
 | `WEBHOOK_STORE` | `Literal['memory', 'postgres']` | `memory` | Where endpoints and delivery records live. "memory" is process-local: lost on restart and invisible to other replicas and to the RQ worker. "postgres" needs migration 011 applied. |
 | `WEBHOOK_TIMEOUT_SECONDS` | `float` | `10.0` | Per-delivery HTTP timeout (seconds). |
 
+## Workflow catalog and runtime configuration
+
+Declared in `baselith.core.config.workflows`.
+
+| Variable | Type | Default | Description |
+| --- | --- | --- | --- |
+| `WORKFLOWS_CODE_ENABLED` | `bool` | `False` | Allow CODE nodes, which run a Python snippet in the sandbox (Docker or microVM). Off by default: a definition can be uploaded through the API, so a node that runs code turns "may save a workflow" into "may run code". |
+| `WORKFLOWS_DIR` | `str \| None` | *empty* | Directory of `*.yaml` / `*.yml` / `*.json` definitions loaded at startup. Definitions saved through the API are written back here; without it the catalog is memory-only and an API upload is lost on restart. |
+| `WORKFLOWS_ENABLED` | `bool` | `False` | Master switch: loads the catalog, mounts the /workflows router and registers opted-in workflows as MCP tools. |
+| `WORKFLOWS_HTTP_ALLOW_INTERNAL` | `bool` | `False` | SSRF: HTTP nodes reject loopback/private/link-local/reserved targets by default. Enable only for trusted local development. |
+| `WORKFLOWS_HTTP_CREDENTIALS` :material-key: | `SecretStr \| None` | *empty* | Credentials HTTP nodes may name (`config['credential']`), as one JSON object: {"crm": {"hosts": ["api.crm.example"], "headers": {"Authorization": "Bearer ..."}}}. A definition only ever carries the name; the secret stays here, wrapped so it never reaches a repr, a log line or an exported definition. A credential is sent only to the hosts it lists, and only over https, because the URL of a node is often built from data the workflow does not control. An entry without hosts is dropped, never widened. |
+| `WORKFLOWS_MAX_CONCURRENT_RUNS` | `int` | `8` | Runs in flight at once in this process; further starts answer 429. |
+| `WORKFLOWS_RUN_HISTORY_SIZE` | `int` | `500` | Finished runs kept for GET /workflows/runs/{id} (process-local, oldest evicted first). |
+| `WORKFLOWS_RUN_TIMEOUT_SECONDS` | `float` | `300.0` | Wall-clock limit of one run started through the API, a trigger or MCP. |
+| `WORKFLOWS_SCHEDULER_ENABLED` | `bool` | `False` | Run catalog workflows that carry a cron `schedule` inside this process. Leave it off on all but one replica, or each replica fires the schedule. |
+| `WORKFLOWS_SCHEDULER_INTERVAL_SECONDS` | `float` | `30.0` |  |
+| `WORKFLOWS_TRIGGER_SECRET` :material-key: | `SecretStr \| None` | *empty* | Shared secret of the inbound trigger (POST /workflows/{id}/trigger). Unset means the trigger answers 503: an unsigned trigger is never served. |
+| `WORKFLOWS_TRIGGER_TOLERANCE_SECONDS` | `int` | `300` | Oldest X-Baselith-Signature timestamp a trigger accepts, in seconds (replay window). A repeated signature inside the window is refused too. |
+
 ## World-model configuration (`WORLD_MODEL_`)
 
 Declared in `baselith.core.config.world_model`.
@@ -1074,4 +1107,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-726 settings documented.
+745 settings documented.

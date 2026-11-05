@@ -221,7 +221,8 @@ override it per call, or `0` to disable the freshness check.
 ## Delivery, retries & dead-lettering
 
 - Each delivery is attempted up to `WEBHOOK_MAX_ATTEMPTS` times with exponential
-  backoff + jitter. Non-2xx responses and network errors are retried.
+  backoff + jitter. Non-2xx responses and network errors are retried. The jitter is drawn
+  from `random.SystemRandom`, so no scanner exemption is needed.
 - A delivery that exhausts its attempts is stored in the `FAILED` state — the
   dead-letter equivalent — and can be replayed via the API or
   `service.replay_delivery(delivery_id)`.
