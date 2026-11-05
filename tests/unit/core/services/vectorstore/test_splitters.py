@@ -1,5 +1,6 @@
 """Unit tests for document-aware splitters (markdown, python, selector)."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,23 @@ class TestMarkdownHeaderSplitter:
     def test_empty_input(self):
         assert MarkdownHeaderSplitter().split("") == []
         assert MarkdownHeaderSplitter().split("   \n \n") == []
+
+    def test_closing_hashes_are_not_part_of_the_title(self):
+        chunks = MarkdownHeaderSplitter().split("## Section ##\n\nBody text.\n")
+
+        assert [c.metadata["headings"] for c in chunks] == [["Section"]]
+
+    def test_long_whitespace_runs_stay_linear(self):
+        # A heading-shaped line with a long run of spaces used to backtrack
+        # quadratically (py/polynomial-redos); it must stay near-instant.
+        hostile = "# " + " " * 50_000 + "x" + " " * 50_000 + "\n\nBody.\n"
+        blank = "#" + " " * 100_000 + "\n"
+
+        started = time.perf_counter()
+        MarkdownHeaderSplitter().split(hostile)
+        MarkdownHeaderSplitter().split(blank)
+
+        assert time.perf_counter() - started < 1.0
 
 
 PYTHON_SOURCE = '''"""Module docstring."""
