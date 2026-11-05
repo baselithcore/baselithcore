@@ -157,6 +157,11 @@ def _http_credentials(config: WorkflowsConfig) -> dict[str, dict[str, Any]]:
         ):
             valid[str(name)] = {"hosts": hosts, "headers": headers}
         else:
+            # `name` is the operator-chosen label of the entry (the key in
+            # WORKFLOWS_HTTP_CREDENTIALS), never a header value or a secret; the
+            # rule matches on the word "credential" in the event name. The
+            # `hosts` and `headers` contents are deliberately not logged.
+            # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             logger.error(
                 "workflows_http_credential_dropped name=%s: it needs a non-empty "
                 "'hosts' list and a non-empty 'headers' mapping of strings",
