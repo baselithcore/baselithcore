@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from baselith.core.config.workflows import WorkflowsConfig
+from baselith.core.orchestration.checkpoint import InMemoryCheckpointStore
 from baselith.core.webhooks.signing import build_signature_header
 from baselith.core.workflows.builder import WorkflowBuilder, WorkflowDefinition
 from baselith.core.workflows.service import WorkflowService, set_workflow_service
@@ -29,7 +30,16 @@ def _wf(workflow_id: str = "greet", **fields) -> WorkflowDefinition:
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
+    # The runtime resolves the process-wide checkpoint store, which is cached on
+    # first use and, under ``auto``, becomes a Postgres store whenever an
+    # earlier test in the same worker left Postgres enabled. Pin an in-process
+    # store so a run id that does not exist is "unknown", not a database error.
+    store = InMemoryCheckpointStore()
+    monkeypatch.setattr(
+        "baselith.core.orchestration.checkpoint_factory.get_default_checkpoint_store",
+        lambda: store,
+    )
     config = WorkflowsConfig(
         WORKFLOWS_ENABLED="true",
         WORKFLOWS_DIR=str(tmp_path),
