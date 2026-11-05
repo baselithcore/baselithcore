@@ -369,9 +369,9 @@ only roles keeps exactly the access it had before.
 | Role        | Scopes                                                      |
 | ----------- | ---------------------------------------------------------- |
 | `admin`     | `*` (all)                                                  |
-| `service`   | `chat:*`, `memory:*`, `feedback:*`, `webhooks:*`, `metrics:read`, `mcp:invoke` |
-| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `metrics:read`, `mcp:invoke` |
-| `job`       | `chat:read/write`, `memory:read`, `metrics:read`, `mcp:invoke` |
+| `service`   | `chat:*`, `memory:*`, `feedback:*`, `knowledge:*`, `webhooks:*`, `metrics:read`, `mcp:invoke` |
+| `user`      | `chat:read/write`, `memory:read/write`, `feedback:write`, `knowledge:read`, `metrics:read`, `mcp:invoke` |
+| `job`       | `chat:read/write`, `memory:read`, `knowledge:read`, `metrics:read`, `mcp:invoke` |
 | `guest`     | `chat:read`, `metrics:read`                                |
 | `anonymous` | *(none)*                                                   |
 | `scoped`    | *(none — a scoped key is authorized solely by its explicit grants)* |

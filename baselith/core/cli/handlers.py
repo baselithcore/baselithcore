@@ -282,6 +282,19 @@ def cmd_cache(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_workflow(args: argparse.Namespace) -> int:
+    """Execute the 'workflow' command (validate, run, export, list, triggers)."""
+    from baselith.core.cli.commands.workflow import run_workflow
+
+    command = getattr(args, "workflow_command", None)
+    if command is None:
+        print(
+            "usage: baselith workflow {validate,run,export,list,generate,trigger-secret,trigger-sign} ..."
+        )
+        return 1
+    return run_workflow(command, vars(args), json_output=_wants_json(args))
+
+
 def cmd_queue(args: argparse.Namespace) -> int:
     """Execute the 'queue' command for task queue management."""
     from baselith.core.cli.commands.queue import run_queue
@@ -359,6 +372,7 @@ COMMAND_HANDLERS_MAP = {
     "db": cmd_db,
     "cache": cmd_cache,
     "queue": cmd_queue,
+    "workflow": cmd_workflow,
     "plugin-updater": cmd_plugin_updater,
     "docs": cmd_docs,
     "doctor": cmd_doctor,

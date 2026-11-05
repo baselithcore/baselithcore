@@ -1031,6 +1031,42 @@ cannot reach `gov.provider` (e.g. an OpenAI/Ollama-only engine pinned to
 the plugin's *default* provider/model; explicit per-call/per-role overrides
 inside the plugin remain the plugin's choice.
 
+#### Endpoints for clients that speak the wire protocol directly
+
+`api_base` above is `None` for a hosted provider, because an SDK fills in its
+own default. A component with no SDK at all — it talks HTTP itself because it
+must see the provider's answer verbatim, like an evaluation bench recording raw
+reasoning — has nothing to fill that gap, and copying the public API hosts into
+a plugin is the second path to a provider that `check_no_plugin_llm_keys.py`
+forbids. `direct_endpoint` resolves every provider in one place:
+
+```python
+from baselith.core.config import get_llm_config
+from baselith.core.services.llm import direct_endpoint
+from baselith.core.services.llm.runtime import api_key_for
+
+config = get_llm_config()
+endpoint = direct_endpoint(config, "vllm", "qwen")   # None ⇒ not reachable here
+if endpoint is not None:
+    # endpoint.protocol: "chat_completions" or "anthropic_messages"
+    # endpoint.base_url: ".../v1" root, or the Anthropic API root
+    key = api_key_for(config, endpoint.provider)     # read at call time
+```
+
+| Provider | `base_url` | Protocol |
+| --- | --- | --- |
+| `openai` | `LLM_API_BASE` when OpenAI is the default provider, else the public API | `chat_completions` |
+| `anthropic` | `LLM_API_BASE` when Anthropic is the default provider, else the public API; `None` on `bedrock`/`vertex` | `anthropic_messages` |
+| `gemini` | Gemini's OpenAI-compatible endpoint (the native SDK base is never used) | `chat_completions` |
+| `huggingface` | The Inference Providers router | `chat_completions` |
+| `ollama` | `ollama_root(config)` + `/v1`, resolved like `api_base_for` (default `http://localhost:11434`) | `chat_completions` |
+| `vllm` | The server serving `model` among `LLM_VLLM_ENDPOINTS` (same registry as the provider), else the single server; `None` when none is configured | `chat_completions` |
+
+The answer never carries a credential and never comes from a caller: the caller
+picks a provider id from `SUPPORTED_PROVIDERS` and, for vLLM, a model the
+configured servers are asked about. With several vLLM servers the call blocks
+on their catalogs (cached), so run it off the event loop on a request path.
+
 #### Named LLM scopes (per-pipeline governance)
 
 A plugin with more than one distinct LLM pipeline can expose each for
@@ -1234,6 +1270,33 @@ the call** — per-plugin and per-user attribution comes from that request's
 context, so a report made on a bare worker thread is filed as unattributable
 unless the spawn carries the caller's context across (`contextvars.copy_context`).
 
+#### Usage billed in a queue worker
+
+A queue worker hosts no plugins, so a sink a plugin registers never runs in it:
+whatever a job bills (a plugin calling the funnel from its job, or a model
+measured outside it and reported with `report_external_usage`) was invisible to
+every per-plugin ledger, and a plugin whose AI work runs in jobs read as having
+spent nothing. `baselith.core.services.llm.usage_outbox` hands that usage to the
+process that does run sinks, in two halves:
+
+- **Worker side.** `TenantAwareWorker.perform_job` wraps each job in
+  `collect_job_usage(connection)`. The work horse collects every billed turn,
+  with the tenant, user and plugin the job was enqueued under, and pushes them
+  to the Redis list `baselith:llm:usage_outbox` when the job ends, success or
+  failure, before the work horse exits (it leaves by `os._exit`, so anything
+  held only in memory would be lost). The list keeps at most 100,000 records and
+  expires after 14 days, so a deployment with no consumer cannot grow Redis.
+  `BASELITH_WORKER_USAGE_OUTBOX=false` turns the hand-off off.
+- **Consumer side.** A process that runs sinks calls
+  `deliver_worker_usage()` on a timer. It drains the list (one transaction, so
+  several processes share it and each turn is delivered once) and re-emits each
+  turn through the ordinary sink seam with the recorded tenant, user and plugin
+  bound, so a sink sees it as if the call had been made in-process.
+
+Nothing is priced or interpreted on the way: the record is the four-bucket
+`Usage` the funnel metered. A Redis failure at either end is logged and
+swallowed; usage is an observation and must never fail a job or a request.
+
 ### Retry & Circuit-Breaker Layering
 
 `LLMService._generate_with_retry` is the **single retry layer** of the LLM
@@ -1425,7 +1488,9 @@ baselith/core/services/vectorstore/
 ├── chunking.py               # Text chunking utilities (default pipeline)
 ├── recursive_splitter.py     # The recursive character splitter (no LangChain)
 ├── splitters.py              # Document-aware splitters (markdown, python)
+├── qa_splitter.py            # Question/answer chunking (one chunk per pair)
 ├── chunking_hierarchical.py  # Parent/child chunking for small-to-big retrieval
+├── knowledge.py              # Text-level ingest / search / delete helpers
 └── providers/
     ├── qdrant_provider.py    # Qdrant implementation (default)
     └── pgvector_provider.py  # PostgreSQL + pgvector implementation
@@ -1739,6 +1804,56 @@ for chunk in splitter.split(markdown_text):
     print(chunk.metadata.get("headings"), len(chunk.text))
 ```
 
+### Question/answer chunking
+
+`baselith/core/services/vectorstore/qa_splitter.py` turns an FAQ into one chunk
+per question/answer pair, and embeds the **question**: users ask in the shape of a
+question, so matching against the stored question retrieves the right entry far
+more reliably than matching against a slice of the answer. Retrieval still
+returns the whole pair.
+
+Three input shapes are recognised, in this order:
+
+| Shape | Example |
+| ----- | ------- |
+| Table (CSV or TSV) | a header naming a `question` and an `answer` column |
+| Labelled lines | `Q:` / `Question:` then `A:` / `Answer:`, optionally numbered or bulleted; a value runs to the next label; labels inside a code fence are content |
+| Markdown FAQ | a heading ending in `?` is the question, the text under it the answer |
+
+At most 5000 pairs are read from a document, a question over 1000 characters
+drops its pair, and an answer over 8000 characters is cut. A document with **no**
+recognisable pair yields no chunks and `ingest_document(chunking="qa")` refuses
+it, rather than quietly indexing a mis-formatted FAQ as prose.
+
+`QASplitter` follows the splitter interface (`split_text`, `split`), and
+`qa_ingestion_chunks(text)` returns the pairs in the form the indexing pipeline
+takes as precomputed chunks (`embedding_text` is the question, `text` the pair).
+
+### Text-level helpers
+
+`baselith/core/services/vectorstore/knowledge.py` holds the steps every text-level
+caller needs around the vector store, so the [knowledge API](knowledge-api.md),
+the MCP `index_document` tool and the workflow `RETRIEVE` node share one
+implementation:
+
+- `search_by_text(query, top_k=, collection=, rerank=, min_score=)` loads the
+  embedder off the event loop, embeds the query as a *query*, and returns
+  `KnowledgeHit` records (document id, chunk index, content, score, metadata
+  without the pipeline's internal keys). A store failure raises; it is never an
+  empty list, because "nothing found" and "the store is down" are different
+  answers.
+- `ingest_document(content, document_id=, metadata=, collection=, chunking=,
+  source_name=, replace=True)` with `chunking` one of `default` (by size), `auto`
+  (by structure: markdown headings, python units) or `qa`. Ingesting an id again
+  replaces the document: chunk ids are deterministic per tenant, document and
+  position, so the new chunks overwrite the old ones in place and only the tail of
+  a longer old version is deleted, *after* the new version is written, so a
+  failure in between leaves the old document readable.
+- `delete_document(document_id, collection=)`.
+
+Chunk point ids include the tenant for every tenant but `default`; see [Upgrade
+Notes](../advanced/upgrade-notes.md#vector-point-ids-are-tenant-scoped).
+
 ### Hierarchical Chunking (small-to-big retrieval)
 
 `baselith/core/services/vectorstore/chunking_hierarchical.py` splits a document into
@@ -1957,8 +2072,12 @@ override it per instance.
 baselith/core/services/voice/
 ├── __init__.py
 ├── service.py              # VoiceService
-├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429)
-├── _elevenlabs_calls.py    # ElevenLabs TTS / Scribe STT / voice list / key check
+├── _elevenlabs.py          # ElevenLabs wire client (hardened, capped, retry on 429; whole and streamed speech)
+├── _elevenlabs_catalog.py  # ElevenLabs voice list / key check / usage read
+├── _elevenlabs_stt.py      # ElevenLabs Scribe speech-to-text
+├── _elevenlabs_payload.py  # the request body per model capability (supports_* predicates)
+├── _elevenlabs_calls.py    # ElevenLabs TTS (whole, stream) / STT / voice list / key check
+├── _openai_sdk.py          # the OpenAI SDK paths (tts-1, whisper-1)
 ├── _openai_wire.py         # OpenAI-compatible wire client (sidecars, governed pin)
 ├── _routing.py             # which backend serves a call
 ├── _usage.py               # usage-seam reporting
@@ -2054,17 +2173,17 @@ TTS prompt = `ceil(chars / 4)`. They are attributed but never priced.
 
 ElevenLabs is not OpenAI-compatible, so `VOICE_PROVIDER=elevenlabs` has its own adapter in
 `baselith/core/services/voice/_elevenlabs*.py`. It serves **both directions**: text-to-speech
-(ElevenLabs' `/v1/text-to-speech/{voice_id}`) and speech-to-text with Scribe
+(ElevenLabs' `/v1/text-to-speech/{voice_id}`, whole or on its `/stream` twin) and speech-to-text with Scribe
 (ElevenLabs' `/v1/speech-to-text`), and exposes `list_voices()` and `probe_elevenlabs()`.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `VOICE_ELEVENLABS_API_KEY` (or `ELEVENLABS_API_KEY`) | unset | The API key (`SecretStr`) |
 | `VOICE_ELEVENLABS_BASE_URL` | `https://api.elevenlabs.io` | API root; **https only** (a data-residency endpoint such as `https://api.eu.residency.elevenlabs.io` goes here). `http` is accepted only together with `VOICE_ALLOW_INTERNAL_ENDPOINTS=true`, for a local fake |
-| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency (an assistant speaks sentence by sentence) and cost (about half the credits per character), and is multilingual, Italian included; use `eleven_multilingual_v2` or `eleven_v3` for richer prosody |
-| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v1` | Scribe model (`scribe_v2` is available) |
+| `VOICE_ELEVENLABS_TTS_MODEL` (legacy `VOICE_ELEVENLABS_MODEL_ID`) | `eleven_flash_v2_5` | Synthesis model. Flash is the default for latency and cost (about half the credits per character), and is multilingual, Italian included. `eleven_v4_turbo` is the vendor's choice for conversational assistants (the most expressive delivery, about 100 ms) and `eleven_v4` its studio-quality sibling; `eleven_multilingual_v2` and `eleven_v3` are the previous generation. A host's per-call `SpeechTuning` may choose instead |
+| `VOICE_ELEVENLABS_STT_MODEL` | `scribe_v2` | Scribe model (the current one; `scribe_v1` still works) |
 | `VOICE_ELEVENLABS_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` | Default voice (the premade "Rachel"); a call may name another id |
-| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play) |
+| `VOICE_ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | MP3 formats only (what browsers play), for a whole-body synthesis; a streamed one names its format per call |
 | `VOICE_ELEVENLABS_STABILITY` / `_SIMILARITY_BOOST` / `_STYLE` | `0.5` / `0.75` / `0.0` | Voice settings |
 | `VOICE_ELEVENLABS_RETRIES` | `2` | Retries after an HTTP 429, inside the request deadline |
 
@@ -2079,11 +2198,30 @@ subclasses, so `except VoiceUpstreamError` still works): `key_invalid` (401/403)
 `rate_limited` (429 after the retries), `provider_unavailable` (5xx, redirect, unreachable).
 
 **Latency.** The adapter keeps its connection pool alive (idle connections are kept for 45 s), so a
-voice assistant that speaks sentence by sentence does not pay a DNS lookup, a TCP handshake and a TLS
-handshake for every sentence. The hardened client disables keep-alive by default so that one pool never
+voice assistant that speaks passage by passage does not pay a DNS lookup, a TCP handshake and a TLS
+handshake for every passage. The hardened client disables keep-alive by default so that one pool never
 coalesces two validated hostnames behind a shared pinned IP; this adapter's egress policy admits exactly
 one host, so there is nothing to coalesce. For a smaller payload at the same cost per character set
 `VOICE_ELEVENLABS_OUTPUT_FORMAT=mp3_24000_48`.
+
+**Streaming.** `text_to_speech_stream(text, voice, speed, *, language, context, tuning, output_format)`
+returns a `VoiceStream`: `chunks` (an async iterator of the audio as the provider generates it, under
+`VOICE_MAX_RESPONSE_BYTES` and with `VOICE_TIMEOUT_SECONDS` as an idle deadline per chunk), `provider`,
+`model`, `content_type`, `sample_rate` (for raw PCM) and `metadata` (`request_id`, `stitched`). With
+ElevenLabs it is the `/stream` endpoint; `output_format` names the provider format for this call
+(`pcm_24000`: 16-bit mono PCM a player can schedule chunk by chunk, available on every tier; `pcm_44100` needs
+Pro), else `VOICE_ELEVENLABS_OUTPUT_FORMAT`. A refusal is raised before the stream exists (the status is
+known), and a failure mid-stream ends the iterator with a `VoiceError`. Every other provider answers whole, as
+one chunk, so a caller can always consume a `VoiceStream`. Iterate it to the end or `aclose()` it so the
+connection returns to the pool. The model and the characters are billed at the request, whatever the stream
+then does.
+
+**Model capabilities.** What a model takes is decided once, in `_elevenlabs_payload.py`, and exported as
+predicates a host can read for the model in force: `supports_stitching(model)` (false for the v3 family),
+`supports_language(model)` (`language_code`: Flash, Turbo, the v3 and v4 families; `eleven_multilingual_v2`
+infers it), `supports_speed(model)` (false for the v4 family, which takes only `stability` and
+`similarity_boost`; `speed` and `style` are then not sent) and `supports_tags(model)` (audio tags such as
+`[warmly]`: the v3 and v4 families).
 
 **Continuity and tuning per call.** `text_to_speech(..., language=, context=, tuning=)` accepts three
 optional, provider-neutral arguments that only the ElevenLabs path uses:
@@ -2091,12 +2229,13 @@ optional, provider-neutral arguments that only the ElevenLabs path uses:
 - `context=SpeechContext(previous_text, next_text, previous_request_ids, normalization)` is the
   neighbourhood of the passage. The adapter sends it as ElevenLabs request stitching: `previous_request_ids`
   (at most three, validated, taking precedence) else `previous_text`, `next_text` (each cut to 600
-  characters) and `apply_text_normalization`. `eleven_v3` has no stitching, so those fields are dropped
+  characters) and `apply_text_normalization`. The v3 family has no stitching, so those fields are dropped
   silently; a caller can always ask for the best continuity. The provider's `request-id` response header comes
   back in `VoiceResponse.metadata["request_id"]` (with `stitched`), which is what the next passage chains to.
   Ids are valid for about two hours; the chain itself (who owns it, how long it lives) is the host's job.
 - `language` becomes `language_code` for the models that take it (`eleven_flash_v2_5`, `eleven_turbo_v2_5`,
-  `eleven_v3`); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to 0.7-1.2.
+  the v3 and v4 families); `eleven_multilingual_v2` infers it and the field is not sent. `speed` is clamped to
+  0.7-1.2 and not sent to the v4 family, which ignores it.
 - `tuning=SpeechTuning(model, stability, similarity_boost, style)` states preferred values for this call. A
   value the operator set explicitly (`VOICE_ELEVENLABS_*` in the environment, or a host override's model)
   always wins; `VoiceService.elevenlabs_explicit()` says which ones those are, so a host can show the source.
@@ -2638,6 +2777,43 @@ The default Docling budgets are intentionally close to the lab baseline:
 `DOCLING_CONTEXT_TOKENS=520` for the retrieved prompt context. Tune them only
 when the corpus shape requires it; the core fallback remains deterministic for
 minimal installations that do not include the `documents` extra.
+
+### Notion source
+
+The `document_sources` plugin registers a `notion` source next to `filesystem` and
+`web`. It is **inert until `NOTION_API_TOKEN` is set**: an integration token that
+can read every Notion page shared with that integration.
+
+| Variable | Meaning |
+| -------- | ------- |
+| `NOTION_API_TOKEN` | The integration token (a `SecretStr`: never in a repr, a log line or an error message) |
+| `NOTION_ROOT_PAGE_IDS` | Comma-separated page ids to index **with their sub-pages**; empty indexes every page shared with the integration |
+| `NOTION_MAX_PAGES` | Stop after this many pages (default 200) |
+
+Each readable page becomes one markdown document: its title as the `#` heading,
+then headings, paragraphs, bulleted, numbered and to-do lists, quotes, callouts,
+code, tables, equations and bookmark links, with nested blocks indented and
+followed up to six levels deep. Images, files, databases, and block types the
+converter does not know are skipped, never guessed at. Archived pages and pages
+with almost no text are skipped. The metadata carries `origin: notion`, the page
+`url` as `source`, `title`, `page_id` and `last_edited`; the fingerprint is the
+content hash, so an unchanged page is not re-embedded on the next incremental run.
+
+The source is built to keep the token where it belongs:
+
+- **Fixed egress.** The host is `api.notion.com` and is not configurable, so the
+  token can only ever be sent there. Requests go through the SSRF-hardened client.
+- **Ids are validated** (a UUID, dashes optional) before they are placed in an API
+  path, including ids that come back from the API itself.
+- **Rate limits are honoured**: about three requests a second, `429` is retried
+  after `Retry-After` (capped at 30 s) and `5xx` with backoff, each three times.
+  A client error is not retried.
+- **Errors carry the status code only**, never the response body.
+- A page that is not shared with the integration is skipped with a warning; a
+  rejected token stops the run, because no page can be read.
+
+Share the pages with the integration in Notion (**Connections**) before indexing:
+an integration sees nothing it was not explicitly given.
 
 ### Persistence
 

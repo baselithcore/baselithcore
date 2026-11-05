@@ -18,4 +18,5 @@ __all__ = [
     "shell",
     "test",
     "verify",
+    "workflow",
 ]

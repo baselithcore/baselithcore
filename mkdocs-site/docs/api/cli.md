@@ -35,6 +35,7 @@ baselith --format json <command>  # Global output formatting
 │                             up              Download and start the complete Docker runtime   │
 │                             shell           Start interactive shell                          │
 │                             docs            Generate documentation                           │
+│                             workflow        Validate, run and manage workflow definitions    │
 │   SYSTEM & HEALTH           doctor          Run system diagnostics                           │
 │                             verify          Verify environment configuration                 │
 │                             info            View system dashboard                            │
@@ -1107,6 +1108,35 @@ baselith lint [--fix] [--no-mypy]
 | ----------- | ------------------------------------------------------- |
 | `--fix`     | Automatically resolve formatting and linting violations |
 | `--no-mypy` | Bypass static type checking with MyPy                   |
+
+---
+
+### `workflow` - Workflow Definitions
+
+Work with [workflow](../core-modules/workflows.md) definition files (YAML or JSON). Nothing here needs a running server.
+
+```bash
+baselith workflow validate workflows/*.yaml          # exit code 1 if any is invalid
+baselith workflow run workflows/support.yaml --input '{"question": "How do I reset my password?"}'
+baselith workflow export workflows/support.json --to yaml -o workflows/support.yaml
+baselith workflow list --dir ./workflows             # default: WORKFLOWS_DIR
+baselith workflow generate "answer support questions from the knowledge base" -o workflows/support.yaml
+baselith workflow trigger-secret support-answer      # signing key of that workflow's trigger
+printf '%s' '{"a": 1}' | baselith workflow trigger-sign support-answer
+```
+
+| Subcommand | Description |
+| ---------- | ----------- |
+| `validate FILE…` | Parse and validate each file; reports every error and exits `1` if any file is invalid |
+| `run FILE` | Run once with the configured LLM, vector store and plugin tools. `--input` is JSON when it parses and text otherwise; `--input-file` reads it from a file. A `HUMAN` gate fails closed (no checkpoint store in a one-shot run) |
+| `export FILE` | Convert between YAML and JSON (`--to yaml\|json`, `-o` to write a file) |
+| `list` | Load a catalog directory and show id, name, node count, schedule and trigger flag; rejected files are listed and exit `1` |
+| `generate "…"` | Draft a definition from a description with the configured language model. It is validated, with errors fed back to the model for up to `--attempts` tries (1 to 5), before it is shown; warnings go to stderr so `> file.yaml` stays valid. `--revise FILE` changes an existing definition instead, `-o` writes a file |
+| `trigger-secret ID` | Print the signing key derived from `WORKFLOWS_TRIGGER_SECRET` for one workflow |
+| `trigger-sign ID` | Print the `X-Baselith-Signature` header for a body (`--body-file`, or stdin) |
+
+The catalog, the HTTP API and the signed trigger are described in
+[Workflow Catalog & API](../core-modules/workflow-catalog.md).
 
 ---
 

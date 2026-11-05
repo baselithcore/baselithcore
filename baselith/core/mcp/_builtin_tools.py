@@ -137,35 +137,38 @@ async def index_document(
         collection: Target collection, or the ``default`` sentinel.
 
     Returns:
-        The real outcome: ``chunks_written`` as reported by the vector store,
-        or ``status: "error"`` with the reason. ``status`` is only ``indexed``
-        when the store confirmed a write.
+        The real outcome: ``chunks_written`` and the ``document_id`` the
+        document is stored under, or ``status: "error"`` with the reason.
+        ``status`` is only ``indexed`` when the store confirmed a write.
     """
     try:
-        from baselith.core.models.domain import Document
-        from baselith.core.services.vectorstore.service import get_vectorstore_service
-
-        document = Document(content=content, metadata=dict(metadata or {}))
-        written = await get_vectorstore_service().index(
-            [document], collection_name=_collection_override(collection)
+        from baselith.core.services.vectorstore.knowledge import (
+            IngestError,
+            ingest_document,
         )
-    except Exception as exc:
-        logger.error("mcp_index_document_failed", error=str(exc))
-        return {"status": "error", "error": f"Indexing unavailable: {exc}"}
 
-    if not written:
+        result = await ingest_document(
+            content,
+            metadata=dict(metadata or {}),
+            collection=_collection_override(collection),
+        )
+    except IngestError as exc:
         return {
             "status": "error",
-            "error": "Vector store accepted the request but wrote no chunks",
+            "error": str(exc),
             "collection": collection,
             "content_length": len(content),
         }
+    except Exception as exc:
+        logger.error("mcp_index_document_failed", error=str(exc))
+        return {"status": "error", "error": f"Indexing unavailable: {exc}"}
 
     return {
         "status": "indexed",
         "collection": collection,
         "content_length": len(content),
-        "chunks_written": written,
+        "chunks_written": result.chunks,
+        "document_id": result.document_id,
     }
 
 

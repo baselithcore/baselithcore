@@ -20,7 +20,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from baselith.core.config import get_voice_config
@@ -30,6 +30,7 @@ from baselith.core.services.voice._audio_input import load_audio
 from baselith.core.services.voice._elevenlabs import ElevenLabsClient
 from baselith.core.services.voice._elevenlabs_calls import ElevenLabsCalls
 from baselith.core.services.voice._http_providers import HttpProviders
+from baselith.core.services.voice._openai_sdk import OpenAISdkCalls
 from baselith.core.services.voice._openai_wire import OpenAIWireClient
 from baselith.core.services.voice._wire_calls import WireCalls
 from baselith.core.services.voice.errors import VoiceLimitError
@@ -42,12 +43,13 @@ from baselith.core.services.voice.models import (
     VoiceOverrides,
     VoiceProvider,
     VoiceResponse,
+    VoiceStream,
 )
 
 logger = get_logger(__name__)
 
 
-class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
+class VoiceService(WireCalls, ElevenLabsCalls, OpenAISdkCalls, HttpProviders):
     """
     Multi-provider voice service.
 
@@ -167,27 +169,6 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
             )
         return self._http_client
 
-    def _get_openai_client(self) -> Any:
-        """Return the lazily created shared ``AsyncOpenAI`` client.
-
-        Built once with an explicit timeout (the SDK default is 600s) and
-        reused across TTS/STT calls so each request does not open a new
-        httpx pool.
-        """
-        if self._openai_client is None:
-            try:
-                from openai import AsyncOpenAI
-            except ImportError:
-                raise ImportError(
-                    "openai package required: pip install openai"
-                ) from None
-            self._openai_client = AsyncOpenAI(
-                api_key=self._openai_key,
-                timeout=60.0,
-                max_retries=2,
-            )
-        return self._openai_client
-
     async def aclose(self) -> None:
         """Close provider HTTP resources."""
         if self._http_client is not None:
@@ -282,38 +263,47 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
         _usage.report_tts(response.model, text)
         return response
 
-    async def _tts_openai(self, request: TTSRequest) -> VoiceResponse:
+    async def text_to_speech_stream(
+        self,
+        text: str,
+        voice: str | None = None,
+        speed: float = 1.0,
+        provider: VoiceProvider | None = None,
+        *,
+        language: str | None = None,
+        context: SpeechContext | None = None,
+        tuning: SpeechTuning | None = None,
+        output_format: str | None = None,
+    ) -> VoiceStream:
+        """Convert text to speech, the audio arriving as it is generated.
+
+        ElevenLabs streams natively (its ``/stream`` endpoint; ``output_format`` names the
+        provider format, ``pcm_24000`` for raw audio a player can schedule as it arrives, else
+        ``VOICE_ELEVENLABS_OUTPUT_FORMAT``). Every other provider answers whole, as one chunk,
+        so a caller can always consume a :class:`VoiceStream`. Same arguments as
+        :meth:`text_to_speech`; a refusal is raised before the stream exists.
         """
-        Generate speech using OpenAI TTS.
-
-        Args:
-            request: Audio generation parameters.
-
-        Returns:
-            VoiceResponse: Generated audio data and metadata.
-        """
-        if not self._openai_key:
-            raise ValueError("OpenAI API key not configured")
-
-        client = self._get_openai_client()
-
-        response = await client.audio.speech.create(
-            model=request.model,
-            voice=request.voice,
-            input=request.text,
-            speed=request.speed,
-            response_format=request.format.value,  # type: ignore[arg-type]
+        provider = provider or self.default_provider
+        if provider == VoiceProvider.ELEVENLABS:
+            return await self._tts_elevenlabs_stream(
+                text,
+                voice,
+                speed,
+                language=language,
+                context=context,
+                tuning=tuning,
+                output_format=output_format,
+            )
+        response = await self.text_to_speech(
+            text,
+            voice,
+            speed,
+            provider=provider,
+            language=language,
+            context=context,
+            tuning=tuning,
         )
-
-        audio_bytes = response.content
-
-        return VoiceResponse(
-            success=True,
-            content=audio_bytes,
-            provider="openai",
-            model=request.model,
-            metadata={"voice": request.voice, "format": request.format.value},
-        )
+        return _whole(response)
 
     # -------------------------------------------------------------------------
     # Speech-to-Text
@@ -384,44 +374,6 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
         _usage.report_stt(response.model, len(audio), response.text, duration_seconds)
         return response
 
-    async def _stt_openai(self, request: STTRequest) -> VoiceResponse:
-        """
-        Transcribe audio using OpenAI Whisper model.
-
-        Args:
-            request: Transcription parameters.
-
-        Returns:
-            VoiceResponse: Transcribed text.
-        """
-        if not self._openai_key:
-            raise ValueError("OpenAI API key not configured")
-
-        client = self._get_openai_client()
-
-        # Get audio data
-        audio_bytes = request.get_audio_bytes()
-
-        # Whisper needs a file-like object with a name
-        import io
-
-        audio_file = io.BytesIO(audio_bytes)
-        audio_file.name = "audio.mp3"
-
-        transcript = await client.audio.transcriptions.create(
-            model=request.model,
-            file=audio_file,
-            language=request.language,  # type: ignore[arg-type]
-        )
-
-        return VoiceResponse(
-            success=True,
-            content=transcript.text,
-            provider="openai",
-            model=request.model,
-            language=request.language,
-        )
-
     # -------------------------------------------------------------------------
     # Convenience Methods
     # -------------------------------------------------------------------------
@@ -443,3 +395,19 @@ class VoiceService(WireCalls, ElevenLabsCalls, HttpProviders):
         response = await self.text_to_speech(text, voice=voice)
         response.save_audio(output_path)
         return output_path
+
+
+def _whole(response: VoiceResponse) -> VoiceStream:
+    """A whole answer as a one-chunk stream."""
+    fmt = str(response.metadata.get("format") or "mp3")
+
+    async def one() -> AsyncIterator[bytes]:
+        yield response.audio_bytes
+
+    return VoiceStream(
+        chunks=one(),
+        provider=response.provider,
+        model=response.model,
+        content_type="audio/mpeg" if fmt == "mp3" else f"audio/{fmt}",
+        metadata=dict(response.metadata),
+    )

@@ -93,13 +93,28 @@ def prepare_chunk_text(chunk: str, metadata: dict[str, Any] | None = None) -> st
     return chunk
 
 
-def chunk_point_id(document_id: str, chunk_index: int) -> int:
+def chunk_point_id(
+    document_id: str, chunk_index: int, tenant_id: str | None = None
+) -> int:
     """
     Generate a unique point ID for a chunk.
+
+    The id is the point's primary key, and an upsert on an existing id replaces
+    the stored payload, tenant included. An id derived from the document id
+    alone therefore let two tenants that used the same document id (a file
+    name, an id a client picked) write over each other's chunks, and the later
+    writer then owned them. A non-default tenant is mixed into the hash so ids
+    cannot collide across tenants.
+
+    The default tenant keeps the original derivation, byte for byte: a
+    single-tenant deployment re-indexing a document must land on the points it
+    already has instead of creating a second copy.
 
     Args:
         document_id: Document identifier
         chunk_index: Chunk index
+        tenant_id: Tenant owning the document; ``None`` or ``"default"`` for the
+            single-tenant case
 
     Returns:
         Unique point ID as integer
@@ -107,7 +122,10 @@ def chunk_point_id(document_id: str, chunk_index: int) -> int:
     # Use hash to create numeric ID for Qdrant
     import hashlib
 
-    combined = f"{document_id}::{chunk_index}"
+    if tenant_id in (None, "", "default"):
+        combined = f"{document_id}::{chunk_index}"
+    else:
+        combined = f"{tenant_id}\x1f{document_id}::{chunk_index}"
     hash_obj = hashlib.sha256(combined.encode())
     # Convert first 8 bytes to int
     return int.from_bytes(hash_obj.digest()[:8], byteorder="big")

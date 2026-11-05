@@ -32,8 +32,18 @@ logger = get_logger(__name__)
 # the prose default so most functions/classes stay whole.
 DEFAULT_CODE_CHUNK_SIZE = 2000
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+# Linear-time on purpose: `\s+` and `\S` are disjoint, so there is exactly one
+# way to split a line between the marker and the title. The optional closing
+# hashes (`## Title ##`) are stripped by `_heading_title`, not by the pattern —
+# `(.+?)\s*#*\s*$` backtracks quadratically on long runs of spaces.
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(\S.*)$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def _heading_title(raw: str) -> str:
+    """Return a heading's text without whitespace or closing ``#`` markers."""
+    return raw.rstrip().rstrip("#").rstrip() or raw
+
 
 _MARKDOWN_SUFFIXES = frozenset({".md", ".markdown"})
 _PYTHON_SUFFIXES = frozenset({".py", ".pyi"})
@@ -154,7 +164,7 @@ class MarkdownHeaderSplitter:
             if match and len(match.group(1)) <= self._max_heading_level:
                 flush()
                 level = len(match.group(1))
-                headings = headings[: level - 1] + [match.group(2)]
+                headings = headings[: level - 1] + [_heading_title(match.group(2))]
                 section_lines = [line]
                 has_heading = True
             else:

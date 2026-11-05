@@ -724,6 +724,13 @@ is fine. The plugin-less fallback route behaves the same way.
     to reconnect, which lands them on a pod that is still serving. See
     [Draining long-lived streams](../core-modules/lifecycle.md#draining-long-lived-streams).
 
+!!! note "Startup heap is frozen"
+    The same lifespan ends startup with `gc.collect()` + `gc.freeze()` and
+    undoes it at shutdown, so full collections during request handling no
+    longer re-walk the ~140k objects startup built (a 16ms gen-2 pause
+    measured on the built app, 0ms after). See
+    [Startup heap freeze](../advanced/runtime-tuning.md#startup-heap-freeze).
+
 ---
 
 ### `GET /status` - System Status
@@ -1068,6 +1075,9 @@ omits it leaves these routers unmounted (the table rows marked "mounted by
 | `/compliance/*` — systems, summary, documentation, FRIA, RoPA, post-market, profile, audit — [Compliance › Admin API](../core-modules/compliance.md#admin-api) | API key / Bearer (`require_user`) + `compliance:manage` scope | `COMPLIANCE_ENABLED=true` |
 | `GET /runs/{run_id}/history`, `GET /runs/{run_id}/history/{version}`, `GET /runs/{run_id}/events` (SSE), `POST /runs/{run_id}/fork` — [Orchestration › Durable checkpointing](../core-modules/orchestration.md#durable-checkpointing-resume) | HTTP Basic (`verify_credentials`) | `ORCHESTRATOR_CHECKPOINT_ENABLED=true` (default) |
 | `GET /approvals`, `POST /approvals/{run_id}/decision`, `POST /approvals/{run_id}/resume` — [Orchestration › Durable approvals](../core-modules/orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume) | HTTP Basic (`verify_credentials`) | `ORCHESTRATOR_CHECKPOINT_ENABLED=true` (default) |
+| `GET /workflows`, `POST /workflows/validate`, `POST /workflows/generate`, `GET`/`PUT`/`DELETE /workflows/{id}`, `POST /workflows/{id}/run`, `GET /workflows/runs`, `GET /workflows/runs/{run_id}`, `POST /workflows/runs/{run_id}/resume` — [Workflow Catalog & API](../core-modules/workflow-catalog.md#http-api) | HTTP Basic (`verify_credentials`) | `WORKFLOWS_ENABLED=true` |
+| `POST /workflows/{id}/trigger` — signed inbound webhook, `X-Baselith-Signature` with a per-workflow derived key — [Workflow Catalog & API › Inbound trigger](../core-modules/workflow-catalog.md#inbound-trigger) | HMAC signature (no Basic Auth); answers `503` without `WORKFLOWS_TRIGGER_SECRET` | `WORKFLOWS_ENABLED=true` |
+| `POST /knowledge/documents`, `POST /knowledge/documents/upload`, `DELETE /knowledge/documents/{document_id}`, `POST /knowledge/search` — [Knowledge API](../core-modules/knowledge-api.md) | API key / Bearer (`require_user`) + `knowledge:read` / `knowledge:write` scope | `KNOWLEDGE_API_ENABLED=true` |
 | `POST /mcp` (JSON-RPC), `DELETE /mcp` (end session), `GET /mcp` (answers `405`) — path from `MCP_HTTP_PATH` (default `/mcp`) — [MCP › Over Streamable HTTP](../core-modules/mcp.md#over-streamable-http) | `Authorization` header (Bearer or `ApiKey`) + `mcp:invoke` scope while `MCP_HTTP_REQUIRE_AUTH=true` (default) | `MCP_HTTP_TRANSPORT_ENABLED=true`; mounted by `create_app()` |
 
 Ops note: when running more than one replica, set

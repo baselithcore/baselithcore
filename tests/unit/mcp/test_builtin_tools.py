@@ -151,33 +151,60 @@ class TestSearchKnowledgeBase:
 
 
 class TestIndexDocument:
-    async def test_reports_the_chunk_count_the_store_wrote(self) -> None:
-        index = AsyncMock(return_value=3)
+    """The tool goes through the shared ingestion path.
+
+    It used to call ``index()`` with no embedder and no document id: the first
+    makes the pipeline refuse, the second makes it skip the document, so a real
+    deployment could never index anything through this tool.
+    """
+
+    @pytest.fixture(autouse=True)
+    def embedder(self):
+        with patch(
+            "baselith.core.services.vectorstore.knowledge.resolve_embedder",
+            new=AsyncMock(return_value=object()),
+        ):
+            yield
+
+    async def test_indexes_with_an_id_and_an_embedder(self) -> None:
+        store = _store(index=AsyncMock(return_value=1))
+        store.retrieve = AsyncMock(return_value=[])
         with patch(
             "baselith.core.services.vectorstore.service.get_vectorstore_service",
-            return_value=_store(index=index),
+            return_value=store,
         ):
             result = await _builtin_tools.index_document("body", metadata={"k": "v"})
 
         assert result["status"] == "indexed"
-        assert result["chunks_written"] == 3
-        (documents,), _ = index.await_args
+        assert result["chunks_written"] == 1
+        assert result["document_id"]
+        (documents,), kwargs = store.index.await_args
         assert documents[0].content == "body"
+        assert documents[0].id == result["document_id"]
         assert documents[0].metadata == {"k": "v"}
+        assert kwargs["embedder"] is not None
 
     async def test_zero_chunks_written_is_not_success(self) -> None:
+        store = _store(index=AsyncMock(return_value=0))
+        store.retrieve = AsyncMock(return_value=[])
         with patch(
             "baselith.core.services.vectorstore.service.get_vectorstore_service",
-            return_value=_store(index=AsyncMock(return_value=0)),
+            return_value=store,
         ):
             result = await _builtin_tools.index_document("body")
 
         assert result["status"] == "error"
 
+    async def test_empty_content_is_reported_not_indexed(self) -> None:
+        result = await _builtin_tools.index_document("   ")
+        assert result["status"] == "error" and "empty" in result["error"]
+
     async def test_store_failure_is_reported(self) -> None:
+        store = _store(index=AsyncMock(side_effect=RuntimeError("no pool")))
+        store.retrieve = AsyncMock(return_value=[])
         with patch(
             "baselith.core.services.vectorstore.service.get_vectorstore_service",
-            return_value=_store(index=AsyncMock(side_effect=RuntimeError("no pool"))),
+            return_value=store,
         ):
             result = await _builtin_tools.index_document("body")
 

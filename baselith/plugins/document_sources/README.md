@@ -6,6 +6,7 @@ Official BaselithCore plugin for document ingestion sources.
 
 - filesystem source
 - dynamic web source
+- Notion source (pages shared with an integration, as markdown)
 - OCR backends (MinerU primary, Tesseract fallback)
 - file readers for PDF, Office files and images
 
@@ -14,6 +15,11 @@ Official BaselithCore plugin for document ingestion sources.
 Legacy imports from `baselith.core.doc_sources.*` are temporarily preserved through module-level shims during the migration away from the core.
 
 ## Safety limits
+
+- **Notion source**: inert until `NOTION_API_TOKEN` is set. The host is fixed to
+  `api.notion.com`, so the token cannot be sent elsewhere; page ids are validated
+  as UUIDs before they reach an API path; errors report the status code, never the
+  response body. See *Indexing Service › Notion source* in the services docs.
 
 - **Filesystem containment**: `read_item` resolves the path (symlinks
   included) and requires it to be *inside* the root by path components —

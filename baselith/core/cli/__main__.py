@@ -34,6 +34,7 @@ from baselith.core.cli.handlers import (
     cmd_test,
     cmd_up,
     cmd_verify,
+    cmd_workflow,
     run_command,
 )
 
@@ -67,7 +68,7 @@ except ImportError:
 
 COMMANDS_MAP = {
     "SCAFFOLDING": ["init", "setup", "plugin"],
-    "DEVELOPMENT": ["run", "up", "shell", "docs"],
+    "DEVELOPMENT": ["run", "up", "shell", "docs", "workflow"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
     "INFRASTRUCTURE": ["db", "cache", "queue", "plugin-updater"],
     "QUALITY & TESTS": ["test", "lint"],
@@ -90,6 +91,7 @@ COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),
     "queue": lambda *args, **kwargs: cmd_queue(*args, **kwargs),
     "plugin-updater": lambda *args, **kwargs: cmd_plugin_updater(*args, **kwargs),
+    "workflow": lambda *args, **kwargs: cmd_workflow(*args, **kwargs),
     "docs": lambda *args, **kwargs: cmd_docs(*args, **kwargs),
     "doctor": lambda *args, **kwargs: cmd_doctor(*args, **kwargs),
     "test": lambda *args, **kwargs: cmd_test(*args, **kwargs),

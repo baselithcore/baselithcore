@@ -90,7 +90,7 @@ class TransitionAnnouncer:
         try:
             from baselith.core.webhooks.service import get_webhook_service
 
-            await get_webhook_service().emit(
+            await get_webhook_service().publish(
                 event, dict(payload), tenant_id=self.webhook_tenant
             )
         except Exception as exc:

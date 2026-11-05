@@ -2,31 +2,59 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from baselith.core.task_queue.jobs import agent_run as job_module
+from baselith.core.task_queue.status import TaskStatus, TaskTracker
 
 pytestmark = [pytest.mark.unit]
 
 
-class _Tracker:
+class _Tracker(TaskTracker):
+    """The real ``TaskTracker`` with only ``set_status`` swapped for a recorder.
+
+    Every ``mark_*`` keeps its true signature, so a call in the wrong shape
+    raises ``TypeError`` here exactly as it does on a worker. A hand-written
+    fake used to take ``message`` before ``result``, the reverse of the real
+    ``mark_completed``, which let the production call pass while it crashed
+    every successful run.
+    """
+
     def __init__(self) -> None:
-        self.started: list[str] = []
-        self.completed: list[tuple[str, dict]] = []
-        self.failed: list[tuple[str, str]] = []
-        self.retrying: list[tuple[str, int]] = []
+        super().__init__(conn=None)  # type: ignore[arg-type]
+        self.calls: list[tuple[str, TaskStatus, dict]] = []
 
-    def mark_started(self, job_id, message=""):
-        self.started.append(job_id)
+    def set_status(self, task_id, status, **kwargs):  # type: ignore[override]
+        self.calls.append((task_id, status, kwargs))
 
-    def mark_completed(self, job_id, message="", result=None):
-        self.completed.append((job_id, result or {}))
+    @property
+    def started(self) -> list[str]:
+        return [t for t, s, _ in self.calls if s is TaskStatus.RUNNING]
 
-    def mark_failed(self, job_id, error):
-        self.failed.append((job_id, error))
+    @property
+    def completed(self) -> list[tuple[str, dict]]:
+        return [
+            (t, kw.get("result") or {})
+            for t, s, kw in self.calls
+            if s is TaskStatus.COMPLETED
+        ]
 
-    def mark_retrying(self, job_id, error, retries_left):
-        self.retrying.append((job_id, retries_left))
+    @property
+    def failed(self) -> list[tuple[str, str]]:
+        return [(t, kw["error"]) for t, s, kw in self.calls if s is TaskStatus.FAILED]
+
+    @property
+    def retrying(self) -> list[tuple[str, int]]:
+        return [
+            (t, int(re.search(r"\((\d+) left\)", kw["message"]).group(1)))  # type: ignore[union-attr]
+            for t, s, kw in self.calls
+            if s is TaskStatus.RETRYING
+        ]
+
+    def messages(self, status: TaskStatus) -> list[str]:
+        return [kw.get("message", "") for _, s, kw in self.calls if s is status]
 
 
 class _Webhooks:
@@ -64,6 +92,8 @@ class TestRunAgentTask:
         result = job_module.run_agent_task("hello")
         assert result["answer"] == "the answer"
         assert len(tracker.completed) == 1
+        assert tracker.completed[0][1] == result
+        assert tracker.messages(TaskStatus.COMPLETED) == ["Agent run completed"]
         assert webhooks.emitted[0][0] == "agent.completed"
         assert webhooks.emitted[0][1]["answer"] == "the answer"
 
@@ -159,6 +189,43 @@ class TestRetryAwareFailure:
         assert tracker.failed == []
         assert len(tracker.completed) == 1
         assert [e for e, _ in webhooks.emitted] == ["agent.completed"]
+
+
+class TestNotifyResumedRun:
+    """The recovery sweep finishes a run for a worker that died."""
+
+    async def test_a_recovered_answer_is_recorded_completed(self, harness):
+        tracker, webhooks = harness
+        await job_module.notify_resumed_run(
+            {"task_id": "job-9"}, {"response": "recovered", "metadata": {"k": 1}}
+        )
+        assert tracker.completed == [
+            ("job-9", {"answer": "recovered", "metadata": {"k": 1}})
+        ]
+        assert tracker.messages(TaskStatus.COMPLETED) == [
+            "Agent run completed (resumed by recovery)"
+        ]
+        assert [e for e, _ in webhooks.emitted] == ["agent.completed"]
+
+    async def test_a_recovered_failure_is_recorded_failed(self, harness):
+        tracker, webhooks = harness
+        await job_module.notify_resumed_run(
+            {"task_id": "job-9"}, {"error": True, "response": "tool crashed"}
+        )
+        assert tracker.failed == [("job-9", "tool crashed")]
+        assert [e for e, _ in webhooks.emitted] == ["agent.failed"]
+
+    async def test_a_run_awaiting_approval_is_not_terminal(self, harness):
+        tracker, webhooks = harness
+        await job_module.notify_resumed_run(
+            {"task_id": "job-9"}, {"awaiting_approval": True}
+        )
+        assert tracker.calls == [] and webhooks.emitted == []
+
+    async def test_a_spec_without_a_task_id_is_ignored(self, harness):
+        tracker, webhooks = harness
+        await job_module.notify_resumed_run({}, {"response": "x"})
+        assert tracker.calls == [] and webhooks.emitted == []
 
 
 def test_tracker_mark_retrying_is_non_terminal_status():

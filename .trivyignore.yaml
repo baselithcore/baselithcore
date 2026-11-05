@@ -49,8 +49,18 @@ vulnerabilities:
   #     transformers 5.14.1 and is unaffected by any of them — it is already
   #     above every fixed version named below.
   #
-  # Re-evaluate at expiry: if mineru has shipped a release accepting
-  # transformers >=5.5.0, drop these entries and re-lock.
+  # Re-argued 2026-11-05: mineru HAS now shipped releases accepting
+  # transformers >=5 — 4.0.9 through 4.1.7 declare `transformers<6,>=5.10.1`
+  # (under their `torch` extra) — but 4.x is a different package, not a bump:
+  # it has no `pipeline` extra and no `mineru.cli.common` module, so the
+  # `do_parse`/`read_fn` pair that baselith/plugins/document_sources/readers/
+  # ocr_mineru.py imports does not exist there (checked against the 4.1.7
+  # wheel). The 3.x line is still capped at <5.0.0. Lifting the block therefore
+  # means porting that reader to the 4.x API, tracked as its own change; until
+  # then the reachability and blast-radius argument below stands unchanged.
+  #
+  # Re-evaluate at expiry: if the reader has been ported to mineru 4.x, drop
+  # these entries and re-lock.
   - id: CVE-2026-4372
     paths:
       - uv.lock
@@ -62,7 +72,7 @@ vulnerabilities:
       default OCR backend then); exercised solely by mineru's own pipeline over
       local documents, under byte/page/time caps. The `huggingface` extra that
       core actually imports resolves transformers 5.12.1 (unaffected).
-    expired_at: 2026-10-29
+    expired_at: 2026-11-19
   - id: CVE-2026-5241
     paths:
       - uv.lock
@@ -74,7 +84,7 @@ vulnerabilities:
       False and emits a security warning when enabled
       (baselith/core/config/services.py) — and the core huggingface branch resolves
       transformers 5.14.1, which carries the fix.
-    expired_at: 2026-10-29
+    expired_at: 2026-11-19
   - id: CVE-2026-9856
     paths:
       - uv.lock
@@ -90,7 +100,7 @@ vulnerabilities:
       resolution is gated on `extra == 'extra-13-baselith-core-mineru'`, and
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
-    expired_at: 2026-10-29
+    expired_at: 2026-11-19
   - id: CVE-2026-80047
     paths:
       - uv.lock
@@ -107,7 +117,7 @@ vulnerabilities:
       did not flag. Re-argued with the entries above at the shared expiry:
       check the advisory for a first patched version and re-lock to it the day
       one exists.
-    expired_at: 2026-10-29
+    expired_at: 2026-11-19
 
   # ----------------------------------------------------------------
   # accelerate 1.14.0 — present only with the `huggingface` extra installed
@@ -155,15 +165,19 @@ vulnerabilities:
   # ----------------------------------------------------------------
   # pip's own vendored tree — visible only since pip 26 ships an SBOM
   # ----------------------------------------------------------------
-  # Both entries below come from ONE file: `pip/_vendor/bom.cdx.json`, the
+  # The entry below comes from ONE file: `pip/_vendor/bom.cdx.json`, the
   # CycloneDX SBOM that pip started shipping with 26.0. Trivy reads it and
-  # reports all 19 vendored components as installed packages. pip 25.0.1 (what
-  # `python:3.12-slim` ships) has no such file, so the same tree scanned clean
-  # — measured both ways on the bare base image: 0 python-pkg findings before
-  # the upgrade, these 2 after. The upgrade did not add either weakness; it
-  # made pip's supply chain legible to the scanner, which is the point of an
-  # SBOM. pip 25.0.1 vendored msgpack 1.1.0, equally inside the advisory's
-  # "<= 1.2.0" range and equally unreported.
+  # reports every vendored component as an installed package. pip 25.0.1 (what
+  # `python:3.12-slim` ships) has no such file, so the same tree scanned clean.
+  # The upgrade did not add the weakness; it made pip's supply chain legible to
+  # the scanner, which is the point of an SBOM.
+  #
+  # Re-checked 2026-11-05 against the PR #127 image scan, with every entry of
+  # this section already expired: the vendored msgpack (GHSA-6v7p-g79w-8964),
+  # the three vendored urllib3 advisories (CVE-2026-97687/-97688/-97689) and the
+  # second phantom-setuptools advisory (CVE-2026-59890) no longer reproduce, so
+  # their entries were dropped rather than renewed. Only CVE-2025-47273 still
+  # does.
   #
   # Why pip is in the image at all, and cannot simply be dropped: the runtime
   # pip is what `baselith plugin deps install` runs, via `sys.executable -m
@@ -172,69 +186,13 @@ vulnerabilities:
   # (CVE-2025-8869, CVE-2026-3219, CVE-2026-6357, CVE-2026-8643,
   # CVE-2026-13346 — symlink and archive handling during wheel installation,
   # and an index-driven arbitrary file write). Staying on 25.0.1 to avoid the
-  # two entries below would trade five reachable install-path weaknesses for
-  # one unreachable DoS and one package that is not installed.
+  # entry below would trade five reachable install-path weaknesses for one
+  # package that is not installed.
   #
-  # Neither entry carries `paths`. Trivy reports SBOM-derived components under
+  # The entry carries no `paths`. Trivy reports SBOM-derived components under
   # the aggregate "Python" target with PkgPath unset, so a path filter matches
   # nothing and silently stops suppressing. Do not "tighten" these by adding
   # one.
-  - id: GHSA-6v7p-g79w-8964
-    statement: >-
-      msgpack 1.1.2, vendored in pip/_vendor/msgpack. Reusing an Unpacker after
-      it has raised keeps reading past the buffer and can crash the process —
-      a DoS when the same Unpacker is fed untrusted input repeatedly. Fixed in
-      1.2.1. Unreachable fix: no released pip carries it. pip 26.2.1 is the
-      newest release and vendors 1.1.2; pip's main branch has already bumped
-      vendor.txt to msgpack==1.2.1, so the next release closes this without
-      any change here. Blast radius: the single consumer is
-      pip/_vendor/cachecontrol/serialize.py, which deserialises pip's OWN HTTP
-      cache. Nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ imports msgpack, and
-      the image installs no other copy. Reaching the vulnerable path means
-      writing crafted msgpack into pip's cache directory first, which is
-      already write access as the running user; production runs as appuser on
-      a read-only root filesystem (readOnlyRootFilesystem), so the cache is not
-      even persistent. Re-evaluate at expiry: if a pip release has shipped
-      msgpack 1.2.1, drop this entry and raise the Dockerfile's pip floor.
-    expired_at: 2026-10-29
-  - id: CVE-2026-97687
-    statement: >-
-      urllib3 2.7.0, vendored in pip/_vendor/urllib3: an HTTPS proxy TLS
-      configuration override that can let traffic be intercepted, fixed in
-      2.8.0. Unreachable fix: pip 26.2.1 is the newest release and still
-      vendors 2.7.0, so there is no pip to raise the Dockerfile floor to. The
-      application's own urllib3 is a separate copy, locked at 2.8.0 and
-      reported clean. Blast radius: the vendored copy is used only by pip's
-      own downloads, i.e. `baselith plugin deps install`, and the proxy
-      override matters only where an operator has configured an HTTPS proxy
-      for that pip. Nothing in baselith/core/, baselith/plugins/, sdk/ or scripts/ imports pip's
-      vendored copy. Same shape and same expiry as GHSA-6v7p-g79w-8964: no
-      `paths`, because SBOM-derived components carry no PkgPath. Re-evaluate
-      at expiry: if a pip release vendors urllib3 >=2.8.0, drop all three
-      urllib3 entries and raise the Dockerfile's pip floor.
-    expired_at: 2026-10-29
-  - id: CVE-2026-97689
-    statement: >-
-      Denial of service through unbounded memory allocation in urllib3's chunk
-      parser, in the copy vendored by pip 26.2.1 (2.7.0; fixed in 2.8.0). Same
-      block and same scoping as CVE-2026-97687 above: no released pip carries
-      the fix, the application's own urllib3 is locked at 2.8.0, and the
-      vendored copy only parses responses to pip's own downloads during a
-      plugin dependency install. A hostile index could exhaust memory of that
-      one short-lived pip process, not of the API server. Re-argued with
-      CVE-2026-97687 at the shared expiry.
-    expired_at: 2026-10-29
-  - id: CVE-2026-97688
-    statement: >-
-      Denial of service through an infinite loop while decoding a chunked
-      Deflate response, in the copy vendored by pip 26.2.1 (2.7.0; fixed in
-      2.8.0). Same block and same scoping as CVE-2026-97687 above: no released
-      pip carries the fix (pip's main branch still vendors urllib3==2.7.0), the
-      application's own urllib3 is locked at 2.8.0, and the vendored copy only
-      decodes responses to pip's own downloads during a plugin dependency
-      install. A hostile index could hang that one short-lived pip process,
-      not the API server. Re-argued with CVE-2026-97687 at the shared expiry.
-    expired_at: 2026-10-29
   - id: CVE-2025-47273
     statement: >-
       Path traversal in setuptools' PackageIndex, reported against 70.3.0 and
@@ -249,28 +207,10 @@ vulnerabilities:
       which is clean. So this is a scanner artifact of pip's SBOM, not an
       accepted risk — but it is kept on the same expiry as the entry above so
       both get re-checked together rather than decaying into a permanent mute.
+      Re-argued 2026-11-05: still reported by the image scan, still a phantom
+      (the finding carries no "(METADATA)" dist-info target, only pip's SBOM).
       Re-evaluate at expiry by confirming pip still ships no setuptools code.
-    expired_at: 2026-10-29
-  - id: CVE-2026-59890
-    statement: >-
-      The SECOND advisory against the same phantom setuptools 70.3.0, and the
-      reason this shape of entry will keep recurring: a MANIFEST.in exclusion
-      bypass in sdist via an NFC/NFD Unicode normalization collision on macOS
-      APFS/HFS+ (GHSA-h35f-9h28-mq5c), fixed in 83.0.0. Everything said for
-      CVE-2025-47273 above applies unchanged — the version comes from pip's
-      vendored SBOM, pip/_vendor/setuptools does not exist, and the only real
-      setuptools in the image is the one the Dockerfile installs into /install
-      at >=83.0.0, which is exactly at this advisory's fixed version. The
-      advisory is also about building an sdist on macOS, which this Linux image
-      does not do.
-      Kept per-CVE rather than muting the package, deliberately: a
-      setuptools-wide mute would also hide findings against that real 83.0.0
-      copy, which is the one that could actually hurt. If a third phantom CVE
-      shows up, revisit the SHAPE of the exception rather than adding a fourth
-      — the honest fix would be Trivy learning that a vendored SBOM entry with
-      no code on disk is not an installed package.
-    expired_at: 2026-10-29
-
+    expired_at: 2026-11-19
 # ==================================================================
 # Secret-scanner exceptions
 # ==================================================================

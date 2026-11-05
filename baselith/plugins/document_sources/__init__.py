@@ -9,8 +9,10 @@ from .plugin import DocumentSourcesPlugin
 # is imported. Nothing else imported them, so ``create_document_sources()``
 # returned an empty list and every ``/reindex`` logged "No active document
 # sources" over a populated DOCUMENTS_ROOT. ``web`` stays inert until
-# WEB_DOCUMENTS_ENABLED and WEB_DOCUMENTS_URLS are set.
+# WEB_DOCUMENTS_ENABLED and WEB_DOCUMENTS_URLS are set, and so does ``notion``
+# until NOTION_API_TOKEN is.
 from .sources import filesystem as filesystem
+from .sources import notion as notion
 from .sources import web as web
 from .sources.registry import create_document_sources
 
