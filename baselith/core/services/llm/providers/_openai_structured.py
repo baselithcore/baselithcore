@@ -20,7 +20,10 @@ from baselith.core.services.llm.providers._openai_mapping import (
     to_openai_tool_choice,
     to_openai_tools,
 )
-from baselith.core.services.llm.providers._openai_request import token_cap
+from baselith.core.services.llm.providers._openai_request import (
+    apply_reasoning_defaults,
+    token_cap,
+)
 from baselith.core.services.llm.tool_calling import (
     LLMResult,
     LLMToolSpec,
@@ -85,6 +88,11 @@ async def generate_structured(
             )
         if response_format is not None:
             request_kwargs["response_format"] = response_format_kwarg(response_format)
+        # A reasoning model answers 400 to any temperature but the default: the
+        # plain, streamed and message paths already drop it, and a structured call
+        # that asked for 0.0 failed on exactly the default model. Only the
+        # temperature rule applies here: this path sends no reasoning effort.
+        apply_reasoning_defaults(request_kwargs, model, None)
 
         response = await client.chat.completions.create(**request_kwargs)
         result = result_from_completion(response, fallback_prompt=prompt)

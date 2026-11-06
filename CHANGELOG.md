@@ -712,6 +712,14 @@ pull-request-only, so the release job cannot commit here. Follows
 ## [Unreleased]
 
 ### Fixed
+- **A structured OpenAI call no longer fails on a reasoning model for the
+  temperature it asked for.** `generate_structured` (the path of any call with a
+  `response_format`) sent `temperature` as given, so a deterministic request
+  (`temperature=0.0`) answered 400 ("does not support 0.0 with this model") on
+  `gpt-5` and later and on the o-series, the default model included. It now
+  applies the same shaping as the text, streaming and message paths: a
+  non-default temperature is dropped for those families and kept for every other
+  model.
 - **Usage a queue-worker job bills is no longer lost to per-plugin ledgers.** A
   worker hosts no plugins, so a plugin's usage sink never ran there: a plugin
   whose AI work happens in its background jobs showed no AI calls, no last use
