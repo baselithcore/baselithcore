@@ -108,7 +108,9 @@ answer.
 On the OpenAI provider, reasoning families (o-series, gpt-5 and later) reject
 any `temperature` but the default 1, so a different value is dropped from the
 request rather than failing it; other models, including unknown ones behind a
-compatible endpoint, keep theirs. The `LLM_OPENAI_REASONING_EFFORT` default is
+compatible endpoint, keep theirs. This holds on every OpenAI path: text,
+streaming, message and structured output (`generate_structured`, the path any call
+with a `response_format` takes). The `LLM_OPENAI_REASONING_EFFORT` default is
 sent on the text, streaming and message API paths, but never to gpt-3, gpt-4 or
 chatgpt models, which answer 400 to the field.
 The streamed message turn (`generate_messages_stream`, the path every tool-calling
