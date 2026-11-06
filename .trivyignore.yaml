@@ -173,11 +173,15 @@ vulnerabilities:
   # the scanner, which is the point of an SBOM.
   #
   # Re-checked 2026-11-05 against the PR #127 image scan, with every entry of
-  # this section already expired: the vendored msgpack (GHSA-6v7p-g79w-8964),
-  # the three vendored urllib3 advisories (CVE-2026-97687/-97688/-97689) and the
-  # second phantom-setuptools advisory (CVE-2026-59890) no longer reproduce, so
-  # their entries were dropped rather than renewed. Only CVE-2025-47273 still
-  # does.
+  # this section already expired: the vendored msgpack (GHSA-6v7p-g79w-8964) and
+  # the three vendored urllib3 advisories (CVE-2026-97687/-97688/-97689) no
+  # longer reproduce, so their entries were dropped rather than renewed.
+  # CVE-2025-47273 still does, and so does the second phantom-setuptools
+  # advisory, CVE-2026-59890: its entry was dropped too, wrongly. The PR image
+  # scan gates on HIGH,CRITICAL only and CVE-2026-59890 is MEDIUM, so that scan
+  # could never show it; the MEDIUM report pass of the release image on main
+  # (release-image.yml) reported it again on 2026-11-05 as code-scanning alert
+  # #384. Check a MEDIUM entry against that pass, not against the PR gate.
   #
   # Why pip is in the image at all, and cannot simply be dropped: the runtime
   # pip is what `baselith plugin deps install` runs, via `sys.executable -m
@@ -210,6 +214,28 @@ vulnerabilities:
       Re-argued 2026-11-05: still reported by the image scan, still a phantom
       (the finding carries no "(METADATA)" dist-info target, only pip's SBOM).
       Re-evaluate at expiry by confirming pip still ships no setuptools code.
+    expired_at: 2026-11-19
+  - id: CVE-2026-59890
+    statement: >-
+      The SECOND advisory against the same phantom setuptools 70.3.0, and the
+      reason this shape of entry will keep recurring: a MANIFEST.in exclusion
+      bypass in sdist via an NFC/NFD Unicode normalization collision on macOS
+      APFS/HFS+ (GHSA-h35f-9h28-mq5c), fixed in 83.0.0. Everything said for
+      CVE-2025-47273 above applies unchanged — the version comes from pip's
+      vendored SBOM, pip/_vendor/setuptools does not exist, and the only real
+      setuptools in the image is the one the Dockerfile installs into /install
+      at >=83.0.0, which is exactly at this advisory's fixed version. The
+      advisory is also about building an sdist on macOS, which this Linux image
+      does not do.
+      Kept per-CVE rather than muting the package, deliberately: a
+      setuptools-wide mute would also hide findings against that real 83.0.0
+      copy, which is the one that could actually hurt. If a third phantom CVE
+      shows up, revisit the SHAPE of the exception rather than adding a fourth
+      — the honest fix would be Trivy learning that a vendored SBOM entry with
+      no code on disk is not an installed package.
+      Restored 2026-11-07 after a wrong removal: it is MEDIUM, so only the
+      report pass of the release image sees it, and that pass reported it again
+      on the v1.3.0 image. Same expiry as CVE-2025-47273, re-argued with it.
     expired_at: 2026-11-19
 # ==================================================================
 # Secret-scanner exceptions
