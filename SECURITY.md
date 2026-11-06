@@ -13,8 +13,8 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.2.x  | :white_check_mark: |
-| < 1.2  | :x:                |
+| 1.3.x  | :white_check_mark: |
+| < 1.3  | :x:                |
 
 The exact version is recorded in [`baselith/core/_version.py`](baselith/core/_version.py). The
 table above is rewritten by semantic-release on every release (see the
