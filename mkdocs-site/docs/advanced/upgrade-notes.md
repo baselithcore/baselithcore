@@ -406,6 +406,23 @@ See [Security › Plugin trust store](security.md#plugin-trust-store).
 
 ## API and signature changes
 
+### A durable approval covers the call it was requested for
+
+A recorded approval used to match on tool name and category alone, and nothing
+consumed it, so after a reviewer approved `deploy` for one set of arguments
+every later `deploy` call in the same run went through, whatever its
+arguments. The pause now records the SHA-256 of the call's canonicalised
+arguments (`args_digest`) and a decision matches only that digest; earlier
+decisions are carried forward (`pending_approval["decided"]`, newest 64) so
+a resumed run replaying an approved call still finds its approval.
+
+**What can break:** a run that calls the same tool with different arguments
+now pauses once per distinct call instead of once per tool. Callers that pass
+no arguments (`HUMAN` workflow nodes, plugin gates) and runs paused by an
+earlier release keep matching by tool and category. A custom checkpoint object
+used with `enforce_approval` must accept an optional `args_digest` on
+`approval_decision` and `await_approval`.
+
 ### Workflow `TOOL` nodes are gated under an orchestration context
 
 A workflow run by the orchestrator (`WorkflowFlowHandler`,

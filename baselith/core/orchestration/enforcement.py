@@ -159,6 +159,9 @@ async def enforce_tool_invocation(
                 tool_name,
                 context.get("human_intervention"),
                 checkpoint=context.get("checkpoint"),
+                # Binds a durable approval to this call's arguments, so approving
+                # one invocation never authorises another of the same tool.
+                args_digest=_args_digest(args) if args is not None else None,
             )
         budget = context.get("loop_budget")
         if budget is not None:

@@ -42,10 +42,10 @@ class _PendingCheckpoint:
     def __init__(self) -> None:
         self.awaiting: list[tuple[str, str]] = []
 
-    def approval_decision(self, tool_name, category):
+    def approval_decision(self, tool_name, category, args_digest=None):
         return None
 
-    async def await_approval(self, tool_name, category):
+    async def await_approval(self, tool_name, category, args_digest=None):
         self.awaiting.append((tool_name, category))
 
 

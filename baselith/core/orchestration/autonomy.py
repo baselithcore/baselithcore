@@ -120,6 +120,7 @@ async def enforce_approval(
     *,
     timeout: int | None = None,
     checkpoint: Any | None = None,
+    args_digest: str | None = None,
 ) -> None:
     """Gate a tool invocation behind the autonomy approval matrix.
 
@@ -143,6 +144,11 @@ async def enforce_approval(
         timeout: Optional approval wait timeout in seconds.
         checkpoint: Optional checkpoint manager enabling durable
             pause/resume around the approval.
+        args_digest: Optional SHA-256 of the call's canonicalised arguments.
+            With a ``checkpoint`` it binds the durable request and the
+            recorded decision to this one call, so an approval for one set of
+            arguments never covers another. Without it, a decision matches by
+            tool and category as before.
 
     Raises:
         ApprovalPendingError: Run durably paused awaiting an async decision.
@@ -152,8 +158,11 @@ async def enforce_approval(
     if not policy.requires_approval(category):
         return
 
+    # Passed positionally and only when known, so a duck-typed checkpoint that
+    # predates the digest keeps working for callers that supply none.
+    bound = () if args_digest is None else (args_digest,)
     if checkpoint is not None:
-        decision = checkpoint.approval_decision(tool_name, category)
+        decision = checkpoint.approval_decision(tool_name, category, *bound)
         if decision is True:
             return
         if decision is False:
@@ -163,7 +172,7 @@ async def enforce_approval(
 
     if human_intervention is None:
         if checkpoint is not None:
-            await checkpoint.await_approval(tool_name, category)
+            await checkpoint.await_approval(tool_name, category, *bound)
             raise ApprovalPendingError(tool_name, category, checkpoint.run_id)
         raise ApprovalRequiredError(
             tool_name,

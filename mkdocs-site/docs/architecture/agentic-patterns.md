@@ -463,7 +463,8 @@ Other interaction primitives on `HumanIntervention`: `ask_input()`,
     (persist `awaiting_approval`, raise `ApprovalPendingError`, resume via
     the `/approvals` API) — the same contract for the ReAct autonomy gate and
     for `HUMAN` nodes in workflow graphs (`WorkflowBuilder.human(...)`, which
-    fail **closed** without a checkpoint). See
+    fail **closed** without a checkpoint). A tool approval is bound to the
+    digest of the call's arguments, so it covers that call and no other. See
     [Orchestration › Durable approvals](../core-modules/orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
     and [Workflows › Human approval gates](../core-modules/workflows.md#human-approval-gates-human-nodes).
 

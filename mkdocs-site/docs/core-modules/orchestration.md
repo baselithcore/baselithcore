@@ -1482,6 +1482,18 @@ channel exists:
     *requester* chose: it is recorded next to the authenticated id, never
     instead of it.
 
+!!! note "An approval covers one call, not the tool"
+    The pause records the SHA-256 of the call's canonicalised arguments
+    (`args_digest`, the digest the audit trail already carries), and a recorded
+    decision matches only that digest. After `deploy` is approved for
+    `{"env": "staging"}`, a later `deploy` for `{"env": "prod"}` in the same run
+    pauses again and needs its own decision, and a denial of one call does not
+    deny the other. Replaying the approved call on resume still finds its
+    approval: earlier decisions are carried forward on the checkpoint
+    (`pending_approval["decided"]`, the newest 64). A gate that passes no
+    arguments (`HUMAN` nodes, plugin gates, a run paused by an earlier release)
+    keeps matching by tool and category.
+
 A synchronous `human_intervention` channel, when present, still takes
 precedence (the classic blocking `request_approval` flow); the durable path
 engages only where that channel is absent. The parallel tool executor keeps
