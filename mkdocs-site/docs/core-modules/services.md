@@ -1546,7 +1546,10 @@ baselith/core/services/vectorstore/
     into the retry/circuit-breaker wrappers instead of stalling callers
     indefinitely. Both auth fields stay unset for the local compose
     default; a remote instance without them would send unauthenticated
-    plaintext traffic.
+    plaintext traffic. `QDRANT_PREFER_GRPC` (default `false`) sends upserts and searches over
+    gRPC (`VECTORSTORE_GRPC_PORT`, `6334`) instead of REST — protobuf instead of
+    JSON for every 1024-dimension vector. The bundled compose files publish
+    only `6333`, so enabling it there means publishing `6334` as well.
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier, embedding
@@ -1617,7 +1620,7 @@ await vs.delete_documents(["doc1", "doc2", "doc3"], collection_name="documents")
 
 Both providers' `delete_by_filter` accept a `list`/`tuple`/`set` as the filter
 value, meaning "match **any** of these values": `QdrantProvider` builds a
-`MatchAny` condition, `PgVectorProvider` a `payload->>%s = ANY(%s)` predicate.
+`MatchAny` condition, `PgVectorProvider` a `payload @> ANY(%s::jsonb[])` containment predicate for `document_id` and `tenant_id` (the keys the service always writes as strings), so the `gin (payload jsonb_path_ops)` index serves it — the `payload->>%s = ANY(%s)` form it replaced read every row (a sequential scan, 28–170 ms against 0.16 ms on 200 000 rows). Any other key, and any negated condition, keeps the text form: containment matches only a JSON string, so it is not assumed for keys whose type the service does not control, and `NOT (payload @> …)` would match rows that lack the key.
 Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnels
 into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
 instead of 1000. Tenant isolation applies here as everywhere else: the current
@@ -2960,6 +2963,7 @@ VECTORSTORE_EMBEDDING_DIM=1024
 EMBEDDING_CACHE_TTL=604800   # 7 days
 QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
 QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
+QDRANT_PREFER_GRPC=false     # gRPC (VECTORSTORE_GRPC_PORT) instead of REST
 VECTORSTORE_TIMEOUT_SECONDS=30.0
 
 # Vision — VISION_PROVIDER picks the provider; the model is per provider

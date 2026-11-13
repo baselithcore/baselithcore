@@ -519,6 +519,7 @@ VECTORSTORE_EMBEDDING_FALLBACK_DIM=384
 # Managed/remote Qdrant — both unset for the loopback compose default
 QDRANT_API_KEY=                      # SecretStr; API key for managed/remote Qdrant
 QDRANT_HTTPS=false                   # Use TLS for the Qdrant REST endpoint
+QDRANT_PREFER_GRPC=false             # Use gRPC (VECTORSTORE_GRPC_PORT) instead of REST
 VECTORSTORE_TIMEOUT_SECONDS=30.0     # Per-request deadline for vector store calls
 VECTORSTORE_SEARCH_CACHE_ENABLED=true  # Cache vector search results in Redis
 VECTORSTORE_SEARCH_CACHE_TTL=300     # Cached result lifetime in seconds (>= 1)

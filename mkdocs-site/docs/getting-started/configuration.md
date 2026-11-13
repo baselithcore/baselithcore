@@ -1009,6 +1009,7 @@ Declared in `baselith.core.config.vectorstore`.
 | `INDEX_MAX_CONCURRENCY` | `int` | `8` |  |
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
+| `QDRANT_PREFER_GRPC` | `bool` | `False` | Talk to Qdrant over gRPC (VECTORSTORE_GRPC_PORT) instead of REST |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
 | `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
@@ -1107,4 +1108,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-745 settings documented.
+746 settings documented.

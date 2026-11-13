@@ -196,7 +196,8 @@ class TestRetrieveDeleteScroll:
             )
         sql = _sqls(cursor)[0]
         assert "DELETE FROM vs_documents" in sql
-        assert "payload->>%s" in sql
+        # A string key the service writes: containment, so the GIN index serves it.
+        assert "payload @> %s::jsonb" in sql
 
 
 class TestServiceWiring:
@@ -289,9 +290,8 @@ class TestQdrantStyleFilterTranslation:
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], query_filter=filt)
         sql = _search_sql(cursor)
-        assert "payload->>%s = %s" in sql
-        params = _search_params(cursor)
-        assert "document_id" in params and "d1" in params
+        assert "payload @> %s::jsonb" in sql
+        assert '{"document_id":"d1"}' in _search_params(cursor)
 
     async def test_search_translates_must_not_match_any(self):
         cursor = _cursor()
@@ -309,8 +309,7 @@ class TestQdrantStyleFilterTranslation:
                 "documents", limit=2, scroll_filter=filt, tenant_id="t1"
             )
         sql = _sqls(cursor)[0]
-        assert "payload->>%s = %s" in sql
-        assert "payload @>" in sql  # tenant condition composed alongside
+        assert sql.count("payload @> %s::jsonb") == 2  # filter + tenant condition
 
     async def test_real_qdrant_models_also_translate(self):
         from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue
@@ -323,7 +322,7 @@ class TestQdrantStyleFilterTranslation:
         with _patched(cursor):
             await PgVectorProvider().search("documents", [0.1], query_filter=filt)
         sql = _search_sql(cursor)
-        assert "payload->>%s = %s" in sql
+        assert "payload @> %s::jsonb" in sql
         assert "NOT (payload->>%s = ANY(%s))" in sql
 
     async def test_unsupported_condition_rejected(self):

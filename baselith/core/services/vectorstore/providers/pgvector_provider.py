@@ -36,6 +36,9 @@ from baselith.core.services.vectorstore.exceptions import VectorStoreError
 from baselith.core.services.vectorstore.providers._pgvector_encoding import (
     _encode_vector,
 )
+from baselith.core.services.vectorstore.providers._pgvector_match import (
+    match_fragment,
+)
 
 logger = get_logger(__name__)
 
@@ -105,12 +108,12 @@ def _condition_sql(condition: Any, params: list[Any], negate: bool) -> str:
             "(expected a FieldCondition-like object with .key and .match)."
         )
     any_values = getattr(match, "any", None)
-    if any_values is not None:
-        params.extend([str(key), [str(v) for v in any_values]])
-        fragment = "payload->>%s = ANY(%s)"
-    else:
-        params.extend([str(key), str(getattr(match, "value", None))])
-        fragment = "payload->>%s = %s"
+    fragment = match_fragment(
+        str(key),
+        list(any_values) if any_values is not None else getattr(match, "value", None),
+        params,
+        negate=negate,
+    )
     return f"NOT ({fragment})" if negate else fragment
 
 
@@ -476,12 +479,8 @@ class PgVectorProvider:
         one statement for a whole batch instead of one DELETE per value.
         """
         table = _table(collection_name)
-        if isinstance(value, (list, tuple, set, frozenset)):
-            params: list[Any] = [key, [str(v) for v in value]]
-            where = ["payload->>%s = ANY(%s)"]
-        else:
-            params = [key, str(value)]
-            where = ["payload->>%s = %s"]
+        params: list[Any] = []
+        where = [match_fragment(key, value, params, negate=False)]
         where += _filter_where(None, kwargs.get("tenant_id"), params)
         async with get_async_cursor() as cur:
             await cur.execute(

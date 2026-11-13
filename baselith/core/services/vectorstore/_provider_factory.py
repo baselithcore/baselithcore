@@ -38,6 +38,7 @@ def build_provider(config: Any) -> VectorStoreProtocol:
             host=config.host,
             port=config.port,
             grpc_port=config.grpc_port,
+            prefer_grpc=config.qdrant_prefer_grpc,
             mode=config.qdrant_mode,
             path=config.qdrant_path,
             api_key=(
