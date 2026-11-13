@@ -159,3 +159,71 @@ async def test_two_gates_approve_sequentially():
     assert result.status == ExecutionStatus.COMPLETED
     assert result.output == "committed:prepared:x"
     assert calls == {"prepare": 1, "commit": 1}
+
+
+@pytest.mark.asyncio
+async def test_one_approval_does_not_open_the_gate_for_every_iteration_item():
+    """Regression: approving the first item's HUMAN gate passed all the others."""
+    import itertools
+
+    from baselith.core.workflows.builder import (
+        NodeType,
+        WorkflowDefinition,
+        WorkflowEdge,
+        WorkflowNode,
+    )
+
+    inner = (
+        WorkflowBuilder("per-item")
+        .start()
+        .human("gate")
+        .tool("pay", tool_id="pay")
+        .end()
+        .build()
+    )
+    outer = WorkflowDefinition(name="batch")
+    nodes = [
+        WorkflowNode(id="start", type=NodeType.START, label="s"),
+        WorkflowNode(
+            id="each",
+            type=NodeType.ITERATION,
+            label="each",
+            config={"workflow": inner, "items": "{{ input }}"},
+        ),
+        WorkflowNode(id="end", type=NodeType.END, label="e"),
+    ]
+    for node in nodes:
+        outer.add_node(node)
+    for i, (x, y) in enumerate(itertools.pairwise(nodes)):
+        outer.add_edge(WorkflowEdge(id=f"e{i}", source_id=x.id, target_id=y.id))
+    paid: list[object] = []
+
+    async def pay(value):
+        paid.append(value)
+        return value
+
+    store = InMemoryCheckpointStore()
+    manager = await _manager(store, "hg-iter")
+    executor = WorkflowExecutor(tools={"pay": pay})
+
+    approvals = 0
+    for _ in range(6):
+        try:
+            result = await executor.execute(
+                outer, initial_input=["a", "b", "c"], checkpoint=manager
+            )
+            break
+        except ApprovalPendingError:
+            approvals += 1
+            assert await record_approval_decision(
+                store, "hg-iter", True, approver="reviewer"
+            )
+            loaded = await store.load("hg-iter")
+            assert loaded is not None
+            manager = CheckpointManager(store, loaded)
+    else:  # pragma: no cover
+        pytest.fail("run never finished")
+
+    assert approvals == 3, "each item must be approved on its own"
+    assert paid == ["a", "b", "c"]
+    assert result.status is ExecutionStatus.COMPLETED

@@ -357,7 +357,11 @@ Most programmatic endpoints accept either an `X-API-Key` header or an
 `Authorization: Bearer <token>` header. The `SecurityManager` resolves the
 caller's role (`user`, `admin`, `job` — a `service` identity is treated as
 `job` — or `scoped` for least-privilege keys, which only `require_user`
-admits) and applies per-role rate limits through the sliding-window
+admits) — a `scoped` identity is then held to the route's capability: `chat:write`
+for `POST /chat`, `POST /chat/stream`, the chat WebSocket and
+`POST /agent/async`, `chat:read` for `GET /agent/status/{task_id}`,
+`feedback:write` for `POST /feedback`; without it the answer is `403`
+`insufficient_scope` (close code `4403` on the WebSocket) — and applies per-role rate limits through the sliding-window
 [`RateLimiter`](../core-modules/middleware.md#ratelimiter) — the only limiter
 in the stack; no secondary per-route limiter is initialised at startup. HTTP
 Basic credentials are not read on these routes.

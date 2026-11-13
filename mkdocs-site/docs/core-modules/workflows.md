@@ -24,7 +24,7 @@ baselith/core/workflows/
 ├── serialization.py  # YAML/JSON loading and export (hardened)
 ├── catalog.py        # WorkflowCatalog — named definitions, directory-backed
 ├── runtime.py        # WorkflowRuntime — limits, history, approval pauses
-├── triggers.py       # Inbound trigger signature verification
+├── triggers.py       # Inbound trigger signature verification (single-use, keyed on the parsed signature)
 ├── service.py        # WorkflowService — catalog + runtime + scheduler + MCP sync
 ├── mcp_tools.py      # Catalog workflows as MCP tools
 ├── adapters.py       # CrewNodeAdapter / ColonyNodeAdapter — multi-agent primitives behind the AGENT-node contract

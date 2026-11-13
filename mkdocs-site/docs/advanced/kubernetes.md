@@ -139,12 +139,17 @@ Verify before deploying:
 IMAGE=ghcr.io/baselithcore/baselithcore:0.31.0
 
 # 1. Cosign signature (keyless — issued via GitHub Actions OIDC)
+#    Pin the identity to the release workflow on main or a release tag. A
+#    pattern that accepts any workflow in the organisation also accepts an
+#    image somebody built from a feature branch.
 cosign verify "$IMAGE" \
-  --certificate-identity-regexp "https://github.com/baselithcore/.*" \
+  --certificate-identity-regexp '^https://github\.com/baselithcore/baselithcore/\.github/workflows/release-image\.yml@refs/(heads/main|tags/v[0-9].*)$' \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
-# 2. GitHub artifact attestation (SLSA provenance, verified against the repo)
-gh attestation verify "oci://$IMAGE" --repo baselithcore/baselithcore
+# 2. GitHub artifact attestation (SLSA provenance, verified against the repo
+#    and the workflow that is allowed to sign)
+gh attestation verify "oci://$IMAGE" --repo baselithcore/baselithcore \
+  --signer-workflow baselithcore/baselithcore/.github/workflows/release-image.yml
 
 # 3. BuildKit provenance / SBOM attached to the image index
 docker buildx imagetools inspect "$IMAGE" --format '{{ json .Provenance }}'

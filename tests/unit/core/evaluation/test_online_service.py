@@ -229,6 +229,32 @@ async def test_judged_sample_emits_evaluation_completed() -> None:
     await service.shutdown()
 
 
+async def test_subscribers_run_under_the_samples_tenant() -> None:
+    """Regression: the worker emitted under the ambient ``default`` tenant."""
+    from baselith.core.context import get_current_tenant_id
+
+    bus = EventBus()
+    seen: list[str] = []
+
+    async def subscriber(payload: dict[str, Any]) -> None:
+        seen.append(get_current_tenant_id())
+
+    bus.subscribe(EventNames.EVALUATION_COMPLETED, subscriber)
+    service = EvaluationService(
+        event_bus=bus,
+        evaluator=_judge(0.9),
+        config=_config(online_judge_rate=1.0),
+        store=InMemoryOnlineEvalStore(),
+    )
+    service.start()
+    await service._on_flow_completed(_flow())
+    await _drain(service)
+    await service.shutdown()
+
+    assert seen == ["acme"]
+    assert get_current_tenant_id() == "default"
+
+
 async def test_judge_is_off_by_default() -> None:
     judge = _judge()
     service = EvaluationService(event_bus=EventBus(), evaluator=judge, config=_config())

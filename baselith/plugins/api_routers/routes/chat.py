@@ -46,9 +46,11 @@ import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from baselith.core.auth.scopes import SCOPE_CHAT_WRITE
 from baselith.core.chat import chat_service
 from baselith.core.config import get_app_config
-from baselith.core.middleware import require_user
+from baselith.core.middleware import require_scope
+from baselith.core.middleware import require_user as require_user
 from baselith.core.models.chat import ChatRequest, ChatResponse
 from baselith.core.observability.logging import get_logger
 from baselith.core.observability.setup import request_id_ctx
@@ -146,7 +148,7 @@ class SSEResponse(StreamingResponse):
     media_type = "text/event-stream"
 
 
-router = APIRouter(dependencies=[Depends(require_user)])
+router = APIRouter(dependencies=[Depends(require_scope(SCOPE_CHAT_WRITE))])
 
 
 def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[str, str]:

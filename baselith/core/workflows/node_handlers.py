@@ -242,7 +242,13 @@ async def handle_human(node: WorkflowNode, context: ExecutionContext) -> Any:
         return context.get_last_output()
     if decision is False:
         raise RuntimeError(f"HUMAN gate {node.id!r} denied by reviewer")
-    await checkpoint.await_approval(node.id, category)
+    from baselith.core.orchestration.checkpoint_approval_match import args_preview
+
+    # The gate holds the value it would pass on; show the reviewer that, not
+    # only the node id.
+    await checkpoint.await_approval(
+        node.id, category, preview=args_preview(context.get_last_output())
+    )
     raise ApprovalPendingError(node.id, category, checkpoint.run_id)
 
 

@@ -298,7 +298,11 @@ scans it with `scan_external_content` (source `conversation_history`, same
 `<untrusted_tool_output tool="conversation_history">` envelope, keeping the
 `User:` / `Assistant:` labels readable inside it. Pass the raw turns — the
 function wraps on every call, by design (`wrap_untrusted` has no idempotency
-shortcut), so it runs exactly once per prompt. `RAG_CONTEXT_IS_DATA_RULE`
+shortcut), so it runs exactly once per prompt. Marker escaping matches the tag
+*name*, not a well-formed tag: `</untrusted_tool_output x>`, a self-closing or
+unterminated form, a soft hyphen or zero-width character inside the name and
+fullwidth `＜ ／` brackets are all neutralised, because a model reads each of
+them as the close marker. `RAG_CONTEXT_IS_DATA_RULE`
 names the conversation alongside the retrieved documents and says only the
 current Question is the user's request.
 
@@ -658,6 +662,22 @@ one window, and chunk boundaries may shift relative to the handler's output
 (the concatenated stream equals the filtered text). The
 `BASELITH_ORCHESTRATOR_GUARDRAILS` kill switch bypasses the streaming guard
 together with the rest of the pipeline.
+
+The window is sized for the short patterns. Two cases are longer than it and
+are handled separately, so that the streamed text equals the non-streaming
+filter's output for them too:
+
+- **A token still growing at the live edge** (a JWT, a prefixed API key, any
+  unbroken run of `[A-Za-z0-9_\-.+/=]`) is kept out of the filter pass until
+  something ends it, up to `MAX_TOKEN_HOLD` (8192) characters. Without this a
+  439-character JWT left the window before its pattern could match, or matched
+  on a prefix and trailed the rest of its signature. The alphabet is ASCII on
+  purpose: text in a script without word spaces keeps streaming.
+- **A private-key block** (`-----BEGIN … PRIVATE KEY-----`) is withheld from
+  its header until its `END` line: the body is dropped, not buffered, and the
+  block is emitted as the guard's own placeholder. A block cut off by the end
+  of the stream stays withheld. Skipped when the operator has disabled that
+  redaction pattern.
 
 With `BASELITH_MODERATION_OUTPUT=true` (and a moderation provider configured),
 `process_stream` composes `moderate_stream(guard_stream(...))`: the
@@ -1502,6 +1522,23 @@ channel exists:
     (`pending_approval["decided"]`, the newest 64). A gate that passes no
     arguments (`HUMAN` nodes, plugin gates, a run paused by an earlier release)
     keeps matching by tool and category.
+
+!!! note "…and one visit of the gate"
+    A decision is also bound to the **visit** it was made for: the scope the
+    gate ran in (each workflow `ITERATION` item and subgraph has its own) and
+    the occurrence of that `(scope, tool, category, digest)` gate within the
+    pass. Approving `send_payment({"to": "bob"})` once does not cover an
+    identical repeat — that is a new call and pauses again — and a `HUMAN` gate
+    approved for the first item of a list does not open for the others, nor for
+    a second pass through the same gate on a `CONDITION` back-edge. Occurrences
+    are counted per pass, like the content-addressed step keys, so a resumed run
+    replays its approved visits in order and stops at the first undecided one.
+    The pending request carries `scope`, `occurrence` and `args_preview` — the
+    call's arguments, credentials and e-mail local parts masked, each long
+    string cut to 160 characters and the whole to 1000 — which `GET /approvals`
+    returns, so the reviewer reads what they approve instead of a hash. (A
+    `HUMAN` gate shows the value it would pass on.) A pause persisted by an
+    earlier release has neither key and matches any visit once.
 
 A synchronous `human_intervention` channel, when present, still takes
 precedence (the classic blocking `request_approval` flow); the durable path

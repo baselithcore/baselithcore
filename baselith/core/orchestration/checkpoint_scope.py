@@ -235,12 +235,22 @@ class CheckpointScope(_ScopeFactory):
     def approval_decision(
         self, tool_name: str, category: str, args_digest: str | None = None
     ) -> bool | None:
-        return self.root.approval_decision(tool_name, category, args_digest)  # type: ignore[no-any-return]
+        """Decision for this visit; this scope's path keeps items distinct."""
+        return self.root.approval_decision(  # type: ignore[no-any-return]
+            tool_name, category, args_digest, scope=self.path
+        )
 
     async def await_approval(
-        self, tool_name: str, category: str, args_digest: str | None = None
+        self,
+        tool_name: str,
+        category: str,
+        args_digest: str | None = None,
+        *,
+        preview: str | None = None,
     ) -> None:
-        await self.root.await_approval(tool_name, category, args_digest)
+        await self.root.await_approval(
+            tool_name, category, args_digest, scope=self.path, preview=preview
+        )
 
     async def ensure_lease(self) -> None:
         await self.root.ensure_lease()

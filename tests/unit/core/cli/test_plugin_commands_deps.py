@@ -171,3 +171,6 @@ class TestPluginDeps:
         assert not _is_valid_requirement("-r requirements.txt")
         assert not _is_valid_requirement("")
         assert not _is_valid_requirement(None)
+        # Direct references are valid PEP 508 but point pip off the index.
+        assert not _is_valid_requirement("pkg @ https://evil.example/pkg.whl")
+        assert not _is_valid_requirement("pkg @ git+https://evil.example/pkg.git")

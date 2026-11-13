@@ -31,6 +31,7 @@ from collections.abc import Callable
 from typing import Any
 
 from baselith.core.config.evaluation import EvaluationConfig, get_evaluation_config
+from baselith.core.context import reset_tenant_context, set_tenant_context
 from baselith.core.events import EventBus, EventNames, get_event_bus
 from baselith.core.observability.logging import get_logger
 
@@ -295,12 +296,19 @@ class EvaluationService:
         queue = self._queue
         while True:
             sample = await queue.get()
+            # The worker is not in any request: without this the sample's text
+            # and the judge's feedback reach event subscribers (memory, the
+            # skill/pattern store) under the ambient ``default`` tenant instead
+            # of the tenant whose conversation produced them.
+            token = set_tenant_context(sample.tenant_id) if sample.tenant_id else None
             try:
                 await self.process_sample(sample)
             except Exception as exc:
                 record_failure("pipeline")
                 logger.warning("online_eval_failed: %s", exc)
             finally:
+                if token is not None:
+                    reset_tenant_context(token)
                 queue.task_done()
 
     async def process_sample(self, sample: OnlineSample) -> None:

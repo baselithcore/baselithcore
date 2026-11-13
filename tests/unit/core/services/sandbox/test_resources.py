@@ -167,7 +167,7 @@ def test_effective_timeout_is_clamped_once_resources_are_given():
 def docker_run(monkeypatch):
     """A SandboxService wired to a fake docker client; returns (service, client)."""
     container = MagicMock()
-    container.logs.side_effect = lambda stdout=True, stderr=True: (
+    container.logs.side_effect = lambda stdout=True, stderr=True, stream=False: (
         b"ok" if stdout else b""
     )
     container.wait.return_value = {"StatusCode": 0}

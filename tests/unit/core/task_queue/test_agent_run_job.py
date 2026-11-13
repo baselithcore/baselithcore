@@ -60,9 +60,11 @@ class _Tracker(TaskTracker):
 class _Webhooks:
     def __init__(self) -> None:
         self.emitted: list[tuple[str, dict]] = []
+        self.tenants: list[str] = []
 
     async def publish(self, event_type, data, *, tenant_id="default"):
         self.emitted.append((event_type, data))
+        self.tenants.append(tenant_id)
         return []
 
 
@@ -241,3 +243,44 @@ def test_tracker_mark_retrying_is_non_terminal_status():
     assert recorded["status"] is TaskStatus.RETRYING
     assert recorded["status"].value == "retrying"
     assert recorded["error"] == "boom"
+
+
+class TestWebhookTenant:
+    """The terminal webhook belongs to the tenant that ran the job."""
+
+    def test_worker_emit_carries_the_bound_tenant(self, harness, monkeypatch):
+        from baselith.core.context import reset_tenant_context, set_tenant_context
+
+        _, webhooks = harness
+
+        async def fake_chat(req, **_kwargs):
+            return _Response()
+
+        monkeypatch.setattr(job_module, "_handle_chat", fake_chat)
+        token = set_tenant_context("acme")
+        try:
+            job_module.run_agent_task("hello")
+        finally:
+            reset_tenant_context(token)
+        assert webhooks.tenants == ["acme"]
+
+    async def test_sweep_notifier_is_rebound_to_the_checkpoint_tenant(self, harness):
+        from types import SimpleNamespace
+
+        from baselith.core.context import get_current_tenant_id
+        from baselith.core.orchestration.run_completion import (
+            COMPLETION_NOTIFY_KEY,
+            notify_resumed_completion,
+        )
+
+        _, webhooks = harness
+        checkpoint = SimpleNamespace(
+            tenant_id="acme",
+            inputs={
+                COMPLETION_NOTIFY_KEY: {"kind": "task_queue.agent_run", "task_id": "t1"}
+            },
+        )
+        ran = await notify_resumed_completion(checkpoint, {"response": "done"})
+        assert ran is True
+        assert webhooks.tenants == ["acme"]
+        assert get_current_tenant_id() != "acme"  # the binding does not leak

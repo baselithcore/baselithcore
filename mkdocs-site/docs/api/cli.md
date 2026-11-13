@@ -610,6 +610,12 @@ baselith plugin deps install <name> -y  # Skip confirmation
 
 **`deps check`** verifies: Python packages, sibling plugins, environment variables, and required resources.
 
+A manifest `python_dependencies` entry must be a plain PEP 508 requirement
+resolved from the configured index. Pip options (`--index-url=…`) and
+direct references (`pkg @ https://…`, `pkg @ git+https://…`) are rejected by
+both `deps install` and install-time manifest validation: they would send pip
+to an origin of the manifest's choosing, outside the lock and every scan.
+
 **Example Output**:
 
 ```text

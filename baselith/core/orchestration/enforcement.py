@@ -25,6 +25,7 @@ from typing import Any
 
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.autonomy import enforce_approval
+from baselith.core.orchestration.checkpoint_approval_match import args_preview
 
 logger = get_logger(__name__)
 
@@ -162,6 +163,8 @@ async def enforce_tool_invocation(
                 # Binds a durable approval to this call's arguments, so approving
                 # one invocation never authorises another of the same tool.
                 args_digest=_args_digest(args) if args is not None else None,
+                # What the reviewer reads: a hash alone approves unseen input.
+                args_preview=args_preview(args),
             )
         budget = context.get("loop_budget")
         if budget is not None:

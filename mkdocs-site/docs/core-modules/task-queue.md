@@ -312,6 +312,10 @@ could not run async. `baselith/core/task_queue/jobs/agent_run.py` closes that ga
 `run_agent_task(query, conversation_id=None)` executes one chat/agent request
 on a worker, tracks its lifecycle in the TaskTracker, and emits a terminal
 webhook so callers can subscribe instead of polling.
+The webhook is published under the **tenant that ran the job** — the worker
+binds it from the job metadata, and a run finished by the recovery sweep is
+re-bound to its checkpoint's tenant before the notifier runs — so only that
+tenant's subscribers receive the answer.
 
 The `api-routers` plugin exposes it over HTTP (authenticated via
 `require_user`):

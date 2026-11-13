@@ -19,6 +19,7 @@ from .idempotency import IdempotencyMiddleware
 from .plugin_activation import PluginActivationMiddleware
 from .plugin_context import PluginContextMiddleware
 from .quota import QuotaMiddleware
+from .scope_gate import enforce_scoped_capability, require_scope
 from .security import (
     RateLimiter,
     RequestSizeLimitMiddleware,
@@ -55,6 +56,8 @@ __all__ = [
     "require_user",
     "require_admin",
     "require_admin_or_job",
+    "require_scope",
+    "enforce_scoped_capability",
     "verify_admin_password",
     "verify_admin_password_async",
     "check_admin_lockout",

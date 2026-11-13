@@ -258,7 +258,11 @@ class TestPrivacy:
             ),
         )
         monkeypatch.setattr(privacy_module, "get_data_subject_service", lambda: service)
-        monkeypatch.setattr(privacy_module, "_enforce", lambda request: None)
+        from baselith.core.auth.types import AuthUser
+
+        monkeypatch.setattr(
+            privacy_module, "_enforce", lambda request: AuthUser(user_id="platform")
+        )
         return _client(privacy_module.router)
 
     @pytest.mark.parametrize(

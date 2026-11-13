@@ -813,11 +813,13 @@
       "clear_admin_failures",
       "clear_request_size_overrides",
       "cost_controller",
+      "enforce_scoped_capability",
       "rate_limiter",
       "record_admin_failure",
       "register_request_size_override",
       "require_admin",
       "require_admin_or_job",
+      "require_scope",
       "require_user",
       "verify_admin_password",
       "verify_admin_password_async"

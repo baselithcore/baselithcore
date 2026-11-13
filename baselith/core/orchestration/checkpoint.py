@@ -49,14 +49,11 @@ from baselith.core.orchestration.call_keys import (
     call_step_key,
     step_key,
 )
-from baselith.core.orchestration.checkpoint_approval_match import (
-    decision_for,
-    new_pending_request,
-)
 from baselith.core.orchestration.checkpoint_errors import (
     CheckpointConflictError,
     CheckpointLeaseHeldError,
 )
+from baselith.core.orchestration.checkpoint_gates import ApprovalGateMixin
 from baselith.core.orchestration.checkpoint_lease import LeaseHolder
 from baselith.core.orchestration.checkpoint_scope import ScopeHost
 
@@ -243,7 +240,7 @@ class CheckpointStore(Protocol):
         ...
 
 
-class CheckpointManager(LeaseHolder, ScopeHost):
+class CheckpointManager(ApprovalGateMixin, LeaseHolder, ScopeHost):
     """Runtime façade a handler uses to make its tool steps durable.
 
     Exposed to handlers on the orchestration context as ``context["checkpoint"]``.
@@ -423,36 +420,6 @@ class CheckpointManager(LeaseHolder, ScopeHost):
         self.checkpoint.error = error
         self._sync_budget()
         await self._persist()
-
-    async def await_approval(
-        self, tool_name: str, category: str, args_digest: str | None = None
-    ) -> None:
-        """Pause the run pending human approval and persist that state.
-
-        Records which tool/category is waiting so an operator (or an approval
-        UI) can review it, then resume the run once a decision is recorded via
-        :func:`record_approval_decision`. With ``args_digest`` the request is
-        bound to that one call; see :mod:`.checkpoint_approval_match`.
-        """
-        self.checkpoint.status = STATUS_AWAITING_APPROVAL
-        self.checkpoint.pending_approval = new_pending_request(
-            tool_name, category, args_digest, self.checkpoint.pending_approval
-        )
-        self._sync_budget()
-        await self._persist()
-
-    def approval_decision(
-        self, tool_name: str, category: str, args_digest: str | None = None
-    ) -> bool | None:
-        """Recorded reviewer decision for this call, if any.
-
-        Returns True (approved) / False (denied) when a decision matching the
-        request exists, None when nothing was recorded (fresh gate). A request
-        bound to an ``args_digest`` is matched only by that digest.
-        """
-        return decision_for(
-            self.checkpoint.pending_approval, tool_name, category, args_digest
-        )
 
 
 # The operator-side approval flow lives in ``checkpoint_approvals`` and

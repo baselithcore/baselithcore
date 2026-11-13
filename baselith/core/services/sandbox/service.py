@@ -23,6 +23,7 @@ from baselith.core.config.sandbox import (
     get_sandbox_config,
 )
 
+from ._logs import read_capped_logs
 from .bootstrap import FileTransfer
 from .docker_factory import DockerFactory
 from .policy import build_sandbox_runtime_kwargs
@@ -452,12 +453,8 @@ class SandboxService:
                         execution_time=timeout,
                     )
 
-                stdout = (
-                    container.logs(stdout=True, stderr=False).decode("utf-8").strip()
-                )
-                stderr = (
-                    container.logs(stdout=False, stderr=True).decode("utf-8").strip()
-                )
+                stdout = read_capped_logs(container, stdout=True, stderr=False)
+                stderr = read_capped_logs(container, stdout=False, stderr=True)
 
                 return ExecutionResult(
                     stdout=stdout,

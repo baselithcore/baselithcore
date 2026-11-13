@@ -48,7 +48,11 @@ class ReasoningAgent:
         self.sandbox_service = sandbox_service
 
     async def solve(
-        self, problem_description: str, max_steps: int = 5, branching_factor: int = 3
+        self,
+        problem_description: str,
+        max_steps: int = 5,
+        branching_factor: int = 3,
+        enforcement_context: Any | None = None,
     ) -> dict[str, Any]:
         """
         Solve a problem using Tree of Thoughts.
@@ -69,6 +73,7 @@ class ReasoningAgent:
             k=branching_factor,
             max_steps=max_steps,
             tools=tools,
+            enforcement_context=enforcement_context,
         )
         return result_dict
 

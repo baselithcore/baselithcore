@@ -64,6 +64,25 @@ def test_replay_is_refused_with_a_flag():
     assert exc.value.replay is True
 
 
+@pytest.mark.parametrize(
+    "respell",
+    [
+        lambda h: h + ",x=1",
+        lambda h: h.replace(",", ", "),
+        lambda h: ",".join(reversed(h.split(","))),
+        lambda h: h.replace("t=", "t=0", 1),
+        lambda h: h.upper().replace("T=", "t=").replace("V1=", "v1="),
+    ],
+)
+def test_replay_with_a_respelled_header_is_refused(respell):
+    """The header grammar is lenient, so the raw string is not the identity."""
+    verifier = _verifier()
+    header = _sign("w1")
+    verifier.verify("w1", BODY, header)
+    with pytest.raises(TriggerAuthError):
+        verifier.verify("w1", BODY, respell(header))
+
+
 def test_same_body_signed_again_is_a_new_request():
     verifier = _verifier()
     now = int(time.time())

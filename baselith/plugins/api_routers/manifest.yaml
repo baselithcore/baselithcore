@@ -20,5 +20,5 @@ permissions:
   tools: []
   secrets: []
   filesystem: []
-integrity_sha256: d589dc33e1a8defdc89af447402f3a4a99f8920276a904b74b3125b65535a592
+integrity_sha256: 818b0631a33b4afa1f4fd145d822ed9cbbcd2a0635a9e439a81d61f99a57ee73
 hash_surface_version: 5

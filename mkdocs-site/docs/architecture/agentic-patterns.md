@@ -162,7 +162,9 @@ safe_output = output.filtered_output
     filters streamed chunks through `guard_stream`
     (`baselith/core/orchestration/stream_guard.py`) with a holdback window, so
     redaction patterns split across chunk boundaries are still caught (the window
-    is re-filtered every 64 characters, not every chunk). The
+    is re-filtered every 64 characters, not every chunk); a token still growing
+    at the live edge and an open private-key block are held whole, so secrets
+    longer than the window are redacted as well. The
     inbound gate (`guard_input_async`) also layers **content moderation**
     (`baselith/core/guardrails/moderation.py`, fail-open) on top of the regex guard
     when `BASELITH_MODERATION_PROVIDER` names a provider; a surface that

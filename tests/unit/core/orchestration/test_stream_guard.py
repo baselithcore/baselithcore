@@ -106,7 +106,9 @@ async def test_stride_filters_less_often_than_per_chunk(monkeypatch):
         return original(text)
 
     monkeypatch.setattr(output_guard, "filter", counting)
-    chunks = ["x" * 5] * 200
+    # Words, not one unbroken run: a run that reaches the live edge is held
+    # out of the filter pass altogether, which would leave nothing to count.
+    chunks = ["word "] * 200
 
     _ = [c async for c in guard_stream(_agen(chunks), stride=0)]
     per_chunk = calls
@@ -114,3 +116,90 @@ async def test_stride_filters_less_often_than_per_chunk(monkeypatch):
     _ = [c async for c in guard_stream(_agen(chunks))]
 
     assert calls < per_chunk / 5
+
+
+# --- secrets longer than the holdback window ---------------------------------
+
+_JWT = "eyJ" + "a" * 150 + "." + "b" * 180 + "." + "c" * 100
+# Assembled at runtime so no literal key block sits in the repository for a
+# secret scanner to flag; the content is filler, not a key.
+_DASHES = "-" * 5
+_PEM = (
+    f"{_DASHES}BEGIN RSA PRIVATE KEY{_DASHES}\n"
+    + "\n".join("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" * 2 for _ in range(26))
+    + f"\n{_DASHES}END RSA PRIVATE KEY{_DASHES}"
+)
+
+
+def _split(text: str, size: int) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [1, 3, 7, 64, 200, 5000])
+async def test_a_jwt_longer_than_the_window_is_redacted(size):
+    text = f"the token is {_JWT} keep it safe. " + "tail " * 60
+    out = "".join([c async for c in guard_stream(_agen(_split(text, size)))])
+    assert "a" * 40 not in out and "b" * 40 not in out
+    assert out.startswith("the token is ") and out.endswith("tail ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [1, 5, 31, 64, 200, 5000])
+async def test_a_private_key_block_is_withheld_whole(size):
+    text = f"here is the key:\n{_PEM}\nand the rest of the answer. " + "tail " * 60
+    out = "".join([c async for c in guard_stream(_agen(_split(text, size)))])
+    assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" not in out
+    assert "PRIVATE KEY-----" not in out
+    assert out.startswith("here is the key:\n")
+    assert "and the rest of the answer." in out and out.endswith("tail ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [1, 50, 5000])
+async def test_streaming_matches_the_non_streaming_filter_for_long_secrets(size):
+    from baselith.core.orchestration import guard_pipeline
+
+    _, output_guard = guard_pipeline._guards()
+    text = f"a {_JWT} b\n{_PEM}\nc " + "tail " * 60
+    out = "".join([c async for c in guard_stream(_agen(_split(text, size)))])
+    assert out == output_guard.filter(text).filtered_output
+
+
+@pytest.mark.asyncio
+async def test_a_key_block_cut_off_by_the_end_of_the_stream_stays_withheld():
+    text = "key:\n" + _PEM[: len(_PEM) // 2]
+    out = "".join([c async for c in guard_stream(_agen(_split(text, 40)))])
+    assert "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC" not in out
+    assert out.startswith("key:\n")
+
+
+@pytest.mark.asyncio
+async def test_an_unbroken_run_is_not_buffered_without_bound():
+    from baselith.core.orchestration.stream_guard import MAX_TOKEN_HOLD
+
+    blob = "Q" * (MAX_TOKEN_HOLD * 3)
+    largest_gap = 0
+    seen = 0
+    fed = 0
+
+    async def feed():
+        nonlocal fed
+        for piece in _split(blob, 256):
+            fed += len(piece)
+            yield piece
+
+    async for piece in guard_stream(feed()):
+        seen += len(piece)
+        largest_gap = max(largest_gap, fed - seen)
+    assert seen == len(blob)
+    assert largest_gap <= MAX_TOKEN_HOLD + 1024
+
+
+@pytest.mark.asyncio
+async def test_text_without_word_spaces_keeps_streaming():
+    """A non-ASCII script must not be held back as one long 'token'."""
+    text = "これは長い日本語の文章です。" * 200
+    pieces = [c async for c in guard_stream(_agen(_split(text, 20)))]
+    assert "".join(pieces) == text
+    assert len(pieces) > 20

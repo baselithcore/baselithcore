@@ -40,6 +40,10 @@ router = APIRouter(
 
 _SCOPE = "privacy:manage"
 
+#: The tenant platform-level credentials are bound to (the unauthenticated and
+#: single-tenant default). Deployment-wide operations are limited to it.
+PLATFORM_TENANT = "default"
+
 #: A subject id is an opaque identifier: no control characters (the consent
 #: log separates tenant and subject with one).
 _SUBJECT_ID = r"^[^\x00-\x1f\x7f]+$"
@@ -145,8 +149,24 @@ async def erase_subject(request: Request, payload: SubjectRequest) -> dict[str, 
 async def retention_sweep(
     request: Request, payload: RetentionRequest
 ) -> dict[str, Any]:
-    """Purge records older than the horizon across retention-aware providers."""
-    _enforce(request)
+    """Purge records older than the horizon across retention-aware providers.
+
+    The sweep is deployment-wide — it deletes expired rows of every tenant — so
+    it is a platform operation: a credential bound to another tenant, whatever
+    its scopes, is refused, and a zero horizon (everything) is not accepted.
+    """
+    user = _enforce(request)
+    if user.tenant_id != PLATFORM_TENANT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="the retention sweep spans every tenant; "
+            "it is limited to platform-level credentials",
+        )
+    if payload.older_than_days < 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="older_than_days must be at least 1",
+        )
     service = get_data_subject_service()
     report = await service.purge_expired(payload.older_than_days * 86400)
     return {**report.model_dump(), "total": report.total}
