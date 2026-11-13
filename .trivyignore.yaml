@@ -72,7 +72,12 @@ vulnerabilities:
       default OCR backend then); exercised solely by mineru's own pipeline over
       local documents, under byte/page/time caps. The `huggingface` extra that
       core actually imports resolves transformers 5.12.1 (unaffected).
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-5241
     paths:
       - uv.lock
@@ -84,7 +89,12 @@ vulnerabilities:
       False and emits a security warning when enabled
       (baselith/core/config/services.py) — and the core huggingface branch resolves
       transformers 5.14.1, which carries the fix.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-9856
     paths:
       - uv.lock
@@ -100,7 +110,12 @@ vulnerabilities:
       resolution is gated on `extra == 'extra-13-baselith-core-mineru'`, and
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-80047
     paths:
       - uv.lock
@@ -117,7 +132,12 @@ vulnerabilities:
       did not flag. Re-argued with the entries above at the shared expiry:
       check the advisory for a first patched version and re-lock to it the day
       one exists.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
 
   # ----------------------------------------------------------------
   # accelerate 1.14.0 — present only with the `huggingface` extra installed
@@ -158,9 +178,12 @@ vulnerabilities:
       still "<= 1.14.0" with no fix, both upstream PRs remain closed unmerged,
       and 1.15.0 is still the latest release, without them. Reachability and
       blast radius are unchanged.
+      Re-argued 2026-11-13: unchanged. GHSA-4j2p-28q2-5m79 still lists
+      "<= 1.14.0" with no first patched version, PRs #4070 and #4138 are still
+      closed unmerged, and 1.15.0 is still the latest release.
       Re-argue at expiry: check the advisory for a first patched version and
       re-lock to it the day one exists.
-    expired_at: 2026-11-10
+    expired_at: 2026-12-11
 
   # ----------------------------------------------------------------
   # pip's own vendored tree — visible only since pip 26 ships an SBOM
@@ -214,7 +237,10 @@ vulnerabilities:
       Re-argued 2026-11-05: still reported by the image scan, still a phantom
       (the finding carries no "(METADATA)" dist-info target, only pip's SBOM).
       Re-evaluate at expiry by confirming pip still ships no setuptools code.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
+      still vendors setuptools only as an SBOM component; the image installs
+      its own setuptools >=84.1.0.
+    expired_at: 2026-12-11
   - id: CVE-2026-59890
     statement: >-
       The SECOND advisory against the same phantom setuptools 70.3.0, and the
@@ -236,7 +262,10 @@ vulnerabilities:
       Restored 2026-11-07 after a wrong removal: it is MEDIUM, so only the
       report pass of the release image sees it, and that pass reported it again
       on the v1.3.0 image. Same expiry as CVE-2025-47273, re-argued with it.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
+      still vendors setuptools only as an SBOM component; the image installs
+      its own setuptools >=84.1.0.
+    expired_at: 2026-12-11
 # ==================================================================
 # Secret-scanner exceptions
 # ==================================================================
