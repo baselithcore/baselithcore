@@ -249,7 +249,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
   injection. Chunks pass through the streaming output guard
   (`baselith/core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
-  streaming moderation) before they reach the caller; see
+  streaming moderation) before they reach the caller. The window is re-filtered
+  once `DEFAULT_FILTER_STRIDE` (64) characters have accumulated past it, not on
+  every chunk — pass `stride=0` to filter per chunk; see
   [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
   memory manager, the background memory write is scheduled only when the
   stream **completes** — a stream that errors or is abandoned by the client
@@ -386,6 +388,10 @@ print(result.alternatives)    # Optional[list[dict]]
 `ClassificationResult` is a dataclass with fields `intent`, `confidence`,
 `method`, and optional `alternatives`. (There is no `source` field; the
 strategy that produced the result is reported via `method`.)
+
+The LLM strategy answers with one short JSON object (`intent`, `confidence`) and
+the call is capped at 96 output tokens, so a model that elaborates cannot hold
+retrieval and the first token behind it.
 
 The LLM strategy's classification prompt is a registry-served catalog prompt
 (`intent_classification`, rendered via `build_classification_prompt` with the
