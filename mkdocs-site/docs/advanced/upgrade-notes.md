@@ -406,6 +406,43 @@ See [Security › Plugin trust store](security.md#plugin-trust-store).
 
 ## API and signature changes
 
+### Workflow `TOOL` nodes are gated under an orchestration context
+
+A workflow run by the orchestrator (`WorkflowFlowHandler`,
+`Orchestrator.register_workflow`) now pushes every `TOOL` node call through
+`enforce_tool_invocation`, like the Agent and ReAct loops: agent contract,
+plugin capability, autonomy approval, tool-call budget, rate limit, pre-hooks
+and audit. Before, a `TOOL` node called its function directly, so the same tool
+was gated in a chat turn and free in a workflow.
+
+**What can break:** a `TOOL` node that declares no `config["category"]` is
+treated as `destructive`, so under the default `SUPERVISED` autonomy level with
+no approval channel its run now fails with "requires human approval". Declare
+the category on side-effect-free nodes (`.tool(..., category="read_only")`).
+A `WorkflowExecutor` called directly, without `gate_context`, is unchanged.
+
+### `A2AClient.invoke` speaks JSON-RPC to `POST {endpoint}/a2a`
+
+The client used to post a legacy message to `{endpoint}/a2a/invoke`, a route
+the bundled router never exposed, so every call against an `A2AServer` returned
+`404`. It now sends a JSON-RPC 2.0 request to `{endpoint}/a2a` (signing is
+unchanged) and maps a JSON-RPC `error` onto a failed `A2AResponse`.
+
+**What can break:** nothing that worked, since the old route did not exist on
+this package's server. A third-party peer that implemented `/a2a/invoke`
+must serve JSON-RPC at `/a2a` instead.
+
+### `ParallelToolExecutor` runs the full enforcement chokepoint
+
+The executor re-implemented three of the chokepoint's controls (contract,
+autonomy approval, tool-call budget) and skipped the rest. It now calls
+`enforce_tool_invocation`, so plugin capability checks, the tool rate limit,
+veto-capable `pre` hooks and the audit trail apply to parallel calls too. A
+denied call is still skipped with a failed `ToolResult`, never raised.
+
+**What can break:** a `pre` hook registered for a tool that used to be ignored
+in a parallel run now vetoes it.
+
 ### Plugin core bounds name the public core release
 
 `min_core_version` / `max_core_version` are compared with `CORE_VERSION`

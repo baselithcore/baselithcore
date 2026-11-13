@@ -166,8 +166,16 @@ class MCPServer(MessageHandlerMixin, RegistrationMixin):
         """
         Run the MCP server.
 
+        Only the stdio transport is served from here. Streamable HTTP is
+        mounted on the FastAPI app instead (``MCP_HTTP_TRANSPORT_ENABLED``; see
+        ``baselith.core.mcp.http_transport``), and the legacy HTTP+SSE transport
+        is not implemented.
+
         Args:
-            transport: Transport type ("stdio" or "sse")
+            transport: Transport type; only ``"stdio"`` is supported.
+
+        Raises:
+            ValueError: For any other transport.
         """
         if transport == "stdio":
             await self.run_stdio()

@@ -143,7 +143,9 @@ cache_write_tokens=0, batch=False) -> float`. A negative token count raises
 
 - `DEFAULT_PRICING` — a snapshot mapping common model ids to `ModelPrice`
   (Anthropic, OpenAI, Google, and zero-cost local models). Treat it as a
-  default; override per deployment for negotiated rates.
+  default. There is no configuration hook yet: the framework's own call
+  sites read it, and your own code can pass `table=` to `estimate_cost` or
+  `get_price` to price with negotiated rates.
 - `PRICING_AS_OF` — the snapshot date of `DEFAULT_PRICING` (ISO string).
   Display this in dashboards/reports instead of hand-syncing a copy; refresh it
   together with the table. It marks a **full re-verification pass**, not the
