@@ -331,7 +331,7 @@ If migration fails, you can rollback:
 - **Documentation**: <https://docs.baselithcore.xyz>
 - **GitHub Issues**: <https://github.com/baselithcore/baselithcore/issues>
 - **Discord Community**: <https://discord.gg/baselithcore>
-- **Migration Support**: <support@baselithcore.xyz>
+- **Migration Support**: <baselith.ai@gmail.com>
 
 ---
 

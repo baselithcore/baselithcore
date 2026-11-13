@@ -28,7 +28,7 @@ discussions.
 ## Security vulnerabilities
 
 **Never** in a public issue or discussion. Follow [SECURITY.md](SECURITY.md):
-private advisory or `security@baselithcore.dev`. Response targets are published
+private advisory or `baselith.ai@gmail.com`. Response targets are published
 there.
 
 ## What to expect

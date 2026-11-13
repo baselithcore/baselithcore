@@ -31,7 +31,7 @@ Report privately via either channel:
 
 - **GitHub Security Advisory** — use *Security → Report a vulnerability* on the
   repository (preferred; gives us a private collaboration thread).
-- **Email** — `security@baselithcore.dev` (PGP key available on request).
+- **Email** — `baselith.ai@gmail.com` (PGP key available on request).
 
 Please include:
 
