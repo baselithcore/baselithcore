@@ -24,7 +24,7 @@ name: Release Container Image
 #
 # It is therefore on by default now, with RELEASE_IMAGE_DISABLED in ci.yml as
 # the kill switch. `workflow_dispatch` remains the way to cut an image by hand
-# for any tag; pass the git tag.
+# for a release tag, from main only (the tag is required and validated below).
 on:
   workflow_call:
     inputs:
@@ -90,7 +90,27 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          TAG="${INPUT_TAG:-${RELEASE_TAG:-latest}}"
+          # An image is cut for a version, never for "whatever this run was
+          # started from": the old `:-latest` fallback let a bare
+          # workflow_dispatch from any branch build that branch and move the
+          # `latest`, major, minor and exact tags to it — signed and attested.
+          TAG="${INPUT_TAG:-${RELEASE_TAG:-}}"
+          if ! [[ "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::refusing to publish: '${TAG}' is not a release version tag" >&2
+            exit 1
+          fi
+          # Only main and release tags may publish. A dispatch from another
+          # branch runs that branch's copy of this file, so this is a guard
+          # against accidents, not against a writer: the cosign identity in
+          # docs/advanced/kubernetes.md pins `@refs/heads/main|tags/v*` for
+          # that, and a protected `environment:` closes it on the GitHub side.
+          case "$GITHUB_REF" in
+            refs/heads/main|refs/tags/v*) ;;
+            *)
+              echo "::error::refusing to publish from ${GITHUB_REF}" >&2
+              exit 1
+              ;;
+          esac
           # Strip a leading 'v' if present (v0.12.0 -> 0.12.0).
           TAG="${TAG#v}"
 
