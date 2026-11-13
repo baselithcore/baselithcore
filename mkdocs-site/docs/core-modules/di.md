@@ -86,6 +86,10 @@ llm = container.resolve(LLMServiceProtocol)
 `register` always takes a **factory callable** as its second argument. To
 register an already-created object, use `register_instance`.
 
+A factory may resolve other services from the same container (`container.resolve(...)`
+inside the factory). The container and scope locks are reentrant, so a
+dependency graph resolves instead of deadlocking.
+
 ### ServiceLifetime
 
 | Lifetime | Behavior |
