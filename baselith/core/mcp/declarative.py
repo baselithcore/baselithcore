@@ -168,6 +168,56 @@ def _clean_description(text: str, source: str) -> str:
     return cleaned[:MAX_DESCRIPTION_CHARS]
 
 
+#: Schema keywords whose string values are prose a model reads (and may obey).
+_PROSE_KEYS = frozenset({"description", "title", "default", "const", "$comment"})
+#: Bounds on a server-supplied schema: nesting, nodes visited, and the length of
+#: any single prose value. Past a bound the remainder is dropped, not trusted.
+_SCHEMA_MAX_DEPTH = 8
+_SCHEMA_MAX_NODES = 2000
+_SCHEMA_PROSE_CHARS = 500
+
+
+def _clean_schema(schema: dict[str, Any], source: str) -> dict[str, Any]:
+    """A server-written ``inputSchema`` made safe to hand a model as parameters.
+
+    ``description`` of the *tool* was cleaned, but the schema is shown to the
+    model just the same: a property ``description``, a ``title``, an ``enum``
+    value or a ``default`` is a free-text slot that bypassed the cleaner. Every
+    string in those positions gets the description treatment; structure
+    (``type``, ``properties``, ``required``) is untouched so validation keeps
+    working. The walk is bounded in depth and node count.
+    """
+    budget = [_SCHEMA_MAX_NODES]
+
+    def clean(value: Any, depth: int, key: str | None) -> Any:
+        budget[0] -= 1
+        if budget[0] < 0 or depth > _SCHEMA_MAX_DEPTH:
+            return None
+        if isinstance(value, str):
+            if key in _PROSE_KEYS or key == "enum":
+                return _clean_description(value, source)[:_SCHEMA_PROSE_CHARS]
+            return value
+        if isinstance(value, dict):
+            out: dict[str, Any] = {}
+            for k, v in value.items():
+                # Property names under ``properties`` are keys, not prose.
+                inner = None if key == "properties" else k
+                cleaned = clean(v, depth + 1, inner)
+                if cleaned is not None or v is None:
+                    out[k] = cleaned
+            return out
+        if isinstance(value, list):
+            # ``enum``/``examples`` items are prose-bearing; other lists
+            # (``required``, ``type``, ``oneOf``) keep their values as they are.
+            item_key = "enum" if key in {"enum", "examples"} else None
+            items = [(v, clean(v, depth + 1, item_key)) for v in value]
+            return [c for v, c in items if c is not None or v is None]
+        return value
+
+    cleaned_schema = clean(schema, 0, None)
+    return cleaned_schema if isinstance(cleaned_schema, dict) else {}
+
+
 def _as_tool_info(tool: MCPToolInfo | str) -> MCPToolInfo:
     if isinstance(tool, MCPToolInfo):
         return tool
@@ -255,7 +305,11 @@ def make_mcp_tool_fns(
                 fn=_make_fn(info.name),
                 description=description
                 or f"Tool '{info.name}' on external MCP server '{server_name}'.",
-                parameters=info.input_schema or None,
+                parameters=_clean_schema(
+                    info.input_schema,
+                    f"mcp_tool_schema:{server_name}.{info.name}",
+                )
+                or None,
                 category=category,
             )
         )

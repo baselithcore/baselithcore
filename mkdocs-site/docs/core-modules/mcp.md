@@ -1078,7 +1078,12 @@ Safety posture, in order:
   (`ValueError` otherwise); a tool whose name is not `[A-Za-z0-9_.-]{1,64}`, or
   repeats an earlier one, is skipped; descriptions lose control and bidi
   characters, pass through `scan_external_content` with sanitising on, and are
-  capped at 2000 characters.
+  capped at 2000 characters. The tool's `inputSchema` is shown to the model as
+  its parameters, so its free-text slots get the same treatment: every
+  `description`, `title`, `$comment`, `default`, `const` and `enum` string is
+  cleaned and cut at 500 characters, while the structure (`type`, `properties`,
+  `required`) is left alone so argument validation still works. The walk is
+  bounded to 8 levels and 2000 nodes; what lies beyond is dropped.
 
 ### Tool execution errors
 
