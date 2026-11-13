@@ -14,13 +14,8 @@ from typing import Any
 from uuid import uuid4
 
 from baselith.core.observability.logging import get_logger
-from baselith.core.orchestration.autonomy import (
-    DESTRUCTIVE,
-    ApprovalRequiredError,
-    enforce_approval,
-)
-from baselith.core.orchestration.contract import ContractViolationError
-from baselith.core.orchestration.limits import BudgetExceededError
+from baselith.core.orchestration.autonomy import DESTRUCTIVE
+from baselith.core.orchestration.enforcement import enforce_tool_invocation
 from baselith.core.orchestration.tool_output import (
     sanitize_tool_output,
     truncate_tool_output,
@@ -124,8 +119,9 @@ class ParallelToolExecutor:
                 tool absent from ``allowed_tools`` or listed in ``must_not`` is
                 rejected before execution.
             tool_hooks: Optional
-                ``baselith.core.orchestration.hooks.ToolHookRegistry`` whose ``post``
-                hooks observe every finished call. ``None`` uses the
+                ``baselith.core.orchestration.hooks.ToolHookRegistry`` whose
+                ``pre`` hooks may veto a call (it is then skipped) and whose
+                ``post`` hooks observe every finished call. ``None`` uses the
                 process-wide default registry (a no-op when empty).
         """
         self.max_parallel = max_parallel
@@ -313,69 +309,38 @@ class ParallelToolExecutor:
                 error=f"Unknown tool: {call.tool_name}",
             )
 
-        # Contract gate: reject tools not permitted by the agent contract
-        # (allowed_tools / must_not) before any side effect can happen.
-        if self.contract_validator is not None:
-            try:
-                self.contract_validator.check_tool_call(call.tool_name)
-            except ContractViolationError as e:
-                call.status = ToolStatus.SKIPPED
-                logger.warning(
-                    "tool_blocked_by_contract",
-                    tool_name=call.tool_name,
-                    reason=str(e),
-                )
-                return ToolResult(
-                    call_id=call.id,
-                    tool_name=call.tool_name,
-                    success=False,
-                    error=str(e),
-                )
-
-        # Autonomy gate: tools whose category requires approval at the
-        # configured level go through enforce_approval (human channel or
-        # fail-closed) BEFORE any side effect can happen.
-        if self.autonomy_policy is not None:
-            try:
-                await enforce_approval(
-                    self.autonomy_policy,
-                    self._tool_categories.get(call.tool_name, DESTRUCTIVE),
-                    call.tool_name,
-                    self.human_intervention,
-                )
-            except ApprovalRequiredError as e:
-                call.status = ToolStatus.SKIPPED
-                logger.warning(
-                    "tool_blocked_by_autonomy_policy",
-                    tool_name=call.tool_name,
-                    reason=str(e),
-                )
-                return ToolResult(
-                    call_id=call.id,
-                    tool_name=call.tool_name,
-                    success=False,
-                    error=str(e),
-                )
-
-        # Budget gate: record the tool call against the per-request cap.
-        # Exceeding the cap aborts this call (fail-closed) so a runaway
-        # loop cannot keep dispatching tools.
-        if self.loop_budget is not None:
-            try:
-                self.loop_budget.record_tool_call()
-            except BudgetExceededError as e:
-                call.status = ToolStatus.SKIPPED
-                logger.warning(
-                    "tool_blocked_by_loop_budget",
-                    tool_name=call.tool_name,
-                    reason=str(e),
-                )
-                return ToolResult(
-                    call_id=call.id,
-                    tool_name=call.tool_name,
-                    success=False,
-                    error=str(e),
-                )
+        # One chokepoint for every control -- agent contract, plugin capability,
+        # autonomy approval, tool-call budget, rate limit, veto-capable
+        # pre-hooks and the audit trail -- the same call the Agent and ReAct
+        # loops make. This used to re-implement three of them by hand and skip
+        # the rest. A denial skips the call (fail-closed) and never raises into
+        # the surrounding gather.
+        try:
+            await enforce_tool_invocation(
+                {
+                    "contract_validator": self.contract_validator,
+                    "autonomy_policy": self.autonomy_policy,
+                    "human_intervention": self.human_intervention,
+                    "loop_budget": self.loop_budget,
+                    "tool_hooks": self.tool_hooks,
+                },
+                call.tool_name,
+                self._tool_categories.get(call.tool_name, DESTRUCTIVE),
+                args=call.parameters,
+            )
+        except Exception as e:
+            call.status = ToolStatus.SKIPPED
+            logger.warning(
+                "tool_blocked_by_gate",
+                tool_name=call.tool_name,
+                reason=str(e),
+            )
+            return ToolResult(
+                call_id=call.id,
+                tool_name=call.tool_name,
+                success=False,
+                error=str(e),
+            )
 
         async with self._get_semaphore():
             try:

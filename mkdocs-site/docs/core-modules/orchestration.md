@@ -122,9 +122,13 @@ chokepoint helpers in `baselith/core/orchestration/enforcement.py`:
   [Tool burst rate limit](#tool-burst-rate-limit-rate_limitpy)).
 
 Each helper is a no-op when its primitive is absent, so they are safe to call
-from any handler. `ParallelToolExecutor` enforces the same controls
-internally when constructed with `loop_budget` / `contract_validator` /
-`autonomy_policy`.
+from any handler. `ParallelToolExecutor` calls `enforce_tool_invocation`
+itself for every call, so the contract, plugin capability, approval, budget,
+rate limit, pre-hooks and audit trail apply to parallel tool calls too; a
+denied call is skipped with a failed `ToolResult`, never raised into the
+gather. Workflow `TOOL` nodes take the same path when the workflow runs
+under an orchestration context (see
+[Workflows](workflows.md#node-types)).
 
 Every gated invocation is also recorded on the audit trail — `tool.invoke` on
 success, `tool.blocked` (with the refusal reason) when any gate raises. The

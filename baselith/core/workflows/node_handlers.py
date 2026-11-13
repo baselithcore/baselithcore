@@ -99,12 +99,14 @@ async def handle_subgraph(
             f"Subgraph node {node.id!r} has no workflow in config['workflow']"
         )
     checkpoint = context.__dict__.get(NODE_CHECKPOINT_KEY)
-    if checkpoint is not None:
-        result = await executor.execute(
-            sub, initial_input=context.get_last_output(), checkpoint=checkpoint
-        )
-    else:
-        result = await executor.execute(sub, initial_input=context.get_last_output())
+    # The nested run inherits the gate: a tool inside a subgraph is no less a
+    # tool call than one at the top level.
+    result = await executor.execute(
+        sub,
+        initial_input=context.get_last_output(),
+        checkpoint=checkpoint,
+        gate_context=context.gate_context,
+    )
     if result.status != ExecutionStatus.COMPLETED:
         raise RuntimeError(
             f"Subgraph {sub.name!r} failed: {result.error or result.status}"
@@ -152,6 +154,31 @@ def _accepts_checkpoint(run: Any) -> bool:
     )
 
 
+async def _enforce_tool_gate(
+    node: WorkflowNode, fn: Any, context: ExecutionContext, args: Any
+) -> None:
+    """Push one TOOL node call through the single enforcement chokepoint.
+
+    A no-op without ``context.gate_context``, so a standalone executor behaves
+    as it always did. The risk category is the node's ``config["category"]``;
+    an undeclared or unrecognised value is ``destructive`` - the stance the
+    Agent and ReAct loops take for an undeclared tool, never silently waved
+    through. Denials raise and fail the node (an ``ApprovalPendingError``
+    keeps its durable-pause meaning in the executor).
+    """
+    gate = context.gate_context
+    if not gate:
+        return
+    # Lazy: ``baselith.core.workflows`` must stay importable without orchestration.
+    from baselith.core.orchestration.autonomy import ALL_CATEGORIES, DESTRUCTIVE
+    from baselith.core.orchestration.enforcement import enforce_tool_invocation
+
+    declared = node.config.get("category", DESTRUCTIVE)
+    category = declared if declared in ALL_CATEGORIES else DESTRUCTIVE
+    tool_name = node.tool_id or getattr(fn, "__name__", None) or node.id
+    await enforce_tool_invocation(gate, tool_name, category, args=args)
+
+
 async def handle_tool(
     executor: WorkflowExecutor, node: WorkflowNode, context: ExecutionContext
 ) -> Any:
@@ -170,7 +197,9 @@ async def handle_tool(
         )
     arguments = node.config.get("arguments")
     if arguments is None:
-        result = fn(context.get_last_output())
+        last_output = context.get_last_output()
+        await _enforce_tool_gate(node, fn, context, last_output)
+        result = fn(last_output)
     else:
         # Named arguments (templated against the run scope), for tools that
         # take keyword parameters - the shape plugin tools are registered in.
@@ -181,6 +210,7 @@ async def handle_tool(
             raise ValueError(
                 f"Tool node {node.id!r}: config['arguments'] must be a mapping"
             )
+        await _enforce_tool_gate(node, fn, context, kwargs)
         result = fn(**kwargs)
     if asyncio.iscoroutine(result):
         return await result

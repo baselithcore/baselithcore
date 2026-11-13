@@ -151,6 +151,20 @@ to the reviewer.
 | `LIST`      | Filter, sort, slice, de-duplicate and project a list ([details](#list)) | `config["ops"]` |
 | `CODE`      | Python snippet in the sandbox, opt-in ([details](#code)) | `config["code"]` |
 
+!!! warning "TOOL nodes are gated under an orchestrator"
+    `execute(..., gate_context=context)` (what `WorkflowFlowHandler` and
+    `Orchestrator.register_workflow` pass for you) routes every `TOOL` call
+    through the same enforcement chokepoint as the Agent and ReAct loops:
+    agent contract, plugin capability, autonomy approval, tool-call budget,
+    rate limit, pre-hooks and the audit trail. Declare the node's risk with
+    `config["category"]` (`read_only`, `mutating`, `destructive` or
+    `external_side_effect`), for example
+    `.tool("lookup", tool_id="lookup", category="read_only")`. A node that
+    declares nothing, or an unknown value, is treated as `destructive`, so at
+    the default `SUPERVISED` level and with no approval channel it is refused.
+    A standalone `WorkflowExecutor` run with no `gate_context` is ungated, as
+    before.
+
 !!! note "Node fields"
     `TOOL` nodes call the tool with the upstream output; with
     `config["arguments"]` (a mapping, `{{ }}` templates allowed) they call it
