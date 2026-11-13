@@ -4,6 +4,7 @@ Standard RAG Flow Handler.
 Implements the default Question Answering logic over documents.
 """
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -121,6 +122,35 @@ def build_rag_user_prompt(context_text: str, query: str, history: str = "") -> s
     rendered = render_history_context(history)
     history_block = f"Conversation so far:\n{rendered}\n\n" if rendered else ""
     return f"{history_block}Context:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
+
+
+#: Characters of untrusted text above which the injection scan leaves the
+#: event loop. The scan is pure CPU and linear in its input: ~3 ms for five
+#: 1 000-character chunks, ~12 ms for twenty, ~6 ms for a 10 KB history — time
+#: during which no other stream on the worker moves. Below this a thread hop
+#: costs more than the scan.
+SCAN_OFFLOAD_CHARS = 2048
+
+
+async def render_rag_context_async(results: list[Any]) -> str:
+    """:func:`render_rag_context`, off the event loop when the chunks are large."""
+    size = sum(len(r.document.content or "") for r in results)
+    if size < SCAN_OFFLOAD_CHARS:
+        return render_rag_context(results)
+    return await asyncio.to_thread(render_rag_context, results)
+
+
+async def build_rag_user_prompt_async(
+    context_text: str, query: str, history: str = ""
+) -> str:
+    """:func:`build_rag_user_prompt`, off the event loop when history is large.
+
+    Only the history is scanned here (the context block already was), so its
+    length alone decides.
+    """
+    if len(history or "") < SCAN_OFFLOAD_CHARS:
+        return build_rag_user_prompt(context_text, query, history)
+    return await asyncio.to_thread(build_rag_user_prompt, context_text, query, history)
 
 
 class StandardRagHandler(BaseFlowHandler):
@@ -250,7 +280,7 @@ class StandardRagHandler(BaseFlowHandler):
         if not results:
             return [], "", []
 
-        context_text = render_rag_context(results)
+        context_text = await render_rag_context_async(results)
         sources = [r.document.metadata.get("source", r.document.id) for r in results]
         return results, context_text, sources
 
@@ -285,7 +315,7 @@ class StandardRagHandler(BaseFlowHandler):
                 }
 
             response = await self.llm_service.generate_response(
-                prompt=build_rag_user_prompt(
+                prompt=await build_rag_user_prompt_async(
                     context_text, query, context.get("history_text", "")
                 ),
                 system_prompt=RAG_SYSTEM_PROMPT,

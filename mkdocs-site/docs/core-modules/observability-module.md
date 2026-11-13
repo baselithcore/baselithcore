@@ -82,10 +82,10 @@ with bind_context(request_id="req-456"):
 
 ### Technical Implementation
 
-- **ProcessorFormatter**: We use a `UnifiedFormatter` (a specialized `ProcessorFormatter`) that handles both structured dictionaries and plain strings safely.
+- **ProcessorFormatter**: one structlog `ProcessorFormatter` renders both origins — a structlog event dict arrives as the record's message, a foreign (stdlib) record goes through the pre-chain first. Both carry a timestamp: structlog entries are stamped on the calling thread, at the moment they are logged, not when the listener renders them.
 - **Uvicorn Hijacking**: During startup, Uvicorn loggers are reconfigured to propagate to the root logger, clearing their default handlers to prevent duplicated or mismatched logs.
 - **Rich Integration**: In development mode, `rich` is used for high-fidelity tracebacks and colorized output.
-- **Non-blocking hand-off (`QueueHandler` + `QueueListener`)**: The root logger's handler is a `QueueHandler`; the blocking write — structlog rendering, JSON serialization, and stream I/O — runs on a dedicated `QueueListener` thread, not on the caller. This keeps every `logger.info()` off the event loop's critical path (the render+write would otherwise run synchronously inside the request, most costly under `LOG_JSON=true`). `configure_logging()` stops any prior listener before re-mounting (no thread leak on re-init) and registers an `atexit` flush so buffered records are written on shutdown.
+- **Non-blocking hand-off (`QueueHandler` + `QueueListener`)**: The root logger's handler is a `QueueHandler`; the blocking write — structlog rendering, JSON serialization, and stream I/O — runs on a dedicated `QueueListener` thread, not on the caller. This keeps every `logger.info()` off the event loop's critical path (the render+write would otherwise run synchronously inside the request, most costly under `LOG_JSON=true`). `configure_logging()` stops any prior listener before re-mounting (no thread leak on re-init) and registers an `atexit` flush so buffered records are written on shutdown. The handler is a small `QueueHandler` subclass that passes a structlog record across the queue **unformatted**: the stock `prepare()` stringified the event dict on the caller and the formatter parsed it back with `ast.literal_eval`, which cost a second pass per entry and dropped any line carrying a value whose `repr` is not a Python literal — a `UUID`, a `Path`, an exception — with a `--- Logging error ---` on stderr instead.
 
 ---
 
@@ -702,6 +702,18 @@ first goes by key: a field whose name marks it a secret (`token`,
 recursively through nested dicts, lists and tuples. The second goes by value:
 every remaining string has its emails masked to the first three characters of
 the local part, and the credentials inside it redacted:
+
+The value pass runs on the calling thread for every string of every entry, and
+almost none of them hold a secret, so each regex is skipped when it cannot
+match: the email pass needs an `@`, the credential and bearer passes need one
+of the vocabulary keywords, the token pass needs one of its three prefixes
+(`eyJ`, `ya29.`, `1//`). Every test is a necessary condition of the regex it
+guards, so the output is identical to running all of them — about 1 µs instead
+of 17 µs on an ordinary line, 20 µs instead of 320 µs on a traceback. The
+keyword test is a lowercase substring match, which equals the regexes'
+case-insensitive match only for ASCII text (`re.IGNORECASE` also folds `ſ`, `ı`
+and the Kelvin sign onto ASCII letters), so a string with any non-ASCII
+character always takes every pass.
 
 | Form in the message | Logged as |
 |---|---|

@@ -281,6 +281,14 @@ scopes a Redis key and is not an access boundary. Callers running outside a
 request (a background job, a CLI invocation) share the `"default"` prefix
 instead of raising under `strict_tenant_isolation`.
 
+The vector store imports this module for its search cache, so it sits on the
+import path of every serving process. The package `__init__` therefore
+resolves its exports on first access ([lazy loading](../advanced/lazy-loading.md)):
+importing `baselith.core.optimization.caching` no longer loads the prompt
+compiler, the evolution engine and the evaluation package along with it.
+`from baselith.core.optimization import compile_prompt` and every other
+package-level import keep working unchanged.
+
 ---
 
 ## Configuration

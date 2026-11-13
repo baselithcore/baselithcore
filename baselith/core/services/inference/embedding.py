@@ -18,6 +18,10 @@ from typing import Any, Protocol
 import httpx
 
 from baselith.core.config.inference import EmbeddingConfig, get_embedding_config
+from baselith.core.services.inference._batching import (
+    REMOTE_BATCH_CONCURRENCY,
+    map_batches,
+)
 from baselith.core.services.inference._http import RemoteClient, tls_context
 from baselith.core.services.inference._protocols import (
     EMBED_PATHS,
@@ -37,6 +41,9 @@ class EmbeddingBackend(Protocol):
 
 class RemoteEmbeddingBackend:
     """HTTP client for the configured embedding protocol."""
+
+    #: Batches one call may have in flight (see ``_batching``).
+    batch_concurrency = REMOTE_BATCH_CONCURRENCY
 
     def __init__(
         self,
@@ -177,11 +184,7 @@ class EmbeddingService:
         ``BASELITH_EMBEDDING_DOCUMENT_PREFIX`` applies; use :meth:`embed_query`
         / :meth:`embed_queries` for the search side.
         """
-        out: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            batch = texts[start : start + self._batch_size]
-            out.extend(self._checked(await self._backend.embed(batch, is_query=False)))
-        return out
+        return await self._embed_batched(texts, is_query=False)
 
     async def embed_query(self, text: str) -> list[float]:
         """Embed one query string (``BASELITH_EMBEDDING_QUERY_PREFIX`` applies)."""
@@ -189,11 +192,24 @@ class EmbeddingService:
 
     async def embed_queries(self, texts: list[str]) -> list[list[float]]:
         """Embed several queries (batched; the query prefix applies to each)."""
-        out: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            batch = texts[start : start + self._batch_size]
-            out.extend(self._checked(await self._backend.embed(batch, is_query=True)))
-        return out
+        return await self._embed_batched(texts, is_query=True)
+
+    async def _embed_batched(
+        self, texts: list[str], *, is_query: bool
+    ) -> list[list[float]]:
+        """Embed ``texts`` in batches, overlapping them on a remote backend."""
+
+        async def one(batch: list[str]) -> list[list[float]]:
+            return self._checked(await self._backend.embed(batch, is_query=is_query))
+
+        batches = [
+            texts[start : start + self._batch_size]
+            for start in range(0, len(texts), self._batch_size)
+        ]
+        results = await map_batches(
+            batches, one, concurrency=getattr(self._backend, "batch_concurrency", 1)
+        )
+        return [vector for vectors in results for vector in vectors]
 
     async def shutdown(self) -> None:
         """Close the backend (called by the lazy registry at shutdown)."""

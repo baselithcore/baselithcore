@@ -33,6 +33,9 @@ from baselith.core.services.vectorstore._dimension import (
     EmbeddingDimensionMismatchError,
 )
 from baselith.core.services.vectorstore.exceptions import VectorStoreError
+from baselith.core.services.vectorstore.providers._pgvector_encoding import (
+    _encode_vector,
+)
 
 logger = get_logger(__name__)
 
@@ -68,11 +71,6 @@ def _table(collection_name: str) -> str:
             f"Invalid collection name {collection_name!r}: only [a-zA-Z0-9_] allowed."
         )
     return f"vs_{collection_name.lower()}"
-
-
-def _encode_vector(vector: Sequence[float]) -> str:
-    """pgvector text encoding: '[0.1,0.2,...]'."""
-    return "[" + ",".join(repr(float(v)) for v in vector) + "]"
 
 
 @dataclass(frozen=True)

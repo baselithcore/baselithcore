@@ -30,6 +30,7 @@ def mock_vectorstore():
     mock = AsyncMock()
     mock.index = AsyncMock(return_value=None)
     mock.delete_document = AsyncMock(return_value=None)
+    mock.delete_documents = AsyncMock(return_value=None)
     return mock
 
 

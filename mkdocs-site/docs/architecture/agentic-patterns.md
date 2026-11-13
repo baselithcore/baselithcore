@@ -186,7 +186,9 @@ safe_output = output.filtered_output
     conversation history (`history_text` in the RAG prompt,
     `recent_history` on the context) as one `conversation_history` envelope
     via `render_history_context`. A poisoned document, memory or earlier turn
-    therefore reaches the model as quoted data, never as an instruction. See
+    therefore reaches the model as quoted data, never as an instruction. The
+    scans are pure CPU, so past 2 048 characters of chunks or history the
+    handler runs them in a worker thread rather than on the event loop. See
     [Orchestration › Untrusted-output envelope](../core-modules/orchestration.md#untrusted-output-envelope).
     Queries are embedded with the index's own model
     (`VectorStoreConfig.embedding_model`), through the remote embedding server

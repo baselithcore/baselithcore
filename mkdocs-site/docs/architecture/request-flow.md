@@ -600,8 +600,10 @@ finished stream from a dropped connection.
 
 Two other bounds apply to every stream:
 
-- **Client disconnect** — the generator checks `request.is_disconnected()` each
-  round (including every heartbeat, so a silent stream notices too) and closes
+- **Client disconnect** — the generator checks `request.is_disconnected()` at
+  most every 0.5 s while chunks flow (asking before each chunk cost more loop
+  time than framing it) and on every heartbeat, so a silent stream notices too,
+  and closes
   the source on the way out, so a closed tab no longer leaves the
   upstream LLM call running (and billing).
 - **Wall clock** — `CHAT_STREAM_TIMEOUT_SECONDS` (default `300.0`) bounds the whole

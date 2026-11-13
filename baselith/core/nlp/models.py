@@ -7,7 +7,6 @@ Provides embedder and reranker model loading with caching.
 from __future__ import annotations
 
 import time
-from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -34,6 +33,7 @@ from baselith.core.config import (
 )
 from baselith.core.nlp import _remote  # TEI-backed stand-ins when BASELITH_*_URL is set
 from baselith.core.nlp._model_meta import _count_tokens_sync, _model_name
+from baselith.core.nlp._named_cache import NamedModelCache
 from baselith.core.nlp.roles import (
     DOCUMENT,
     QUERY,
@@ -417,8 +417,7 @@ class CachedEmbedder:
         return getattr(self.model, name)
 
 
-@cache
-def get_embedder(model_name: str | None = None) -> CachedEmbedder:
+def _get_embedder(model_name: str) -> CachedEmbedder:
     """
     Get cached embedder instance.
 
@@ -430,14 +429,13 @@ def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     """
     vs_config = get_vectorstore_config()
     storage_config = get_storage_config()
-    actual_model_name = model_name or vs_config.embedding_model
-    if _remote.use_remote_embedder(actual_model_name):  # core EmbeddingService
+    if _remote.use_remote_embedder(model_name):  # core EmbeddingService
         base_model: Any = _remote.RemoteEmbeddingModel()
     else:
         _require_sentence_transformers()
         sentence_transformer, _ = _model_classes()
         assert sentence_transformer is not None
-        base_model = sentence_transformer(actual_model_name)
+        base_model = sentence_transformer(model_name)
 
     return CachedEmbedder(
         base_model,
@@ -448,8 +446,7 @@ def get_embedder(model_name: str | None = None) -> CachedEmbedder:
     )
 
 
-@cache
-def get_reranker(model_name: str | None = None) -> CrossEncoder:
+def _get_reranker(model_name: str) -> CrossEncoder:
     """
     Get cached reranker instance.
 
@@ -459,14 +456,21 @@ def get_reranker(model_name: str | None = None) -> CrossEncoder:
     Returns:
         CrossEncoder instance
     """
-    actual_model_name = model_name or get_chat_config().reranker_model
-    if _remote.use_remote_reranker(actual_model_name):
+    if _remote.use_remote_reranker(model_name):
         return cast("CrossEncoder", _remote.RemoteCrossEncoder())
     _require_sentence_transformers()
     _, cross_encoder = _model_classes()
     assert cross_encoder is not None
     # sentence-transformers ships no py.typed, so the constructor is `Any`.
-    return cast("CrossEncoder", cross_encoder(actual_model_name))
+    return cast("CrossEncoder", cross_encoder(model_name))
+
+
+# Keyed on the resolved name: every spelling of "the configured model" —
+# no argument, ``None``, the name itself — shares one loaded instance.
+get_embedder = NamedModelCache(
+    lambda: get_vectorstore_config().embedding_model, _get_embedder
+)
+get_reranker = NamedModelCache(lambda: get_chat_config().reranker_model, _get_reranker)
 
 
 __all__ = [

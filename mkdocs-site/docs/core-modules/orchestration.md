@@ -304,7 +304,10 @@ current Question is the user's request.
     Anyone who can get a document into the knowledge base can write text the
     model reads, so retrieved chunks no longer reach the prompt as plain
     `Source [id]: content` lines. `render_rag_context` (`handlers/rag.py`)
-    scans each chunk with `scan_external_content` — findings logged with the
+    scans each chunk with `scan_external_content` (in a worker thread once the
+    chunks, or the conversation history, pass 2 048 characters: the scan is
+    pure CPU, 3–12 ms for a typical retrieval, and would otherwise hold every
+    other stream on the worker) — findings logged with the
     document id, flagged content sanitized under
     `BASELITH_SANITIZE_EXTERNAL_CONTENT` (on by default) — and seals it in the
     same `<untrusted_tool_output tool="document_retrieval">` envelope tool

@@ -29,6 +29,9 @@ from .state import IndexedDocument, IndexingStats, IndexStateStore
 
 logger = get_logger(__name__)
 
+#: Document ids per filtered delete when clearing stale documents.
+_STALE_DELETE_CHUNK = 500
+
 
 class IndexingService:
     """
@@ -411,22 +414,30 @@ class IndexingService:
         """
         deleted = 0
 
-        # Fan out deletions with a bounded concurrency ceiling; each is an
-        # independent vector-store round-trip. Over a source emptied of
-        # thousands of docs an unbounded gather would open that many
-        # simultaneous round-trips. return_exceptions keeps per-item handling.
+        # One filtered delete per chunk of ids, not one round trip per
+        # document: a source emptied of thousands of files cost that many
+        # waited deletes. A failed chunk keeps its ids registered, so the next
+        # run retries them.
         stale_list = list(stale_ids)
+        chunks = [
+            stale_list[start : start + _STALE_DELETE_CHUNK]
+            for start in range(0, len(stale_list), _STALE_DELETE_CHUNK)
+        ]
         results = await bounded_gather(
-            (self.vectorstore.delete_document(doc_id) for doc_id in stale_list),
+            (self.vectorstore.delete_documents(chunk) for chunk in chunks),
             limit=self._config.index_max_concurrency,
             return_exceptions=True,
         )
-        for doc_id, outcome in zip(stale_list, results, strict=True):
+        for chunk, outcome in zip(chunks, results, strict=True):
             if isinstance(outcome, BaseException):
-                logger.warning(f"[indexing] Failed to delete {doc_id}: {outcome}")
+                logger.warning(
+                    f"[indexing] Failed to delete {len(chunk)} stale documents: "
+                    f"{outcome}"
+                )
                 continue
-            self._indexed_items.pop(doc_id, None)
-            deleted += 1
+            for doc_id in chunk:
+                self._indexed_items.pop(doc_id, None)
+            deleted += len(chunk)
 
         if deleted:
             self._registry_version += 1

@@ -14,11 +14,17 @@ import importlib
 import pytest
 
 import baselith.core.cli
+import baselith.core.optimization
 import baselith.core.orchestration
 import baselith.core.plugins
 from baselith.core._lazy import lazy_exports
 
-LAZY_PACKAGES = (baselith.core.plugins, baselith.core.orchestration, baselith.core.cli)
+LAZY_PACKAGES = (
+    baselith.core.plugins,
+    baselith.core.orchestration,
+    baselith.core.cli,
+    baselith.core.optimization,
+)
 
 
 class TestLazyExports:

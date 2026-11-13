@@ -39,7 +39,7 @@ shutdown.
 | `BASELITH_EMBEDDING_URL` | — | TEI base URL; required for `remote` |
 | `BASELITH_EMBEDDING_MODEL` | `BAAI/bge-m3` | model id |
 | `BASELITH_EMBEDDING_DIM` | `1024` | vector size |
-| `BASELITH_EMBEDDING_BATCH_SIZE` | `32` | texts per HTTP request |
+| `BASELITH_EMBEDDING_BATCH_SIZE` | `32` | texts per HTTP request; a call spanning several batches sends up to 4 at once to a remote server (in order, first failure cancels the rest), one at a time in-process |
 | `BASELITH_EMBEDDING_TIMEOUT` | `60` | per-request timeout, seconds |
 | `BASELITH_EMBEDDING_MAX_RETRIES` | `3` | retries on 5xx and timeouts (429 only with `RETRY_RATE_LIMITED`) |
 | `BASELITH_EMBEDDING_API_KEY` | — | optional bearer token |

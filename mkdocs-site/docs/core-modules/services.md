@@ -1621,7 +1621,10 @@ value, meaning "match **any** of these values": `QdrantProvider` builds a
 Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnels
 into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
 instead of 1000. Tenant isolation applies here as everywhere else: the current
-`tenant_id` is injected into the filter automatically.
+`tenant_id` is injected into the filter automatically. The indexing service
+clears stale documents the same way — one `delete_documents()` per 500 ids,
+`INDEX_MAX_CONCURRENCY` chunks at a time; a chunk that fails keeps its ids in
+the registry, so the next run retries them.
 
 Both providers also expose `list_collections()` (a Qdrant server's collections;
 the `vs_*` tables for pgvector), which the GDPR tenant purge uses to delete a
@@ -1757,6 +1760,19 @@ Embeddings are produced through an `EmbedderProtocol` implementation passed to
 `index()` / `search()` (or resolved from configuration). The vector store caches
 embeddings transparently via its model-scoped `embedding_cache`. There is no
 `EmbeddingService` export in `baselith.core.services.vectorstore`.
+
+That cache (`RedisCache`) serialises with orjson, falling back to the stdlib
+encoder for what orjson refuses; the stored text is plain JSON either way, so
+existing entries stay readable. `PgVectorProvider` encodes a vector for the
+`vector` type the same way — a JSON array of floats is the pgvector literal.
+Both used to format every float in Python on the event loop, ~0.2 ms per
+1024-dimension vector.
+
+The indexing registry (`IndexedDocument.metadata`) keeps a document's metadata
+without `ingestion_chunks`: a reader's pre-computed chunks repeat the document
+text several times, nothing reads them back from the registry, and the
+registry is held for the life of the process and written to one Redis value
+after every run.
 
 ### Recursive chunking (dependency-free)
 

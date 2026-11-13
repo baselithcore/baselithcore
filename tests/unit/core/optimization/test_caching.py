@@ -87,7 +87,8 @@ async def test_redis_cache_set_many(redis_cache, mock_redis):
     pipe.execute.assert_awaited_once()
     # JSON-serializes complex values, leaves strings as-is.
     serialized = [call.args[1] for call in pipe.set.call_args_list]
-    assert '{"a": 1}' in serialized
+    # Compact JSON: the encoder writes no padding.
+    assert '{"a":1}' in serialized
     assert "v2" in serialized
 
 
