@@ -774,7 +774,9 @@ never wrote. `context["memory_context"]` used to be plain `- {content}` lines;
 with `scan_external_content` and seals the bullet list in one
 `<untrusted_tool_output tool="memory_recall">` envelope, so a consumer that puts
 it in a prompt next to `UNTRUSTED_OUTPUT_SYSTEM_RULE` gets background data the
-model will not obey. An empty recall is still `""`.
+model will not obey. An empty recall is still `""`. The swarm sub-task prompt
+(`gather_memory_context`) uses the same helper and rule, so recalled memory is
+sealed there too.
 `context["recent_history"]` (the memory manager's recent-context block) gets
 the same treatment at the same point: `inject_memory_context` passes it
 through `render_history_context`, so it arrives as one

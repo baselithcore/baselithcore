@@ -2368,7 +2368,7 @@ print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECO
 
 BaselithCore supports two types of sandboxing for secure code execution:
 
-1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks. Container stdout and stderr are read as a stream against a 1 MiB budget per stream (`sandbox/_logs.py`) and truncated with a notice beyond it, so code that prints until its timeout cannot hand the API process a buffer of its choosing.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks. Container stdout and stderr are read as a stream against a 1 MiB budget per stream (`sandbox/_logs.py`) and truncated with a notice beyond it, so code that prints until its timeout cannot hand the API process a buffer of its choosing. The one-shot run path also asks the daemon for a `json-file` log capped at one 1 MiB file (`capped_log_config()`), bounding what a `print` loop can write to the host.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.

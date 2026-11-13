@@ -185,7 +185,7 @@ safe_output = output.filtered_output
     (`wrap_untrusted`, tool name `document_retrieval`); the `Source [id]:`
     label stays outside the envelope so answers can still cite it. The
     system prompt carries `RAG_CONTEXT_IS_DATA_RULE`. Recalled memories are
-    scanned too and injected as one `memory_recall` envelope, and replayed
+    scanned too and injected as one `memory_recall` envelope (the swarm sub-task prompt included), and replayed
     conversation history (`history_text` in the RAG prompt,
     `recent_history` on the context) as one `conversation_history` envelope
     via `render_history_context`. A poisoned document, memory or earlier turn
