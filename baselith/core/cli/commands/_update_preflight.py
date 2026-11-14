@@ -2,7 +2,8 @@
 
 Read-only: it reads the saved report, the run store, the task queue and the
 disk through the same builder the API serves, and never loads plugin code,
-contacts GitHub or writes anything. Exit 1 when any item blocks.
+contacts GitHub or writes anything. Exit 1 when any item blocks, or when an
+``info`` item says the release is not installed from here.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ def render_preflight(items: list[PreflightItem]) -> list[str]:
 
 
 def run_preflight(subject: str, version: str | None, fmt: str) -> int:
-    """Print the pre-flight of ``subject``; 1 when any item blocks or it failed."""
+    """Print the pre-flight of ``subject``; 1 unless it can be installed now."""
     try:
         items = _preflight_inputs(subject, version)
     except Exception as exc:  # a diagnostic must report, not crash
@@ -40,7 +41,8 @@ def run_preflight(subject: str, version: str | None, fmt: str) -> int:
         print(json.dumps([i.model_dump(mode="json") for i in items], indent=2))
     else:
         print("\n".join(render_preflight(items)))
-    return 1 if any(i.level is PreflightLevel.BLOCK for i in items) else 0
+    stops = (PreflightLevel.BLOCK, PreflightLevel.INFO)
+    return 1 if any(i.level in stops for i in items) else 0
 
 
 __all__ = ["render_preflight", "run_preflight"]

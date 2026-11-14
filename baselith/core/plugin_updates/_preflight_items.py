@@ -14,9 +14,16 @@ from .models import ApplyBlocker
 
 
 class PreflightLevel(StrEnum):
-    """How much an item stands in the way."""
+    """How much an item stands in the way.
+
+    ``info`` is a fact, not a fault: the release does not install with one
+    click here by design (a plugin that ships inside this tree arrives with
+    the tree's next release), so there is nothing to fix, and the pre-flight
+    is not ``ready`` either.
+    """
 
     OK = "ok"
+    INFO = "info"
     WARN = "warn"
     BLOCK = "block"
 
@@ -76,11 +83,27 @@ def warn(code: str, message: str) -> PreflightItem:
     return item(code, PreflightLevel.WARN, message)
 
 
+def info(code: str, message: str) -> PreflightItem:
+    """An ``info`` item."""
+    return item(code, PreflightLevel.INFO, message)
+
+
+def in_tree_release_text(distribution: bool) -> str:
+    """Why an unsigned release of a plugin shipped in this tree is no fault."""
+    what = "distribution" if distribution else "core"
+    return (
+        f"This release arrives with the next {what} release; it has no signed "
+        "artifact for a one-click install."
+    )
+
+
 __all__ = [
     "BLOCKER_TEXT",
     "PreflightItem",
     "PreflightLevel",
     "block",
+    "in_tree_release_text",
+    "info",
     "item",
     "warn",
 ]

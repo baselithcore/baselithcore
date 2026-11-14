@@ -1,11 +1,14 @@
 """Pre-flight: whether an update can be installed now, as a list a person can act on.
 
-Each :class:`PreflightItem` is ``ok``, ``warn`` or ``block`` with one sentence.
+Each :class:`PreflightItem` is ``ok``, ``info``, ``warn`` or ``block`` with one
+sentence.
 :func:`build_preflight` is pure: the report, the settings, the updater's
 heartbeat, the active run, the installed plugins' core bounds and every probe
 are passed in, and a probe that raises becomes a ``warn`` item
 (``<probe>_unavailable``), never an exception. ``ready`` closes the list only
-when nothing blocks. Computed on request; the updater checks again before it
+when nothing blocks and no ``info`` item says the release is not installed
+from here (an unsigned release of a plugin shipped in this tree, which
+arrives with the tree's next release). Computed on request; the updater checks again before it
 touches anything.
 """
 
@@ -21,8 +24,9 @@ from baselith.core.plugins.version import SemanticVersion
 
 from ._core_preflight import CoreState, core_blocker_items
 from ._preflight_items import BLOCKER_TEXT as _BLOCKER_TEXT
-from ._preflight_items import PreflightItem, PreflightLevel
+from ._preflight_items import PreflightItem, PreflightLevel, in_tree_release_text
 from ._preflight_items import block as _block
+from ._preflight_items import info as _info
 from ._preflight_items import item as _item
 from ._preflight_items import warn as _warn
 from .apply.eligibility import already_reached, apply_status
@@ -33,13 +37,15 @@ from .apply.models import (
     ApplyRun,
     UpdaterHeartbeat,
 )
-from .models import CheckReport, Refusal, SystemUpdate, UpdateCandidate
+from .models import ApplyBlocker, CheckReport, Refusal, SystemUpdate, UpdateCandidate
 from .upgrade.compat import plugin_compatibility
 from .upgrade_models import InstallMethod, PluginBoundsIssue
 
 logger = logging.getLogger(__name__)
 
 _MB = 1024 * 1024
+#: The levels that keep ``ready`` off the list.
+_NOT_READY = (PreflightLevel.BLOCK, PreflightLevel.INFO)
 
 
 def normalize_subject(subject: str) -> str:
@@ -147,6 +153,8 @@ def _blocker_items(
     active_run: ApplyRun | None,
     core_version: str,
     now: datetime,
+    in_tree: bool,
+    distribution: bool,
 ) -> list[PreflightItem]:
     status = apply_status(
         candidate,
@@ -158,10 +166,16 @@ def _blocker_items(
         now=now,
     )
     suffix = f" ({status.detail})" if status.detail else ""
-    return [
-        _block(f"blocker_{b.value}", f"{_BLOCKER_TEXT.get(b, b.value)}{suffix}")
-        for b in status.blockers
-    ]
+    items: list[PreflightItem] = []
+    for b in status.blockers:
+        if in_tree and b is ApplyBlocker.UNSIGNED_RELEASE:
+            # Expected, not a fault: the tree's next release brings it.
+            items.append(_info("in_tree_release", in_tree_release_text(distribution)))
+            continue
+        items.append(
+            _block(f"blocker_{b.value}", f"{_BLOCKER_TEXT.get(b, b.value)}{suffix}")
+        )
+    return items
 
 
 def _compat_items(
@@ -277,6 +291,7 @@ def build_preflight(
     distribution: bool,
     boot_probe: Callable[[], list[str] | None] | None = None,
     core: CoreState | None = None,
+    in_tree: bool = False,
 ) -> list[PreflightItem]:
     """The pre-flight of installing ``version`` of ``subject`` here, now.
 
@@ -298,6 +313,9 @@ def build_preflight(
         boot_probe: Active plugins of the newest boot report (None: none yet).
         core: The host's state and the verified release, for the core
             subject (None: nothing known, which blocks as unknown).
+        in_tree: The plugin subject ships inside this tree (not an overlay
+            install), so an unsigned release is an ``info`` item: it arrives
+            with the tree's next release. Ignored for the core subject.
 
     Returns:
         The items; never raises for a failing probe.
@@ -334,6 +352,8 @@ def build_preflight(
             active_run=active_run,
             core_version=core_version,
             now=now,
+            in_tree=in_tree,
+            distribution=distribution,
         )
     if not is_core or state.release is None:  # else blocker_major_jump says it
         items += _major_items(candidate.installed_version, target, is_core)
@@ -355,7 +375,7 @@ def build_preflight(
     items += _probe_items(queue_probe, disk_free, disk_path, config.min_free_mb)
     if boot_probe is not None:
         items += _boot_items(boot_probe)
-    if not any(i.level is PreflightLevel.BLOCK for i in items):
+    if not any(i.level in _NOT_READY for i in items):
         items.append(
             _item("ready", PreflightLevel.OK, f"{target} can be installed now.")
         )

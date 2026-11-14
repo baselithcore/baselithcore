@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import logging
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
 from baselith.core.config.plugin_update_apply import UpdateApplyConfig
+from baselith.core.config.plugins import installed_plugins_dir
+from baselith.core.plugins.discovery import has_manifest
+from baselith.core.plugins.overlay import registered_overlay_dirs
 
 from ._core_preflight import CoreState
 from ._core_state import local_core_state
@@ -67,6 +70,42 @@ def disk_free(path: Path) -> int:
     return shutil.disk_usage(probe).free
 
 
+def ships_with_tree(
+    name: str,
+    *,
+    loader_root: Path,
+    tree: Path | None = None,
+    overlaid: Iterable[str] | None = None,
+) -> bool:
+    """Whether plugin ``name`` is loaded from the tree that holds the core.
+
+    Such a plugin (the checkout's own, or the installed distribution's
+    ``plugins`` package) arrives with the tree's next release. An overlay
+    install, a plugin the loader reads from another root (``baselith plugin
+    add``) and a symlinked directory do not.
+
+    Args:
+        name: The plugin's directory name.
+        loader_root: The root the plugin loader scans.
+        tree: The ``plugins`` package beside ``core`` (default: this one).
+        overlaid: Names registered from the overlay (default: this process's).
+    """
+    if not name or name.startswith((".", "_")) or "/" in name or "\\" in name:
+        return False
+    names = (
+        {p.name for p in registered_overlay_dirs()}
+        if overlaid is None
+        else set(overlaid)
+    )
+    if name in names:
+        return False
+    own = (tree if tree is not None else installed_plugins_dir()) / name
+    if own.is_symlink() or not own.is_dir() or not has_manifest(own):
+        return False
+    loaded = loader_root / name
+    return not loaded.exists() or loaded.resolve() == own.resolve()
+
+
 def live_preflight(
     subject: str,
     version: str | None,
@@ -81,12 +120,16 @@ def live_preflight(
     queue_probe: Callable[[], int] | None = None,
     now: datetime | None = None,
     core: CoreState | None = None,
+    in_tree: Callable[[str], bool] | None = None,
 ) -> list[PreflightItem]:
     """The pre-flight of ``subject`` with this host's live inputs.
 
     ``queue_probe`` defaults to :func:`queue_jobs` (the task queue in Redis).
     For the core subject ``core`` defaults to :func:`~._core_state.local_core_state`
     (the checkout only; the release is verified when an install is requested).
+    ``in_tree`` says whether a plugin ships inside this tree (default
+    :func:`ships_with_tree` against ``bundled_root``); a probe that fails
+    reads as "no", which keeps an unsigned release a block.
     """
     runs = store if store is not None else RunStore(config.state_dir)
     key = normalize_subject(subject)
@@ -95,6 +138,10 @@ def live_preflight(
     )
     if key == CORE_SUBJECT and core is None:
         core = _guarded("checkout state", lambda: local_core_state(config))
+    probe = in_tree or (lambda n: ships_with_tree(n, loader_root=bundled_root))
+    shipped = key != CORE_SUBJECT and bool(
+        _guarded("plugin tree", lambda: probe(claim))
+    )
     return build_preflight(
         key,
         version,
@@ -111,7 +158,8 @@ def live_preflight(
         distribution=distribution,
         boot_probe=lambda: latest_active_plugins(runs),
         core=core,
+        in_tree=shipped,
     )
 
 
-__all__ = ["disk_free", "live_preflight", "queue_jobs"]
+__all__ = ["disk_free", "live_preflight", "queue_jobs", "ships_with_tree"]

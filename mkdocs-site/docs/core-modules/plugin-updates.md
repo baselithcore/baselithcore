@@ -80,7 +80,7 @@ metric and events still go out.
 | `_system_notice.py` | Pure helpers both notices share: what is served (`scope_notice`) and what is announced (`notice_announcement`) |
 | `_announcing.py` | Announces new releases on the event bus once per key across processes (the service's mixin) |
 | `preflight.py` | The [pre-flight](#pre-flight): `build_preflight`, `PreflightItem`, `PreflightLevel` (pure) |
-| `_preflight_live.py` | The pre-flight's live inputs on this host: run store, task queue, free disk |
+| `_preflight_live.py` | The pre-flight's live inputs on this host: run store, task queue, free disk, and whether a plugin ships inside this tree (`ships_with_tree`) |
 | `apply/drivers/` | The [apply drivers](#apply-drivers): the `ApplyDriver` protocol, the registry and the `DriverRouter` the updater runs |
 | `distribution_manifest.py` | The signed [distribution manifest](#distribution-manifest) (`distribution-release.json`): `DistributionManifest`, `build_manifest_meta`, `load_distribution_manifest` |
 | `policy.py` | The [update policy document](#update-policy-document): `UpdatePolicy`, `MaintenanceWindow`, `PolicyProposal`, `POLICY_OFF` (pure) |
@@ -1332,8 +1332,10 @@ at start leaves auto-apply off.
 
 Before a run is requested, `baselith.core.plugin_updates.build_preflight` answers
 whether an update can be installed here and now, as a list rather than a yes
-or no: each `PreflightItem` has a `code`, a `level` (`ok`, `warn` or `block`)
-and one sentence a person can act on. It is pure — the report, the settings,
+or no: each `PreflightItem` has a `code`, a `level` (`ok`, `info`, `warn` or
+`block`) and one sentence a person can act on. `info` is a fact, not a fault:
+the release does not install with one click here by design, so there is
+nothing to fix, and the list is not `ready` either. It is pure — the report, the settings,
 the heartbeat, the active run, the installed plugins' core bounds and every
 probe are passed in — and computed on request; the updater checks again
 before it touches anything. A probe that fails becomes a `warn` item, never an
@@ -1351,6 +1353,7 @@ distribution `core` means the distribution's own release (the report's
 | `candidate_unknown` | block | No release of the subject is known, it was refused, or `version` is not the latest known release. The list ends here |
 | `already_installed` | block | The target is already installed. The list ends here |
 | `blocker_<blocker>` | block | One item per [installability](#installability-verdict) blocker (`blocker_updater_offline`, `blocker_unsigned_release`, …): for a plugin from the same `apply_status` the console shows, for the core subject from `core_blockers` (see below) |
+| `in_tree_release` | info | Plugin subject that ships inside this tree (the checkout's own `baselith/plugins/<name>`, or the installed distribution's, read by the loader and not overlaid): its release has no signed assets, which is expected, since it arrives with the tree's next distribution (or core) release. It replaces `blocker_unsigned_release`; every other blocker stays a `block`, and an overlay or `baselith plugin add` install keeps the block |
 | `plugin_incompatible` | warn | Core subject: installed plugins whose `min_core_version`/`max_core_version` exclude the target, named in the message |
 | `plugin_compatibility_unknown` | warn | Core subject: the bounds cannot be read, or the target is a distribution release that does not yet say which public core it contains |
 | `major_jump` | block (core), warn (plugin) | The target crosses a major version |
@@ -1360,13 +1363,14 @@ distribution `core` means the distribution's own release (the report's
 | `disk_low` | warn | Less free space than `UPDATE_APPLY_MIN_FREE_MB` |
 | `queue_probe_unavailable`, `disk_probe_unavailable` | warn | The queue (for example Redis down) or the disk could not be read |
 | `no_boot_report`, `boot_report_unavailable` | warn | The API never booted with one-click updates on (the updater would refuse the run), or the boot report could not be read |
-| `ready` | ok | Last, and only when nothing blocks |
+| `ready` | ok | Last, and only when nothing blocks and no `info` item stands |
 
 A missing updater heartbeat is not a probe failure: it is the
 `blocker_updater_offline` item, because no run can execute without the
 updater. `GET /api/plugins/updates/preflight` serves the list (see [API](#api))
 and `baselith update preflight <subject> [--version V]` prints it, one
-`[level] code: message` line per item, exiting `1` when any item blocks.
+`[level] code: message` line per item, exiting `1` when any item blocks or is
+`info` (the update cannot be installed from here).
 
 ### Installability verdict
 
