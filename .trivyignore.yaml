@@ -226,20 +226,30 @@ vulnerabilities:
       fixed in 78.1.1. There is nothing to upgrade, because setuptools 70.3.0
       is NOT INSTALLED: it appears only as a component of pip's vendored SBOM.
       pip lists it in _vendor/vendor.txt and bom.cdx.json as a build-time
-      requirement, but ships no code for it — verified on the image,
-      pip/_vendor/setuptools does not exist, and the base image has no
-      setuptools module at all. The only real setuptools in this image is the
-      one the Dockerfile installs into /install (>=83.0.0, well above the
-      78.1.1 fix), which Trivy reports separately from its own dist-info and
+      requirement, but ships only one file of it, pip/_vendor/pkg_resources/
+      __init__.py (the resource and entry-point helper). pip/_vendor/setuptools
+      does not exist, and the code this advisory concerns (PackageIndex) is
+      not in pip's tree; the base image has no setuptools module at all. The
+      only real setuptools in this image is the one the Dockerfile installs
+      into /install (>=84.1.0, well above the 78.1.1 fix), which Trivy reports
+      separately from its own dist-info and
       which is clean. So this is a scanner artifact of pip's SBOM, not an
       accepted risk — but it is kept on the same expiry as the entry above so
       both get re-checked together rather than decaying into a permanent mute.
       Re-argued 2026-11-05: still reported by the image scan, still a phantom
       (the finding carries no "(METADATA)" dist-info target, only pip's SBOM).
-      Re-evaluate at expiry by confirming pip still ships no setuptools code.
+      Re-evaluate at expiry by confirming pip still ships neither a
+      setuptools/ package nor any of the code the advisories concern.
       Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
       still vendors setuptools only as an SBOM component; the image installs
       its own setuptools >=84.1.0.
+      Re-argued 2026-11-14: unchanged, and the earlier "ships no code" wording
+      was too strong — pip 26.3 does ship pkg_resources/__init__.py from
+      setuptools 70.3.0, but it holds none of the code either advisory is
+      about (no PackageIndex, no FileList, no MANIFEST.in handling). Checked
+      by unpacking the pip 26.3 wheel, and reproduced with the pinned Trivy
+      0.71.0 on a venv holding pip 26.3: both advisories are reported against
+      "Python" with no entry, and none with this register.
     expired_at: 2026-12-11
   - id: CVE-2026-59890
     statement: >-
@@ -250,9 +260,9 @@ vulnerabilities:
       CVE-2025-47273 above applies unchanged — the version comes from pip's
       vendored SBOM, pip/_vendor/setuptools does not exist, and the only real
       setuptools in the image is the one the Dockerfile installs into /install
-      at >=83.0.0, which is exactly at this advisory's fixed version. The
-      advisory is also about building an sdist on macOS, which this Linux image
-      does not do.
+      at >=84.1.0, above this advisory's fixed version (83.0.0). The advisory
+      is also about building an sdist on macOS, which this Linux image does
+      not do.
       Kept per-CVE rather than muting the package, deliberately: a
       setuptools-wide mute would also hide findings against that real 83.0.0
       copy, which is the one that could actually hurt. If a third phantom CVE
@@ -265,6 +275,15 @@ vulnerabilities:
       Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
       still vendors setuptools only as an SBOM component; the image installs
       its own setuptools >=84.1.0.
+      Re-argued 2026-11-14, with code-scanning alert #384 still open on main:
+      that alert is the last release-image scan (2026-11-06), taken before this
+      entry was restored, and main does not carry the entry yet. Reproduced
+      with the pinned Trivy 0.71.0 on a venv holding pip 26.3 (the same
+      "Python" target, setuptools 70.3.0, MEDIUM): reported with the register
+      from main, not reported with this one. The alert closes by itself at the
+      first release-image scan from main after this entry lands there; it is
+      left open rather than dismissed by hand, because a dismissal is not tied
+      to the expiry below and could keep the finding hidden after it lapses.
     expired_at: 2026-12-11
 # ==================================================================
 # Secret-scanner exceptions
