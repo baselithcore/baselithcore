@@ -101,6 +101,36 @@ async def start_runtime_services(app: Any) -> None:
     await _start_online_evaluation(app)
     await _start_workflows(app)
     await _write_update_boot_report()
+    _start_update_outcomes(app)
+
+
+#: How often the web tier sweeps the one-click run store into the run metrics.
+_OUTCOME_SWEEP_SECONDS = 60.0
+
+
+def _start_update_outcomes(app: Any) -> None:
+    """Count finished one-click runs and gauge stuck or failed ones (host installs).
+
+    A no-op unless ``UPDATE_APPLY_ENABLED``. Every worker sweeps; the store's
+    metering marks make each finished run count once.
+    """
+    try:
+        from baselith.core.config.plugin_update_apply import get_update_apply_config
+
+        apply_cfg = get_update_apply_config()
+        if not apply_cfg.enabled:
+            return
+        from baselith.core.plugin_updates.apply.store import RunStore
+        from baselith.core.plugin_updates.outcomes import run_sweeps
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run_sweeps(RunStore(apply_cfg.state_dir), _OUTCOME_SWEEP_SECONDS, stop),
+            name="update-outcomes",
+        )
+        app.state.update_outcomes = (task, stop)
+    except Exception as exc:  # metrics must never block a boot
+        logger.warning("update_outcomes_start_failed: %s", type(exc).__name__)
 
 
 async def _start_webhook_outbox(app: Any) -> None:
@@ -219,6 +249,16 @@ async def stop_runtime_services(app: Any) -> None:
         await stop_workflow_service(app)
     except Exception as exc:
         logger.warning("workflow_service_stop_failed: %s", exc)
+
+    outcomes = getattr(app.state, "update_outcomes", None)
+    if outcomes is not None:
+        task, stop = outcomes
+        stop.set()
+        try:
+            await asyncio.wait_for(task, 5.0)
+        except Exception as exc:
+            logger.warning("update_outcomes_stop_failed: %s", type(exc).__name__)
+        app.state.update_outcomes = None
 
     plugin_updates = getattr(app.state, "plugin_updates", None)
     if plugin_updates is not None:

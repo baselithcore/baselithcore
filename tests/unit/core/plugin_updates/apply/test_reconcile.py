@@ -245,3 +245,110 @@ async def test_one_failing_resume_does_not_strand_the_others(tmp_path: Path) -> 
     assert store.get(a.id).state is RunState.ACTIVATING
     assert store.get(b.id).state is RunState.FAILED
     assert store.read_expectation("gamma") is None
+
+
+def _finalizing_core(store: RunStore):
+    from baselith.core.plugin_updates.apply.models import CORE_CLAIM, CORE_SUBJECT
+
+    run = store.create(
+        kind=RunKind.UPDATE,
+        plugin=CORE_CLAIM,
+        subject=CORE_SUBJECT,
+        from_version="1.14.0",
+        to_version="1.15.0",
+        tarball_sha256="a" * 40,
+        requested_by="cli:op",
+        approval_required=False,
+        approval_ttl_seconds=60,
+    )
+    return store.transition(run.id, RunState.FINALIZING, previous_target="b" * 40)
+
+
+def _boot(store: RunStore, version: str) -> None:
+    from baselith.core.plugin_updates.apply.boot_report import BootReport
+
+    report = BootReport(
+        pid=1,
+        booted_at=datetime.now(UTC),
+        core_version="1.3.1",
+        framework_version=version,
+        plugins={},
+    )
+    store.boot_dir.mkdir(parents=True, exist_ok=True)
+    (store.boot_dir / "1.json").write_text(report.model_dump_json())
+
+
+async def test_finalizing_is_closed_by_reconcile_when_versions_match(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path)
+    run = _finalizing_core(store)
+    _boot(store, "1.15.0")
+    handled = await reconcile(store, _Exec(store), framework_version="1.15.0")
+    assert handled == [run.id]
+    done = store.get(run.id)
+    assert done.state is RunState.SUCCEEDED and "1.15.0" in done.message
+    assert store.active(run.plugin) is None
+
+
+async def test_finalizing_stays_open_when_versions_differ(tmp_path: Path) -> None:
+    store = RunStore(tmp_path)
+    run = _finalizing_core(store)
+    _boot(store, "1.15.0")
+    assert await reconcile(store, _Exec(store), framework_version="1.14.0") == []
+    assert store.get(run.id).state is RunState.FINALIZING
+    _boot(store, "1.14.0")  # the API is back on the old version
+    assert await reconcile(store, _Exec(store), framework_version="1.15.0") == []
+    assert store.get(run.id).state is RunState.FINALIZING
+
+
+async def test_finalizing_after_the_timeout_succeeds_when_the_target_serves(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path)
+    run = _finalizing_core(store)
+    _boot(store, "1.15.0")
+    late = run.updated_at + timedelta(seconds=901)
+    early = run.updated_at + timedelta(seconds=899)
+    # Within the timeout an updater on the old version leaves it alone.
+    assert (
+        await reconcile(
+            store,
+            _Exec(store),
+            now=early,
+            framework_version="1.14.0",
+            finalize_timeout_seconds=900,
+        )
+        == []
+    )
+    handled = await reconcile(
+        store,
+        _Exec(store),
+        now=late,
+        framework_version="1.14.0",
+        finalize_timeout_seconds=900,
+    )
+    assert handled == [run.id]
+    done = store.get(run.id)
+    assert done.state is RunState.SUCCEEDED and done.failure is None
+    assert "1.15.0" in done.message and "updater" in done.message
+    assert store.active(run.plugin) is None
+
+
+async def test_finalizing_after_the_timeout_fails_when_the_target_does_not_serve(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path)
+    run = _finalizing_core(store)
+    _boot(store, "1.14.0")  # someone moved the checkout back by hand
+    await reconcile(
+        store,
+        _Exec(store),
+        now=run.updated_at + timedelta(hours=1),
+        framework_version="1.14.0",
+        finalize_timeout_seconds=900,
+    )
+    done = store.get(run.id)
+    assert (done.state, done.failure) == (RunState.FAILED, "finalize_timeout")
+    assert "nothing was rolled back" in done.message
+    assert store.active(run.plugin) is None

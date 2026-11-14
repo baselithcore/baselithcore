@@ -1018,6 +1018,8 @@
       "AnnouncementGate",
       "CheckReport",
       "PluginUpdateService",
+      "PreflightItem",
+      "PreflightLevel",
       "RELEASE_WORKFLOW_AUTHOR",
       "Refusal",
       "ReleaseInfo",
@@ -1029,6 +1031,7 @@
       "VerificationResult",
       "affects",
       "build_announcement_gate",
+      "build_preflight",
       "check_plugin",
       "check_plugin_provenance",
       "check_system",
@@ -1045,7 +1048,10 @@
     ],
     "baselith.core.plugin_updates.apply": [
       "ApplyRun",
+      "CORE_CLAIM",
+      "CORE_SUBJECT",
       "Expectation",
+      "PolicyRefused",
       "RELEASING_STATES",
       "ROLLBACK_FAILED_EVENT",
       "RunConflict",
@@ -1056,6 +1062,20 @@
       "RunTransition",
       "UpdaterHeartbeat",
       "rollback_failed_payload"
+    ],
+    "baselith.core.plugin_updates.apply.drivers": [
+      "ApplyDriver",
+      "CORE_DRIVER_UNAVAILABLE",
+      "CORE_HOST_DRIVER",
+      "CoreHostDriver",
+      "DriverRegistry",
+      "DriverRouter",
+      "PLUGIN_OVERLAY_DRIVER",
+      "UNKNOWN_DRIVER",
+      "UnknownDriver",
+      "get_driver",
+      "register_driver",
+      "registered_drivers"
     ],
     "baselith.core.plugin_updates.upgrade": [
       "Deployment",

@@ -310,6 +310,14 @@ def cmd_plugin_updater(args: argparse.Namespace) -> int:
     return run_plugin_updater(command, vars(args))
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """Execute the 'update' command (read-only update report)."""
+    from baselith.core.cli.commands.update import run_update
+
+    command = getattr(args, "update_command", None) or "status"
+    return run_update(command, vars(args))
+
+
 def cmd_docs(args: argparse.Namespace) -> int:
     """Execute the 'docs' command for local documentation maintenance."""
     from baselith.core.cli.commands.docs import run_docs
@@ -374,6 +382,7 @@ COMMAND_HANDLERS_MAP = {
     "queue": cmd_queue,
     "workflow": cmd_workflow,
     "plugin-updater": cmd_plugin_updater,
+    "update": cmd_update,
     "docs": cmd_docs,
     "doctor": cmd_doctor,
     "test": cmd_test,

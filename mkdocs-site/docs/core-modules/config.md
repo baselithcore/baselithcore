@@ -57,7 +57,7 @@ baselith/core/config/
 ├── orchestration.py      # OrchestrationConfig, RouterConfig
 ├── processing.py         # ProcessingConfig (documents, web crawling, OCR, NLP)
 ├── plugins.py            # PluginConfig
-├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, CORE_UPDATE_REPO, SYSTEM_UPGRADE_GUIDE_URL)
+├── plugin_updates.py     # PluginUpdateConfig (PLUGIN_UPDATE_ prefix, CORE_UPDATE_REPO, DISTRIBUTION_UPDATE_REPO, SYSTEM_UPGRADE_GUIDE_URL)
 ├── plugin_update_apply.py # UpdateApplyConfig (UPDATE_APPLY_ prefix, one-click plugin updates)
 ├── memory.py             # SupermemoryConfig + MemoryRuntimeConfig (MEMORY_ prefix)
 ├── environment.py        # re-export of baselith/core/utils/runtime_env.py (stdlib-only)
@@ -88,8 +88,8 @@ store (`MCP_TASK_STORE_BACKEND`: `auto` / `memory` / `postgres`) under
 [Guardrails › Configuration](guardrails.md#configuration), and `WEBHOOK_STORE`
 and the `WEBHOOK_OUTBOX_*` transactional-outbox settings under
 [Webhooks › Configuration](webhooks.md#configuration). The
-`PLUGIN_UPDATE_*`, `CORE_UPDATE_REPO` and `SYSTEM_UPGRADE_GUIDE_URL` settings
-read by `get_plugin_update_config()` are listed under
+`PLUGIN_UPDATE_*`, `CORE_UPDATE_REPO`, `DISTRIBUTION_UPDATE_REPO` and
+`SYSTEM_UPGRADE_GUIDE_URL` settings read by `get_plugin_update_config()` are listed under
 [Plugin Updates › Configuration](plugin-updates.md#configuration).
 
 ---
@@ -1484,6 +1484,26 @@ its kill switch `UPDATE_APPLY_ENABLED` is off by default.
 `UPDATE_APPLY_APPROVAL_TTL_SECONDS` is the expiry of approval requests
 created without their own window: a console that asks for a second approval
 applies its own setting, and runs filed from the host's CLI are pre-approved.
+`UPDATE_APPLY_MIN_FREE_MB` (default `512`, `0` turns it off) is the free disk
+space below which the update
+[pre-flight](plugin-updates.md#pre-flight) warns `disk_low`.
+`UPDATE_APPLY_POLICY_TICK_SECONDS` (default `60`) is how often the updater
+evaluates the [auto-apply policy](plugin-updates.md#auto-apply-the-policy-runner),
+and `UPDATE_APPLY_POLICY_ESTIMATE_SECONDS` (default `300`) the run duration it
+assumes for a subject with no successful run on record.
+The same class holds the settings of a one-click core install on a git
+checkout: `UPDATE_APPLY_CORE_ENABLED` (off by default, and it needs the kill
+switch too), `UPDATE_APPLY_BACKUP_COMMAND` (an argv run without a shell before
+every core install; none means `backup_unconfigured`),
+`UPDATE_APPLY_BACKUP_TIMEOUT_SECONDS` (default `1800`, 10–14400),
+`UPDATE_APPLY_IGNORED_PATHS` (checkout-relative POSIX paths whose tracked
+changes do not make the tree dirty; an absolute path or a `.`/`..` segment is
+refused), `UPDATE_APPLY_UPDATER_RESTART_COMMAND` (the argv that restarts the
+updater itself after a core install, required for one; make it non-blocking,
+`systemctl --no-block restart`) and `UPDATE_APPLY_FINALIZE_TIMEOUT_SECONDS`
+(default `900`, 60–86400: how long a core run may stay `finalizing` before it
+is closed by what the API serves). The list settings take a JSON array or a
+comma-separated list, like `UPDATE_APPLY_RESTART_COMMAND`.
 Settings that fail to load leave the update checker running with one-click
 updates off. See
 [Plugin updates › One-click update: settings and run store](plugin-updates.md#one-click-update-settings-and-run-store).

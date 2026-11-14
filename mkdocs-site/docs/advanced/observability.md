@@ -296,7 +296,11 @@ viewer's retention window, so an alert can fire on a spike (e.g.
 themselves have scrolled out of a bounded tail.
 
 Update notices are exported as `baselith_update_available{component,security}`
-(no `mas_` prefix) — `1` while a framework or plugin update is available. See
+(no `mas_` prefix) — `1` while a framework or plugin update is available.
+One-click update runs add `baselith_update_run_total{subject,outcome}`,
+`baselith_update_run_inflight_age_seconds{subject}` and
+`baselith_update_rollback_failed_runs{subject}`, swept from the run store by
+the API workers (the updater is not scraped). See
 [Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts).
 
 ### HTTP RED metrics (automatic)
@@ -658,8 +662,11 @@ rule_files:
 
 The Helm chart's `PrometheusRule` also ships an update-notice group built on
 `baselith_update_available`: `BaselithcoreUpdateAvailable` (info, `for: 1h`) and
-`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`). Silence either via
-`prometheusRule.disabledAlerts`.
+`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`), plus two alerts on
+update runs: `BaselithcoreUpdateRollbackFailed` (critical, `for: 5m`, a run of
+a subject ended `rollback_failed`) and `BaselithcoreUpdateRunStuck` (warning,
+`for: 10m`, a run has not changed state for over an hour). Silence any of them
+via `prometheusRule.disabledAlerts`.
 
 ### SLOs & Error-Budget Alerting
 

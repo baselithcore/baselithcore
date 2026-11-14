@@ -55,3 +55,16 @@ def test_cli_entry_skips_plugin_clis_and_never_starts_sentry(tmp_path: Path) -> 
     subprocess.run(
         [sys.executable, "-c", code], check=True, timeout=180, cwd=_ROOT, env=env
     )
+
+
+def test_policy_runner_never_imports_plugins() -> None:
+    """The auto-apply runner and its live wiring run inside the updater."""
+    code = (
+        "import sys\n"
+        "import baselith.core.plugin_updates.apply.policy_runner\n"
+        "import baselith.core.plugin_updates.apply._policy_live\n"
+        "bad = [m for m in sys.modules if m == 'baselith.plugins'"
+        " or m.startswith('baselith.plugins.')]\n"
+        "assert not bad, bad\n" + _CHECK
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=120, cwd=_ROOT)

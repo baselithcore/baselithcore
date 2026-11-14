@@ -215,6 +215,19 @@ probed with `GET {LLM_VLLM_API_BASE}/models`, which names a model the server doe
 under that id; an unconfigured vLLM provider is reported as *not configured*
 and points at `LLM_VLLM_API_BASE` rather than at an API key it does not need.
 
+The `Updates` check reads the last saved update report, as the server serves it
+(it never contacts GitHub). `No update report yet` (also when the saved report is about another core
+version, for example right after an upgrade), `Up to date`, `Update checks
+off` (neither `CORE_UPDATE_REPO` nor `PLUGIN_UPDATE_SOURCES_FILE` is set) and
+`Last check failed (<error>)` pass; `Update available: core <version>` passes
+and names the plugin updates. A security advisory that affects the installed
+core is a non-blocking warning (`Security advisory affects core <version>`,
+plus `; fixed in <version>` when a fixed release exists) that does not change
+the exit code, whether or not a fixed release is published yet. An unreadable
+report passes with a note. The same checks run at the startup preflight of
+`baselith run`, so a security warning is printed there in yellow at every boot;
+it never blocks the start.
+
 **JSON Output** (`baselith doctor --json`, or `baselith --format json doctor`):
 
 ```json
@@ -351,13 +364,16 @@ baselith --format json info   # Machine-readable JSON for CI
 
 ```text
 ╭────── Framework ───────╮╭── Current Workspace ───╮
-│   Version   0.36.0     ││   Name       app      │
-│   Python    3.12.6     ││   In Project ✅ Yes   │
-│   OS        Linux      ││   Plugins    2        │
+│   Version      0.36.0  ││   Name       app      │
+│   Core release 0.36.0  ││   In Project ✅ Yes   │
+│   Python       3.12.6  ││   Plugins    2        │
+│   OS           Linux   ││                       │
 ╰────────────────────────╯╰────────────────────────╯
 
 Completed in 42ms
 ```
+
+The `Core release` row is the public core release this tree corresponds to, the one the update notice compares. A downstream distribution versions independently, so `Version` can differ from it; such a distribution also gets a `Distribution` row. In JSON, `framework.core_version` carries the public core release and `framework.distribution` the distribution name (`null` when there is none); `framework.version` keeps its meaning.
 
 ---
 
@@ -833,9 +849,14 @@ baselith plugin marketplace uninstall <plugin_id>
 
 ---
 
-### `plugin marketplace update` - Update Plugin
+### `plugin marketplace update` - Removed
 
-Check for and install updates for a specific plugin.
+This command no longer updates anything and always exits `1`. It used to
+uninstall the plugin and install it again, which deleted the plugin's
+directory, including its `.env` and runtime state. Use
+`baselith update status` to see what is available, then
+`baselith plugin-updater request <plugin> --version <v> --sha256 <sha>` (see
+[Update report](#update-report) and [Plugin updater](#plugin-updater)).
 
 ```bash
 baselith plugin marketplace update <plugin_id>
@@ -1339,6 +1360,48 @@ This allows for easier debugging by developers without overwhelming end-users.
 
 ---
 
+## Update report
+
+`status`, `check` and `preflight` never install, remove or restart anything;
+`apply core` and `rollback core` only create a run that the host updater
+executes. `status` and
+`preflight` are read-only: `status` prints the last saved report as the server
+serves it. `check`
+contacts GitHub and refreshes the cache (and, in signed mode, downloads and
+keeps verified plugin tarballs), and may announce a new update on the event
+bus. It never loads plugin code.
+See [From the shell](../core-modules/plugin-updates.md#from-the-shell) for what each line means.
+
+| Subcommand | What it does |
+| --- | --- |
+| `status` | Prints the report of the last check (the distribution, when `DISTRIBUTION_UPDATE_REPO` is set in a distribution, then the core, then each plugin with its pinned SHA-256, or `notice only` when the release has no signed package). With no report yet it says so and exits `0`. |
+| `check` | Runs a check now and prints the report. When none of `CORE_UPDATE_REPO`, `DISTRIBUTION_UPDATE_REPO` and `PLUGIN_UPDATE_SOURCES_FILE` is set it says checks are off, writes nothing and exits `0`. Exit `1` when the check failed: the plugin part reported an error, a plugin's release could not be fetched (`source_error`), or the core or distribution release lookup failed (for example no network, even when an older report is shown). An unavailable advisories endpoint alone is printed but does not fail it. |
+| `preflight <subject> [--version V]` | Prints the [pre-flight](../core-modules/plugin-updates.md#pre-flight) of `core` or a plugin (`plugin:<name>` or the bare name): one `[block] code: message` line per item, `[ok] ready: …` last when nothing blocks. Read-only: reads the saved report, the run store, the task queue and the disk; never contacts GitHub. Exit `1` when any item blocks or the pre-flight could not be built, `2` without a subject. `--format json` prints the list of `{code, level, message}`. |
+| `apply core --version V [--yes]` | Requests a [one-click core install](../core-modules/plugin-updates.md#one-click-core-updates) of `V`, which must be the latest known release. Downloads and verifies the release's signed `distribution-release.json` (read-only), prints the pre-flight with that verdict, refuses (exit `1`) on any `block` item, asks `[y/N]` unless `--yes`, then creates a pre-approved run pinned to the manifest's commit, requested by `cli:<user>`, and prints its id. A declined prompt creates nothing (exit `1`). Plugins keep `baselith plugin-updater request` (exit `2` for another subject). |
+| `rollback core [--yes]` | Requests a return to the commit the newest successful core update replaced (exit `1` when there is none, `0` with nothing done when the checkout is already there); asks `[y/N]` unless `--yes`. |
+| `policy get` | Prints the live [auto-apply policy](../core-modules/plugin-updates.md#update-policy-document) (`policy: off` when none is set or the file is invalid) and a pending proposal, if any. `--format json` prints `{policy, proposal}`, the proposal with its `digest`. |
+| `policy set --core off\|patch --plugins off\|patch [--allow NAME ...] [--days mon,tue,.. --start HH:MM --end HH:MM --tz ZONE]` | Replaces the live policy directly: the host shell is trusted, as with `plugin-updater request`, so there is no second approval (a console change is a proposal another administrator approves). A channel other than `off` needs the four window flags together; `--end` before `--start` spans midnight. Prints what changed. The change is journaled in the run store with the actor `cli:<user>` and logged as `AUDIT \| UPDATE_POLICY \| set`. Exit `2` on invalid input (an unknown zone or day, a bad time, a channel without a window; the message comes from the model), `1` when the store cannot be written. |
+| `runs [--subject S] [--limit N]` | Lists update runs of the core and the plugins, newest first: id, subject, kind, state, versions and `requested_by` (`policy:auto-patch` for the runs the policy created). `--subject` is `core` or a plugin name; `--limit` defaults to 20. |
+| `resolve <run_id>` | Frees a `rollback_failed` run of any subject, core included, once the operator has put it right, or closes a core run stuck in `finalizing` (`succeeded` when the API serves its target, else `failed` with `finalize_timeout`): the `plugin-updater resolve` semantics (exit `1` for any other state). |
+
+All accept `--format {text,json}` (default `text`) in any position, for
+example `baselith --format json update status`. Exit codes: `0` ok,
+`1` refused or operational failure, `2` usage error. `apply` and `rollback`
+log `AUDIT | PLUGIN_UPDATE | request|rollback run=<id> plugin=baselith_core by=cli:<account>`.
+
+```bash
+baselith update status
+baselith update check --format json
+baselith update preflight core
+baselith update preflight aura --version 0.27.0
+baselith update apply core --version 1.15.0
+baselith update rollback core --yes
+baselith update policy set --plugins patch --core patch --days sat,sun \
+  --start 01:30 --end 05:00 --tz Europe/Rome
+baselith update policy get --format json
+baselith update runs --subject core
+```
+
 ## Plugin updater
 
 `baselith plugin-updater` runs and operates the one-click plugin updater
@@ -1355,11 +1418,11 @@ the account taken from the process's uid (not `$USER`).
 
 | Subcommand | What it does |
 | --- | --- |
-| `serve` | The service (run by systemd): heartbeat, crash reconciliation, then approved runs one at a time. Exit `2` when `BASELITH_PLUGIN_OVERLAY_DIR` is unset or another updater holds the lock. |
+| `serve` | The service (run by systemd): heartbeat, crash reconciliation, then approved runs one at a time. Between runs it also ticks the [auto-apply policy](../core-modules/plugin-updates.md#auto-apply-the-policy-runner) every `UPDATE_APPLY_POLICY_TICK_SECONDS`, which may create one pre-approved patch run requested by `policy:auto-patch` inside the maintenance window. Exit `2` when `BASELITH_PLUGIN_OVERLAY_DIR` is unset or another updater holds the lock. |
 | `status` | Prints the heartbeat and every unfinished run (`--format json` for JSON). |
 | `request <plugin> --version V --sha256 S` | Queues an update to `V` pinned to the tarball SHA-256 `S`, requested by `cli:<user>`, with no approval step (a shell on the host is already trusted with it). |
 | `rollback <plugin>` | Queues a rollback to the link target before the plugin's last successful update, with no approval step. Exit `1` when there is none; when the plugin already runs that target it prints so and queues nothing (no restart). |
-| `resolve <run_id>` | Moves a `rollback_failed` run to `failed` ("resolved by operator") and frees the plugin for new runs, once the operator has put the plugin right. Exit `1` for any other state. |
+| `resolve <run_id>` | Moves a `rollback_failed` run to `failed` ("resolved by operator") and frees the plugin for new runs, once the operator has put the plugin right. A core run stuck in `finalizing` is closed by what the API serves: `succeeded` when the newest boot report shows its target (the updater then shows `updater_mismatch` until it is restarted), else `failed` with `finalize_timeout`; either is journaled as resolved by the operator. Exit `1` for any other state. |
 
 ```bash
 baselith plugin-updater status

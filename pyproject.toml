@@ -104,6 +104,11 @@ dependencies = [
   # `asyncio` extra, so a plain install could not migrate its database.
   "sqlalchemy[asyncio]>=2.0.0",
   "structlog>=24.1.0",
+  # The update policy's maintenance window resolves IANA zones through
+  # zoneinfo (baselith/core/plugin_updates/window.py). The system tz database
+  # is absent from slim images and Windows, so the window would refuse every
+  # zone there; tzdata is zoneinfo's documented fallback.
+  "tzdata>=2024.1",
   "uvicorn[standard]>=0.30.0,<1.0",
   "rich>=13.7.0",
   "rich-argparse>=1.4.0",

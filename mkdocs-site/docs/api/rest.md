@@ -751,7 +751,12 @@ curl -H "X-API-Key: your-admin-api-key" http://localhost:8000/status
 
 ### `GET /metrics` - Prometheus Metrics
 
-Exports metrics in Prometheus format.
+Exports metrics in Prometheus format. On a host with one-click updates on
+(`UPDATE_APPLY_ENABLED`), every API worker also sweeps the run store once a
+minute into the update run series (`baselith_update_run_total` and two
+gauges, see
+[Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts)):
+the updater process itself is not scraped.
 
 !!! warning "Authentication Required"
     Protected by HTTP Basic Auth while `METRICS_AUTH_REQUIRED=true` (the

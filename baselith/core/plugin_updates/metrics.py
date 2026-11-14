@@ -18,9 +18,11 @@ def publish_update_metrics(report: CheckReport | None) -> None:
     the active one to 1, the other to 0. Series are never removed, because in
     multiprocess mode a removal does not reach the mmap files and the alert
     would keep seeing the old 1. Plugin candidates carry no advisory data and
-    publish ``security="false"``; ``core`` follows the system update's flag,
-    and an advisory affecting the running version sets ``security="true"``
-    even when no newer release exists yet.
+    publish ``security="false"``; ``core`` follows the system update's flag
+    and ``distribution`` the distribution update's, and an advisory affecting
+    the running version sets ``security="true"`` even when no newer release
+    exists yet. ``distribution`` gets series only once a distribution notice
+    has been seen, so the public core never exports it.
     """
     active: set[tuple[str, str]] = set()
     if report is not None:
@@ -28,11 +30,11 @@ def publish_update_metrics(report: CheckReport | None) -> None:
         active.update(
             (f"plugin:{c.plugin}", "false") for c in report.candidates if c.available
         )
-        system = report.system
         # An advisory affecting the running version counts even when no fixed
         # release exists yet: the security alert must still fire.
-        if system is not None and (system.available or system.security):
-            active.add((system.component, "true" if system.security else "false"))
+        for notice in (report.system, report.distribution):
+            if notice is not None and (notice.available or notice.security):
+                active.add((notice.component, "true" if notice.security else "false"))
     _known.add("core")
     _known.update(component for component, _ in active)
     for component in _known:

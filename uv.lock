@@ -476,6 +476,7 @@ dependencies = [
     { name = "sentry-sdk", extra = ["fastapi"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
+    { name = "tzdata" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -674,6 +675,7 @@ requires-dist = [
     { name = "supermemory", marker = "extra == 'memory'", specifier = ">=0.1.0" },
     { name = "tiktoken", marker = "extra == 'tokenizer'", specifier = ">=0.7.0" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=5.3.0" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1.0" },
     { name = "xlrd", marker = "extra == 'documents'", specifier = ">=2.0.2" },
 ]

@@ -287,6 +287,7 @@ class TestCoverage:
             "doctor",
             "info",
             "plugin-updater",
+            "update",
             # ``workflow run`` can reach the vector store through a RETRIEVE
             # node, so the command stays in the fail-closed default.
             "workflow",

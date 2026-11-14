@@ -575,6 +575,17 @@ uses `multiprocess_mode="mostrecent"` and series are never removed, so a
 recycled worker's fresh `0` supersedes a dead worker's stale `1`. See
 [Plugin Updates › Metric and alerts](plugin-updates.md#metric-and-alerts).
 
+Three more series describe one-click update runs. The API workers sweep the
+run store into them once a minute on a host with `UPDATE_APPLY_ENABLED` (the
+updater process itself is not scraped):
+`baselith_update_run_total{subject,outcome}` (Counter, `UPDATE_RUN_TOTAL`;
+each finished run counted once across workers and restarts),
+`baselith_update_run_inflight_age_seconds{subject}` (Gauge,
+`UPDATE_RUN_INFLIGHT_AGE`; seconds since the subject's executing run last
+changed state, `0` when none) and `baselith_update_rollback_failed_runs{subject}`
+(Gauge, `UPDATE_ROLLBACK_FAILED`). `subject` is `core` or `plugin:<name>`;
+`outcome` is the terminal state. Both gauges use `mostrecent`.
+
 ---
 
 ## Audit Log

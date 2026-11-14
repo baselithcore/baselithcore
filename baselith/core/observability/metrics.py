@@ -331,9 +331,33 @@ UPDATE_AVAILABLE = Gauge(
     multiprocess_mode="mostrecent",
 )
 
+# One-click update runs, read from the run store by a sweep in the web tier
+# (the updater process itself is not scraped). ``subject`` is ``core`` or
+# ``plugin:<name>``; ``outcome`` is the terminal state the run reached.
+UPDATE_RUN_TOTAL = Counter(
+    "baselith_update_run_total",
+    "Finished one-click update runs, counted once each across workers.",
+    ["subject", "outcome"],
+)
+UPDATE_RUN_INFLIGHT_AGE = Gauge(
+    "baselith_update_run_inflight_age_seconds",
+    "Seconds since the in-flight run of a subject last changed state (0: none).",
+    ["subject"],
+    multiprocess_mode="mostrecent",
+)
+UPDATE_ROLLBACK_FAILED = Gauge(
+    "baselith_update_rollback_failed_runs",
+    "Runs of a subject that ended rollback_failed and wait for an operator.",
+    ["subject"],
+    multiprocess_mode="mostrecent",
+)
+
 
 __all__ = [
     "UPDATE_AVAILABLE",
+    "UPDATE_ROLLBACK_FAILED",
+    "UPDATE_RUN_INFLIGHT_AGE",
+    "UPDATE_RUN_TOTAL",
     # Logging
     "LOG_RECORDS_TOTAL",
     # Chat

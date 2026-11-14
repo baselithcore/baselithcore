@@ -144,6 +144,17 @@ class PluginUpdateConfig(BaseSettings):
         "(baselith/core/_core_version.py; env CORE_UPDATE_REPO); empty disables the "
         "system update notice",
     )
+    distribution_update_repo: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "DISTRIBUTION_UPDATE_REPO", "PLUGIN_UPDATE_DISTRIBUTION_UPDATE_REPO"
+        ),
+        description="GitHub owner/repo of this downstream distribution, whose "
+        "releases and security advisories are compared with the distribution's "
+        "own version (baselith/core/_version.py; env DISTRIBUTION_UPDATE_REPO); "
+        "empty disables the distribution update notice, and the public core, "
+        "which is no distribution, never shows one",
+    )
     upgrade_guide_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
@@ -265,9 +276,26 @@ class PluginUpdateConfig(BaseSettings):
         return bool(self.core_update_repo.strip())
 
     @property
+    def distribution_checks_enabled(self) -> bool:
+        """True when a distribution repo is configured and this is a distribution.
+
+        The public core carries no ``__distribution__`` marker: there the
+        distribution and the core are one project, so the core notice alone
+        covers it and nothing is announced twice.
+        """
+        from baselith.core import _version
+
+        marker = getattr(_version, "__distribution__", None)
+        return bool(marker) and bool(self.distribution_update_repo.strip())
+
+    @property
     def enabled(self) -> bool:
-        """True when either the plugin check or the system check can run."""
-        return self.plugin_checks_enabled or self.system_checks_enabled
+        """True when the plugin, the system or the distribution check can run."""
+        return (
+            self.plugin_checks_enabled
+            or self.system_checks_enabled
+            or self.distribution_checks_enabled
+        )
 
 
 @overridable(PluginUpdateConfig)

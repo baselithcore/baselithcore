@@ -7,6 +7,7 @@ from typing import Any
 
 from baselith.core.plugins.version import SemanticVersion
 
+from .distribution_manifest import DISTRIBUTION_ASSET
 from .models import ReleaseInfo
 
 
@@ -64,6 +65,7 @@ def parse_release(plugin: str, rel: Any) -> tuple[SemanticVersion, ReleaseInfo] 
         html_url=text(rel.get("html_url")) or "",
         tarball_url=assets.get(f"{plugin}-{version}.tar.gz"),
         release_json_url=assets.get("release.json"),
+        distribution_manifest_url=assets.get(DISTRIBUTION_ASSET),
         author=text(author.get("login")) if isinstance(author, dict) else None,
         author_id=_account_id(author),
         author_type=text(author.get("type")) if isinstance(author, dict) else None,

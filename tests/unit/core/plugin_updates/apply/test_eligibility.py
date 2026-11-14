@@ -262,3 +262,22 @@ def test_candidate_without_signed_assets_is_unsigned() -> None:
 def test_unverified_legacy_or_unexplained_is_unsigned(refusal: Refusal | None) -> None:
     cand = _cand(verified=False, refusal=refusal)
     assert _status(cand).blockers == [ApplyBlocker.UNSIGNED_RELEASE]
+
+
+def test_core_install_settings_never_reach_a_plugin_verdict(tmp_path: Path) -> None:
+    """Core-only blockers belong to the core; a plugin verdict ignores those settings."""
+    from baselith.core.plugin_updates.apply.drivers._core_guards import (
+        CORE_ONLY_BLOCKERS,
+    )
+
+    cfg = UpdateApplyConfig(enabled=True, core_enabled=False, backup_command=[])
+    status = _status(_cand(), cfg=cfg)
+    assert status.installable and not set(status.blockers) & CORE_ONLY_BLOCKERS
+    worst = _status(
+        _cand(host_build_required=True),
+        cfg=UpdateApplyConfig(enabled=False),
+        method="helm",
+        hb=_hb(overlay_writable=False, core_version="1.49.0"),
+        active=_live_run(tmp_path),
+    )
+    assert not set(worst.blockers) & CORE_ONLY_BLOCKERS

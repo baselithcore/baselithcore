@@ -5,9 +5,11 @@ Layout under ``root``: ``runs/<id>.json`` (snapshot, atomic replace),
 claim, holding the run id: one active run per plugin), ``locks/<plugin>.lock``
 (an exclusive ``flock`` serialising every mutation of a plugin's runs across
 threads and processes), ``expect/<plugin>.json``, ``auditing/<id>`` and
-``audited/<id>`` (the outcome-audit claim and mark, :mod:`._store_audit`) and
-``heartbeat.json``. Every file is written by atomic replace, so a reader never
-sees a torn record. Finished runs are pruned after a retention period
+``audited/<id>`` (the outcome-audit claim and mark, :mod:`._store_audit`),
+``heartbeat.json``, the update policy (``policy*.json``,
+:mod:`._store_policy`) and the metering marks (``metered/<id>``,
+:mod:`._store_meter`). Every file is written by atomic replace, so a reader
+never sees a torn record. Finished runs are pruned after a retention period
 (:meth:`RunStore.prune_finished`).
 """
 
@@ -25,12 +27,16 @@ from pathlib import Path
 from ._store_audit import AuditMixin
 from ._store_expect import ExpectationsMixin
 from ._store_io import _PLUGIN, _RUN_ID, _atomic_write, _now, _read
+from ._store_meter import MeterMixin
+from ._store_policy import PolicyMixin
 from .models import (
+    HOST_DRIVER,
     RELEASING_STATES,
     ApplyRun,
     RunKind,
     RunState,
     RunTransition,
+    subject_refusal,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,7 +73,7 @@ class RunStateConflict(Exception):
         self.actual = actual
 
 
-class RunStore(ExpectationsMixin, AuditMixin):
+class RunStore(ExpectationsMixin, AuditMixin, PolicyMixin, MeterMixin):
     """Runs, claims, journal, heartbeat, expectations and audit marks on one filesystem."""
 
     def __init__(self, root: Path) -> None:
@@ -145,8 +151,18 @@ class RunStore(ExpectationsMixin, AuditMixin):
         approval_ttl_seconds: int,
         target: str | None = None,
         now: datetime | None = None,
+        subject: str | None = None,
+        driver: str = HOST_DRIVER,
     ) -> ApplyRun:
-        """Claim ``plugin`` and write a new run; :class:`RunConflict` if claimed."""
+        """Claim ``plugin`` and write a new run; :class:`RunConflict` if claimed.
+
+        ``subject`` is ``None`` (a plugin run), ``plugin:<plugin>`` or ``core``,
+        which needs the reserved claim ``baselith_core``; any other pairing is
+        a ``ValueError`` and nothing is written.
+        """
+        refusal = subject_refusal(self._plugin(plugin), subject)
+        if refusal is not None:
+            raise ValueError(refusal)
         at = _now(now)
         run_id = f"pinstall-{at.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
         state = RunState.AWAITING_APPROVAL if approval_required else RunState.APPROVED
@@ -170,6 +186,8 @@ class RunStore(ExpectationsMixin, AuditMixin):
                 target=target,
                 updated_at=at,
                 approval_expires_at=expires,
+                subject=subject,
+                driver=driver,
             )
             self._journal(run_id, RunTransition(at=at, state=state, actor=requested_by))
             self._save(run)
@@ -200,11 +218,23 @@ class RunStore(ExpectationsMixin, AuditMixin):
             os.fsync(handle.fileno())
 
     def get(self, run_id: str) -> ApplyRun | None:
-        """The run, or ``None`` when unknown or ``run_id`` is not a valid id."""
+        """The run, or ``None`` when unknown, unreadable or not a valid id.
+
+        A file this release cannot validate (a state written by a newer
+        release, a torn edit) reads as absent, so one bad file never breaks a
+        listing.
+        """
         try:
-            text = _read(self._run_path(run_id))
-            return None if text is None else ApplyRun.model_validate_json(text)
+            path = self._run_path(run_id)
         except ValueError:
+            return None
+        text = _read(path)
+        if text is None:
+            return None
+        try:
+            return ApplyRun.model_validate_json(text)
+        except ValueError:
+            logger.warning("plugin_update_run_unreadable run=%s", run_id)
             return None
 
     def _transition_locked(
