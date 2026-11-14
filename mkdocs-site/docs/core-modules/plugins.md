@@ -678,6 +678,21 @@ the start of `load_all_plugins`, `enforce_signing_policy()` surfaces the
 posture. Outside production, unsigned plugins load (dev/hot-reload
 convenience).
 
+**Plugin code runs from source, never from a bytecode cache.** The hash covers
+a plugin's `*.py` files, but CPython executes the `.pyc` it finds in
+`__pycache__` whenever the cache *claims* to match: a timestamp pyc is accepted
+on the source's mtime and size, an unchecked hash-based pyc (PEP 552) with no
+comparison at all, and a sourceless `module.pyc` beside the sources is
+importable outright. No cache file can be hashed reproducibly, so a tree whose
+sources still verified could run bytecode nobody signed. Every
+`baselith.plugins.*` import therefore goes through a source-only finder
+(`baselith/core/plugins/_source_only.py`, installed by `baselith.plugins` itself
+and by the loader): the module is compiled from the bytes of the `.py` file the
+hash walk read, `__pycache__` is neither read nor written for plugin modules,
+and a module that exists only as bytecode raises `ImportError`. Extension
+modules keep the default loader (native code is hashed from surface V3 on).
+Compiling the whole official plugin set costs about 40 ms, once per process.
+
 !!! warning "`APP_ENV=prod` counts as production now"
     `baselith/core/plugins/integrity.py` used to match the literal string `production`
     on its own, so `APP_ENV=prod` disabled the fail-closed default entirely. It

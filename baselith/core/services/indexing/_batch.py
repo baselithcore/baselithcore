@@ -30,10 +30,21 @@ def build_document(item: Any) -> Document | None:
     return doc
 
 
+#: Metadata the registry must not keep: a reader's pre-computed chunks carry
+#: the document text several times over (text, embedding text, context, body),
+#: nothing reads them back from the registry, and the registry lives for the
+#: life of the process and is written to one Redis value after every run.
+_REGISTRY_EXCLUDED_METADATA = frozenset({"ingestion_chunks"})
+
+
 def _record_indexed(item: Any, indexed_items: dict[str, IndexedDocument]) -> None:
     indexed_items[item.uid] = IndexedDocument(
         fingerprint=item.fingerprint,
-        metadata=dict(item.metadata or {}),
+        metadata={
+            key: value
+            for key, value in (item.metadata or {}).items()
+            if key not in _REGISTRY_EXCLUDED_METADATA
+        },
     )
 
 

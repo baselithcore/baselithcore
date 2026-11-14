@@ -34,8 +34,24 @@ UNTRUSTED_CLOSE_TAG = "</untrusted_tool_output>"
 #: reads ``< UNTRUSTED_TOOL_OUTPUT >`` as the same marker an exact-string
 #: replace would have missed — and one missed marker is a payload that escapes
 #: its envelope.
-_CLOSE_MARKER_RE = re.compile(r"<\s*/\s*untrusted_tool_output\s*>", re.IGNORECASE)
-_OPEN_MARKER_RE = re.compile(r"<\s*untrusted_tool_output\b", re.IGNORECASE)
+#:
+#: The tag *name* is what is matched, not a well-formed tag: ``</untrusted_tool_output x>``,
+#: a self-closing ``/>``, a newline before ``>``, a soft hyphen or zero-width
+#: joiner inside the name and fullwidth ``＜ ／`` brackets all read as the close
+#: marker to a model, and a pattern that insisted on ``\s*>`` let each of them
+#: through with operator-looking text behind it.
+_INVISIBLE = "[\u00ad\u200b-\u200f\u2060-\u2064\ufe00-\ufe0f\ufeff]*"
+_LT = "[<\uff1c\ufe64]"
+_SLASH = "[/\uff0f\u2215]"
+_GAP = rf"(?:\s|{_INVISIBLE[:-1]})*"
+_TAG_NAME = _INVISIBLE.join("untrusted_tool_output")
+_CLOSE_MARKER_RE = re.compile(
+    rf"{_LT}{_GAP}{_SLASH}{_GAP}{_TAG_NAME}\s*>", re.IGNORECASE
+)
+_LOOSE_CLOSE_MARKER_RE = re.compile(
+    rf"{_LT}{_GAP}{_SLASH}{_GAP}{_TAG_NAME}", re.IGNORECASE
+)
+_OPEN_MARKER_RE = re.compile(rf"{_LT}{_GAP}{_TAG_NAME}", re.IGNORECASE)
 
 #: Their escaped forms, and the envelope the wrapper emits. The two escapes
 #: cannot collide: ``&lt;untrusted_tool_output`` never matches
@@ -43,6 +59,9 @@ _OPEN_MARKER_RE = re.compile(r"<\s*untrusted_tool_output\b", re.IGNORECASE)
 #: :func:`unwrap_untrusted` reverses them unambiguously.
 _ESCAPED_CLOSE = "&lt;/untrusted_tool_output&gt;"
 _ESCAPED_OPEN = "&lt;untrusted_tool_output"
+#: A close marker that was not a well-formed tag: only its name is escaped and
+#: whatever followed it stays as the literal text it was.
+_ESCAPED_LOOSE_CLOSE = "&lt;/untrusted_tool_output"
 _ENVELOPE_RE = re.compile(
     r'\A<untrusted_tool_output tool="[^"]*">(?P<body>.*)</untrusted_tool_output>\Z',
     re.DOTALL,
@@ -134,6 +153,7 @@ def escape_untrusted_markers(text: str) -> str:
         text is returned unchanged, so it is safe to apply unconditionally.
     """
     escaped = _CLOSE_MARKER_RE.sub(_ESCAPED_CLOSE, text)
+    escaped = _LOOSE_CLOSE_MARKER_RE.sub(_ESCAPED_LOOSE_CLOSE, escaped)
     return _OPEN_MARKER_RE.sub(_ESCAPED_OPEN, escaped)
 
 
@@ -202,9 +222,10 @@ def unwrap_untrusted(text: str) -> str:
     if match is None:
         return text
     body = match.group("body")
-    return body.replace(_ESCAPED_CLOSE, UNTRUSTED_CLOSE_TAG).replace(
-        _ESCAPED_OPEN, "<untrusted_tool_output"
+    restored = body.replace(_ESCAPED_CLOSE, UNTRUSTED_CLOSE_TAG).replace(
+        _ESCAPED_LOOSE_CLOSE, "</untrusted_tool_output"
     )
+    return restored.replace(_ESCAPED_OPEN, "<untrusted_tool_output")
 
 
 def _default_max_chars() -> int:

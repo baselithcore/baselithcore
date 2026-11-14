@@ -13,8 +13,8 @@ receive backports — upgrade to the latest release.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.3.x  | :white_check_mark: |
-| < 1.3  | :x:                |
+| 1.4.x  | :white_check_mark: |
+| < 1.4  | :x:                |
 
 The exact version is recorded in [`baselith/core/_version.py`](baselith/core/_version.py). The
 table above is rewritten by semantic-release on every release (see the
@@ -31,7 +31,7 @@ Report privately via either channel:
 
 - **GitHub Security Advisory** — use *Security → Report a vulnerability* on the
   repository (preferred; gives us a private collaboration thread).
-- **Email** — `security@baselithcore.dev` (PGP key available on request).
+- **Email** — `baselith.ai@gmail.com` (PGP key available on request).
 
 Please include:
 

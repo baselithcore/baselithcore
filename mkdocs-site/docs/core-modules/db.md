@@ -465,6 +465,10 @@ overhead, so the result is memoised:
 - **Single-flight** — concurrent misses for the same key are coalesced, so a
   cold cache under load triggers one scan rather than one per in-flight
   request. The winner re-checks the cache after acquiring the slot.
+- **Aggregation off the event loop** — the roll-up itself is pure CPU
+  (about 90 ms for a scan at the 10 000-row cap). Above 500 rows it runs in a
+  worker thread, so a cache refresh does not stall the other requests on the
+  worker; smaller scans stay inline, where a thread hop would cost more.
 
 ### Retry policy
 

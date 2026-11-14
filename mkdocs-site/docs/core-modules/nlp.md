@@ -87,7 +87,7 @@ scores = reranker.predict([("query", "doc1"), ("query", "doc2")])
 ```
 
 !!! tip "Performance"
-    `get_embedder()` and `get_reranker()` are wrapped in `@functools.cache` (unbounded, one entry per `model_name`), so each model is loaded once and reused across all requests; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
+    `get_embedder()` and `get_reranker()` keep one instance per **resolved** model name (unbounded), so each model is loaded once and reused across all requests. The configured default is resolved before the lookup: `get_embedder()`, `get_embedder(None)` and `get_embedder("<the configured model>")` return the same object — keyed on the literal arguments they were three copies of the weights, and the memory hierarchy's "same embedder?" check failed between them, so a recall embedded its query twice. `cache_clear()` / `cache_info()` are still available on both; `get_spacy_pipeline()` uses `@lru_cache(maxsize=1)` and holds a single pipeline.
 
 !!! note "Importing `baselith.core.nlp` loads no ML stack"
     `sentence_transformers` (and with it transformers, torch, scipy and

@@ -333,6 +333,25 @@ await client.close()
     with your own HTTP client, or call `A2AServer.dispatch_stream()` directly
     when the peer is in-process.
 
+!!! note "Wire format"
+    `invoke(method, params)` sends a JSON-RPC 2.0 request to
+    `POST {endpoint}/a2a`, the route `create_a2a_router` serves, signed as
+    described below. `method` is the JSON-RPC method name, so against an
+    `A2AServer` use the A2A methods (`message/send`, `tasks/get`,
+    `tasks/cancel`) with the params that method expects, as in the example
+    below. A JSON-RPC `error` object comes back as a failed `A2AResponse`
+    carrying the peer's own `error_code` and `error_message`; a deliberate
+    application error is not retried. Transport errors, timeouts and `5xx` are.
+
+```python
+from baselith.core.a2a.types import Message
+
+response = await client.invoke(
+    "message/send", {"message": Message.user_message("hi").to_dict()}
+)
+# response.result is the Task object as a dict
+```
+
 ### Request signing (HMAC)
 
 When `BASELITH_A2A_SHARED_SECRET` is set, every outgoing request is signed

@@ -26,6 +26,11 @@ _BLOCKED_HOSTNAMES = frozenset({"localhost", "broadcasthost"})
 _EXTRA_INTERNAL_NETWORKS = (
     ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 CGNAT
     ipaddress.ip_network("192.88.99.0/24"),  # Deprecated 6to4 relay anycast
+    # Azure WireServer / IMDS companion: a *public* address that every Azure VM
+    # routes to its own host agent (extension config, certificates). No stdlib
+    # predicate can know it is internal.
+    ipaddress.ip_network("168.63.129.16/32"),
+    ipaddress.ip_network("fec0::/10"),  # Deprecated IPv6 site-local (RFC 3879)
 )
 
 

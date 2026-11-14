@@ -194,6 +194,14 @@
           "signature_failed",
           "needs_environment_update",
           "host_build_required",
+          "backup_unconfigured",
+          "updater_restart_unconfigured",
+          "tree_dirty",
+          "breaking_migration",
+          "major_jump",
+          "core_disabled",
+          "core_install_unsupported",
+          "core_too_old",
           "run_active"
         ],
         "title": "ApplyBlocker",
@@ -637,7 +645,7 @@
         "type": "object"
       },
       "CheckReport": {
-        "description": "Result of a full update check across plugins and the framework.",
+        "description": "Result of a full update check across plugins and the framework.\n\n``system`` compares the public core release the tree contains with the\npublic core's releases. ``distribution`` (``component=\"distribution\"``)\ncompares a downstream distribution's own version with that\ndistribution's releases; it is ``None`` in the public core, when its check\nis off, and in every report saved before it existed.",
         "properties": {
           "candidates": {
             "items": {
@@ -650,6 +658,16 @@
             "format": "date-time",
             "title": "Checked At",
             "type": "string"
+          },
+          "distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "error": {
             "anyOf": [
@@ -2130,6 +2148,39 @@
         "title": "PluginUpdatesResponse",
         "type": "object"
       },
+      "PreflightItem": {
+        "description": "One finding of a pre-flight, with a sentence a person can act on.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/PreflightLevel"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "level",
+          "message"
+        ],
+        "title": "PreflightItem",
+        "type": "object"
+      },
+      "PreflightLevel": {
+        "description": "How much an item stands in the way.",
+        "enum": [
+          "ok",
+          "warn",
+          "block"
+        ],
+        "title": "PreflightLevel",
+        "type": "string"
+      },
       "PrivacyProviders": {
         "description": "``GET /privacy/providers``.",
         "properties": {
@@ -2707,6 +2758,17 @@
               }
             ],
             "title": "Author Type"
+          },
+          "distribution_manifest_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distribution Manifest Url"
           },
           "html_url": {
             "default": "",
@@ -4382,7 +4444,7 @@
   },
   "info": {
     "title": "Baselith-Core",
-    "version": "1.3.0"
+    "version": "1.4.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -5766,6 +5828,73 @@
           }
         },
         "summary": "Check Updates",
+        "tags": [
+          "Plugin Updates"
+        ]
+      }
+    },
+    "/api/plugins/updates/preflight": {
+      "get": {
+        "deprecated": true,
+        "description": "Whether ``subject`` (``core`` or ``plugin:<name>``) can be installed now.\n\nRead-only: it reads the saved report, the run store, the task queue and\nthe disk, and never writes or contacts GitHub.",
+        "operationId": "get_preflight_api_plugins_updates_preflight_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PreflightItem"
+                  },
+                  "title": "Response Get Preflight Api Plugins Updates Preflight Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Preflight",
         "tags": [
           "Plugin Updates"
         ]
@@ -10026,7 +10155,7 @@
     "/privacy/retention/sweep": {
       "post": {
         "deprecated": true,
-        "description": "Purge records older than the horizon across retention-aware providers.",
+        "description": "Purge records older than the horizon across retention-aware providers.\n\nThe sweep is deployment-wide \u2014 it deletes expired rows of every tenant \u2014 so\nit is a platform operation: a credential bound to another tenant, whatever\nits scopes, is refused, and a zero horizon (everything) is not accepted.",
         "operationId": "retention_sweep_privacy_retention_sweep_post",
         "requestBody": {
           "content": {
@@ -11635,6 +11764,72 @@
           }
         },
         "summary": "Check Updates",
+        "tags": [
+          "Plugin Updates"
+        ]
+      }
+    },
+    "/v1/api/plugins/updates/preflight": {
+      "get": {
+        "description": "Whether ``subject`` (``core`` or ``plugin:<name>``) can be installed now.\n\nRead-only: it reads the saved report, the run store, the task queue and\nthe disk, and never writes or contacts GitHub.",
+        "operationId": "get_preflight_v1_api_plugins_updates_preflight_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PreflightItem"
+                  },
+                  "title": "Response Get Preflight V1 Api Plugins Updates Preflight Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Preflight",
         "tags": [
           "Plugin Updates"
         ]
@@ -15765,7 +15960,7 @@
     },
     "/v1/privacy/retention/sweep": {
       "post": {
-        "description": "Purge records older than the horizon across retention-aware providers.",
+        "description": "Purge records older than the horizon across retention-aware providers.\n\nThe sweep is deployment-wide \u2014 it deletes expired rows of every tenant \u2014 so\nit is a platform operation: a credential bound to another tenant, whatever\nits scopes, is refused, and a zero horizon (everything) is not accepted.",
         "operationId": "retention_sweep_v1_privacy_retention_sweep_post",
         "requestBody": {
           "content": {

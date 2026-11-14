@@ -155,7 +155,10 @@ X-Baselith-Signature: t=<unix_ts>,v1=<hex HMAC-SHA256 over "<ts>.<body>">
   nothing about which workflows exist (401 either way).
 - **Freshness and replay.** The timestamp must be within
   `WORKFLOWS_TRIGGER_TOLERANCE_SECONDS` (default 300), and a signature is
-  accepted **once** inside that window (409 on a repeat). The replay memory is
+  accepted **once** inside that window (409 on a repeat). The signature is
+  remembered by its parsed value, so re-spelling the header (an extra part,
+  added whitespace, reordered fields, a zero-padded timestamp) is still a
+  repeat. The replay memory is
   per process.
 - **Fail closed.** Without `WORKFLOWS_TRIGGER_SECRET` the endpoint answers 503.
   Bodies over 1 MiB answer 413 before anything is hashed.

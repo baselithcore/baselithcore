@@ -12,6 +12,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
 
 from baselith.core.config.plugin_update_apply import UpdateApplyConfig
@@ -71,12 +72,9 @@ def evaluate_boot_reports(
     reports: Sequence[BootReport], expect: Expectation
 ) -> HealthVerdict:
     """Every worker that booted after the restart must agree with ``expect``."""
-    if not reports:
-        return HealthVerdict(False, _NO_REPORT)
-    declared = max(r.workers for r in reports)
-    seen = len({r.pid for r in reports})
-    if seen < declared:
-        return HealthVerdict(False, f"{seen} of {declared} workers reported")
+    waiting = workers_problem(reports)
+    if waiting is not None:
+        return HealthVerdict(False, waiting)
     for report in reports:
         problem = _problem(report, expect)
         if problem is not None:
@@ -84,28 +82,28 @@ def evaluate_boot_reports(
     return HealthVerdict(True)
 
 
-async def wait_healthy(
+async def wait_until_healthy(
     store: RunStore,
-    expect: Expectation,
+    since: datetime,
+    evaluate: Callable[[Sequence[BootReport]], HealthVerdict],
     config: UpdateApplyConfig,
     *,
     probe: Callable[[], Awaitable[int]],
     clock: Callable[[], float],
     sleep: Callable[[float], Awaitable[None]],
 ) -> HealthVerdict:
-    """Boot reports agree AND readiness answers 200 for ``stable_seconds`` in a row.
+    """``evaluate`` accepts the reports since ``since`` AND readiness holds.
 
-    Reports are re-read on every poll, so a worker that boots late (or wrong)
-    inside the window resets stability. Gives up after ``health_timeout_seconds``.
+    Readiness must answer 200 for ``stable_seconds`` in a row. Reports are
+    re-read on every poll, so a worker that boots late (or wrong) inside the
+    window resets stability. Gives up after ``health_timeout_seconds``.
     """
     deadline = clock() + config.health_timeout_seconds
     stable_since: float | None = None
     reason = _NO_REPORT
     while True:
-        reports = await asyncio.to_thread(
-            read_boot_reports, store, since=expect.restart_at
-        )
-        verdict = evaluate_boot_reports(reports, expect)
+        reports = await asyncio.to_thread(read_boot_reports, store, since=since)
+        verdict = evaluate(reports)
         try:
             status = await asyncio.wait_for(probe(), max(0.1, deadline - clock()))
         except Exception as exc:  # refused, hung (timeout) etc. is simply "not ready"
@@ -131,4 +129,40 @@ async def wait_healthy(
         await sleep(_POLL_SECONDS)
 
 
-__all__ = ["HealthVerdict", "evaluate_boot_reports", "wait_healthy"]
+def workers_problem(reports: Sequence[BootReport]) -> str | None:
+    """Why the reports cannot be judged yet: none, or fewer workers than declared."""
+    if not reports:
+        return _NO_REPORT
+    declared = max(r.workers for r in reports)
+    seen = len({r.pid for r in reports})
+    return f"{seen} of {declared} workers reported" if seen < declared else None
+
+
+async def wait_healthy(
+    store: RunStore,
+    expect: Expectation,
+    config: UpdateApplyConfig,
+    *,
+    probe: Callable[[], Awaitable[int]],
+    clock: Callable[[], float],
+    sleep: Callable[[float], Awaitable[None]],
+) -> HealthVerdict:
+    """Boot reports agree with ``expect`` AND readiness holds (see :func:`wait_until_healthy`)."""
+    return await wait_until_healthy(
+        store,
+        expect.restart_at,
+        lambda reports: evaluate_boot_reports(reports, expect),
+        config,
+        probe=probe,
+        clock=clock,
+        sleep=sleep,
+    )
+
+
+__all__ = [
+    "HealthVerdict",
+    "evaluate_boot_reports",
+    "wait_healthy",
+    "wait_until_healthy",
+    "workers_problem",
+]

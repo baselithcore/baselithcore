@@ -22,7 +22,7 @@ from baselith.core.orchestration.handlers.rag import (
     RAG_NOT_FOUND_MESSAGE,
     RAG_SYSTEM_PROMPT,
     StandardRagHandler,
-    build_rag_user_prompt,
+    build_rag_user_prompt_async,
 )
 
 logger = get_logger(__name__)
@@ -86,7 +86,7 @@ class StandardRagStreamHandler:
         context["sources"] = list(set(sources))
 
         async for chunk in self._rag.llm_service.generate_response_stream(
-            prompt=build_rag_user_prompt(
+            prompt=await build_rag_user_prompt_async(
                 context_text, query, context.get("history_text", "")
             ),
             system_prompt=RAG_SYSTEM_PROMPT,

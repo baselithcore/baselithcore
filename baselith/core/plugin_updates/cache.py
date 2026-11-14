@@ -9,7 +9,8 @@ candidates ("no plugin report yet") and :meth:`UpdateCache.purge_legacy`
 deletes the old tarball directory. Its core ``system`` notice is kept: it
 never depended on a release manifest, and dropping it would hide a known
 security notice after an upgrade — for as long as GitHub stays unreachable,
-since a failed check carries the previous notice over.
+since a failed check carries the previous notice over. A distribution's
+``distribution`` notice is kept for the same reason.
 """
 
 from __future__ import annotations
@@ -58,7 +59,8 @@ class UpdateCache:
         """Return the last saved report, or None when absent or unreadable.
 
         A report saved by an older cache format (no or another
-        ``cache_format``) keeps only ``checked_at`` and ``system``: its plugin
+        ``cache_format``) keeps only ``checked_at``, ``system`` and
+        ``distribution``: its plugin
         verdicts predate the current rules, so ``candidates`` come back empty
         and the plugin ``error`` is cleared.
         """
@@ -76,6 +78,7 @@ class UpdateCache:
                 "checked_at": data.get("checked_at"),
                 "candidates": [],
                 "system": data.get("system"),
+                "distribution": data.get("distribution"),
             }
         try:
             return CheckReport.model_validate(data)

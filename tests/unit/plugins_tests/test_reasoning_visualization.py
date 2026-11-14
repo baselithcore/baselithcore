@@ -56,4 +56,5 @@ async def test_reasoning_agent_returns_tree():
         k=3,
         max_steps=5,
         tools=[],  # default tools
+        enforcement_context=None,
     )

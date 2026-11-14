@@ -1546,7 +1546,10 @@ baselith/core/services/vectorstore/
     into the retry/circuit-breaker wrappers instead of stalling callers
     indefinitely. Both auth fields stay unset for the local compose
     default; a remote instance without them would send unauthenticated
-    plaintext traffic.
+    plaintext traffic. `QDRANT_PREFER_GRPC` (default `false`) sends upserts and searches over
+    gRPC (`VECTORSTORE_GRPC_PORT`, `6334`) instead of REST — protobuf instead of
+    JSON for every 1024-dimension vector. The bundled compose files publish
+    only `6333`, so enabling it there means publishing `6334` as well.
 
 !!! info "Embedding Cache"
     The embedding cache keys are scoped by **model identifier, embedding
@@ -1617,11 +1620,14 @@ await vs.delete_documents(["doc1", "doc2", "doc3"], collection_name="documents")
 
 Both providers' `delete_by_filter` accept a `list`/`tuple`/`set` as the filter
 value, meaning "match **any** of these values": `QdrantProvider` builds a
-`MatchAny` condition, `PgVectorProvider` a `payload->>%s = ANY(%s)` predicate.
+`MatchAny` condition, `PgVectorProvider` a `payload @> ANY(%s::jsonb[])` containment predicate for `document_id` and `tenant_id` (the keys the service always writes as strings), so the `gin (payload jsonb_path_ops)` index serves it — the `payload->>%s = ANY(%s)` form it replaced read every row (a sequential scan, 28–170 ms against 0.16 ms on 200 000 rows). Any other key, and any negated condition, keeps the text form: containment matches only a JSON string, so it is not assumed for keys whose type the service does not control, and `NOT (payload @> …)` would match rows that lack the key.
 Memory compaction relies on this — `VectorMemoryProvider.delete_many()` funnels
 into `delete_documents()`, so a 1000-item compaction pays one delete round-trip
 instead of 1000. Tenant isolation applies here as everywhere else: the current
-`tenant_id` is injected into the filter automatically.
+`tenant_id` is injected into the filter automatically. The indexing service
+clears stale documents the same way — one `delete_documents()` per 500 ids,
+`INDEX_MAX_CONCURRENCY` chunks at a time; a chunk that fails keeps its ids in
+the registry, so the next run retries them.
 
 Both providers also expose `list_collections()` (a Qdrant server's collections;
 the `vs_*` tables for pgvector), which the GDPR tenant purge uses to delete a
@@ -1757,6 +1763,19 @@ Embeddings are produced through an `EmbedderProtocol` implementation passed to
 `index()` / `search()` (or resolved from configuration). The vector store caches
 embeddings transparently via its model-scoped `embedding_cache`. There is no
 `EmbeddingService` export in `baselith.core.services.vectorstore`.
+
+That cache (`RedisCache`) serialises with orjson, falling back to the stdlib
+encoder for what orjson refuses; the stored text is plain JSON either way, so
+existing entries stay readable. `PgVectorProvider` encodes a vector for the
+`vector` type the same way — a JSON array of floats is the pgvector literal.
+Both used to format every float in Python on the event loop, ~0.2 ms per
+1024-dimension vector.
+
+The indexing registry (`IndexedDocument.metadata`) keeps a document's metadata
+without `ingestion_chunks`: a reader's pre-computed chunks repeat the document
+text several times, nothing reads them back from the registry, and the
+registry is held for the life of the process and written to one Redis value
+after every run.
 
 ### Recursive chunking (dependency-free)
 
@@ -2349,7 +2368,7 @@ print(result.cost_usd)         # compute_seconds * SANDBOX_COST_PER_COMPUTE_SECO
 
 BaselithCore supports two types of sandboxing for secure code execution:
 
-1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks.
+1. **Docker (Standard)**: Uses standard Docker containers with `network_mode="none"` (unless `SANDBOX_ENABLE_NETWORK` opts in) and resource limits. It provides a good balance between performance and security for most tasks. Container stdout and stderr are read as a stream against a 1 MiB budget per stream (`sandbox/_logs.py`) and truncated with a notice beyond it, so code that prints until its timeout cannot hand the API process a buffer of its choosing. The one-shot run path also asks the daemon for a `json-file` log capped at one 1 MiB file (`capped_log_config()`), bounding what a `print` loop can write to the host.
 2. **Docker Sandbox (sbx)**: A premium, **MicroVM-based** isolation layer. It uses the `sbx` CLI to spin up lightweight microVMs for every agent session, providing the strongest possible security boundary against "jailbreak" attempts.
 
 - **MicroVM Isolation (sbx)**: Unlike containers that share the host kernel, MicroVMs have their own kernel, offering hardware-level isolation.
@@ -2944,6 +2963,7 @@ VECTORSTORE_EMBEDDING_DIM=1024
 EMBEDDING_CACHE_TTL=604800   # 7 days
 QDRANT_API_KEY=              # Managed/remote Qdrant only (SecretStr)
 QDRANT_HTTPS=false           # TLS for the Qdrant REST endpoint
+QDRANT_PREFER_GRPC=false     # gRPC (VECTORSTORE_GRPC_PORT) instead of REST
 VECTORSTORE_TIMEOUT_SECONDS=30.0
 
 # Vision — VISION_PROVIDER picks the provider; the model is per provider

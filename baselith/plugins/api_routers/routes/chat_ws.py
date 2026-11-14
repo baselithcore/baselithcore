@@ -32,6 +32,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
+from baselith.core.auth import InsufficientScopeError
+from baselith.core.auth.scopes import SCOPE_CHAT_WRITE
+from baselith.core.middleware.scope_gate import enforce_scoped_capability
 from baselith.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -89,11 +92,16 @@ async def _enforce(websocket: WebSocket) -> str:
     ``HTTPException`` exactly as the REST dependency would.
     """
     manager = _get_security_manager()
-    return await manager.enforce_auth(
+    role: str = await manager.enforce_auth(
         websocket,
         allowed_roles=_CHAT_ROLES,
         limit_per_minute=manager.config.rate_limit_user_per_minute,
     )
+    try:
+        enforce_scoped_capability(websocket, role, SCOPE_CHAT_WRITE)
+    except InsufficientScopeError as exc:
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
+    return role
 
 
 def _stream_timeout_seconds() -> float:

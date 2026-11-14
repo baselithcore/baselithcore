@@ -49,6 +49,16 @@ class BootReport(BaseModel):
     booted_at: datetime
     core_version: str
     plugins: dict[str, PluginBootState]
+    #: The distribution version (``__version__``) the worker imported; a core
+    #: run's health check compares it with the target. ``None`` in reports
+    #: written before it existed.
+    framework_version: str | None = None
+
+
+def _framework_version() -> str:
+    from baselith.core._version import __version__
+
+    return str(__version__)
 
 
 def _plugin_name(plugin: Any) -> str | None:
@@ -164,6 +174,7 @@ async def write_boot_report(
         booted_at=now or datetime.now(UTC),
         core_version=core_version,
         plugins=plugins,
+        framework_version=_framework_version(),
     )
     path = store.boot_dir / f"{worker}.json"
     _atomic_write(path, report.model_dump_json())
@@ -208,10 +219,19 @@ def latest_active_plugins(store: RunStore) -> list[str] | None:
     return sorted(n for n, s in newest.plugins.items() if s.active)
 
 
+def latest_framework_version(store: RunStore) -> str | None:
+    """``framework_version`` of the newest report; ``None`` without one."""
+    reports = _reports(store)
+    if not reports:
+        return None
+    return max(reports, key=lambda r: r.booted_at).framework_version
+
+
 __all__ = [
     "BootReport",
     "PluginBootState",
     "latest_active_plugins",
+    "latest_framework_version",
     "read_boot_reports",
     "write_boot_report",
 ]

@@ -23,9 +23,10 @@ from baselith.core.config.sandbox import (
     get_sandbox_config,
 )
 
+from ._logs import read_capped_logs
 from .bootstrap import FileTransfer
 from .docker_factory import DockerFactory
-from .policy import build_sandbox_runtime_kwargs
+from .policy import build_sandbox_runtime_kwargs, capped_log_config
 from .resources import Resources, effective_timeout
 from .sbx_factory import SbxFactory
 from .transfer import execute_with_files, validate_transfer
@@ -415,6 +416,8 @@ class SandboxService:
         # Resolved here, not in the executor thread: it reads the (possibly
         # overridden) sandbox config, which is context-scoped.
         runtime_kwargs = build_sandbox_runtime_kwargs(resources=resources)
+        # The legacy path reads the container's logs: cap what the daemon keeps.
+        runtime_kwargs.setdefault("log_config", capped_log_config())
 
         def _blocking_run() -> ExecutionResult:
             """Synchronous blocking logic for Docker container execution."""
@@ -452,12 +455,8 @@ class SandboxService:
                         execution_time=timeout,
                     )
 
-                stdout = (
-                    container.logs(stdout=True, stderr=False).decode("utf-8").strip()
-                )
-                stderr = (
-                    container.logs(stdout=False, stderr=True).decode("utf-8").strip()
-                )
+                stdout = read_capped_logs(container, stdout=True, stderr=False)
+                stderr = read_capped_logs(container, stdout=False, stderr=True)
 
                 return ExecutionResult(
                     stdout=stdout,

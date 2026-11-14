@@ -74,7 +74,11 @@ class TestSseFraming:
 
 
 class TestDisconnect:
-    def test_a_gone_client_stops_the_generator(self) -> None:
+    def test_a_gone_client_stops_the_generator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Poll on every pass, so the stop lands on an exact chunk.
+        monkeypatch.setattr(chat_module, "DISCONNECT_POLL_SECONDS", 0.0)
         produced = 0
 
         async def forever() -> AsyncIterator[str]:
@@ -90,6 +94,33 @@ class TestDisconnect:
         # Two data frames, then the disconnect is observed and we stop pulling.
         assert sum(f.endswith("data: tok\n\n") for f in frames) == 2
         assert produced <= 3
+
+    def test_a_burst_does_not_poll_the_client_per_chunk(self) -> None:
+        """The poll is clocked: asking per chunk cost more than framing one."""
+        request = _StubRequest()
+        frames = _collect(
+            chat_module.sse_stream(request, _chunks(*["tok"] * 200), 30.0)
+        )
+
+        assert sum(f.endswith("data: tok\n\n") for f in frames) == 200
+        # 200 chunks arrive well inside one poll window.
+        assert request.checks < 20
+
+    def test_a_gone_client_is_noticed_within_the_poll_window(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(chat_module, "DISCONNECT_POLL_SECONDS", 0.02)
+
+        async def forever() -> AsyncIterator[str]:
+            while True:
+                await asyncio.sleep(0.001)
+                yield "tok"
+
+        request = _StubRequest(disconnect_after=1)
+        frames = _collect(chat_module.sse_stream(request, forever(), 30.0))
+
+        assert frames[-1].endswith(chat_module.SSE_DONE_EVENT)
+        assert len(frames) < 200
 
 
 class TestSourceFailure:

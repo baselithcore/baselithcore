@@ -262,7 +262,7 @@ at `/privacy`, gated by the `privacy:manage`
 | `GET /privacy/providers`      | List registered data providers       |
 | `POST /privacy/export`        | Export all data for a subject        |
 | `POST /privacy/erase`         | Erase all data for a subject         |
-| `POST /privacy/retention/sweep` | Purge records older than N days    |
+| `POST /privacy/retention/sweep` | Purge records older than N days (N ≥ 1). Deployment-wide, so limited to platform-level credentials (tenant `default`): a credential bound to another tenant gets `403` whatever its scopes |
 | `POST /privacy/rectify`       | Correct a subject's data (Art. 16); providers that cannot rectify are listed in `unsupported` |
 | `POST /privacy/restrict`      | Restrict or release processing (Art. 18) |
 | `POST /privacy/object`        | Record an objection (Art. 21); a direct-marketing objection is always upheld |

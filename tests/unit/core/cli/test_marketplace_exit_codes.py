@@ -69,10 +69,44 @@ class TestUnknownPluginFails:
 
         assert m.install_plugin_cmd("absent") == 1
 
-    def test_update(self, registry, installer):
-        registry.get_plugin = AsyncMock(return_value=None)
 
-        assert m.update_plugin_cmd("absent") == 1
+class TestUpdateNeverRemoves:
+    """`update` used to uninstall then reinstall, deleting `.env` and state."""
+
+    def test_plugin_directory_survives(self, tmp_path, capsys):
+        plugin_dir = tmp_path / "acme"
+        plugin_dir.mkdir()
+        (plugin_dir / ".env").write_text("SECRET=1")
+        (plugin_dir / "state.json").write_text("{}")
+
+        with patch(
+            "baselith.core.marketplace.installer.plugin_install_root",
+            return_value=tmp_path,
+        ):
+            with (
+                patch.object(
+                    m.PluginInstaller, "uninstall", new_callable=AsyncMock
+                ) as uninstall,
+                patch.object(
+                    m.PluginInstaller, "install", new_callable=AsyncMock
+                ) as install,
+            ):
+                code = m.update_plugin_cmd("acme")
+
+        assert code == 1
+        assert plugin_dir.is_dir()
+        assert (plugin_dir / ".env").read_text() == "SECRET=1"
+        assert (plugin_dir / "state.json").exists()
+        uninstall.assert_not_awaited()
+        install.assert_not_awaited()
+        out = capsys.readouterr().out
+        assert "baselith update status" in out
+        assert "baselith plugin-updater request acme" in out
+        assert "shows a sha256" in out
+        assert "directory name" in out
+
+    def test_markup_in_plugin_id_does_not_raise(self):
+        assert m.update_plugin_cmd("[/x]") == 1
 
 
 class TestInstall:

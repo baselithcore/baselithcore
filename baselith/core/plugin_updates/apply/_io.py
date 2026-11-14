@@ -133,6 +133,21 @@ def schema_env(config: UpdateApplyConfig) -> dict[str, str]:
     return env
 
 
+async def download_text_asset(source: GitHubReleaseSource, url: str) -> bytes:
+    """The bytes of a small metadata asset (``release.json`` and the like).
+
+    Capped at :data:`~..sources.MAX_TEXT_FILE_BYTES`: these assets are read
+    before anything verifies them.
+
+    Raises:
+        SourceError: The download failed or the asset is larger than the cap.
+    """
+    with tempfile.TemporaryDirectory(prefix="plugin-release-") as tmp:
+        dest = Path(tmp) / "asset"
+        await source.download(url, dest, max_bytes=MAX_TEXT_FILE_BYTES)
+        return dest.read_bytes()
+
+
 class GitHubReleaseFetcher:
     """Finds the release tagged ``v<version>`` (one ``/releases/tags`` call) and downloads it."""
 
@@ -165,12 +180,7 @@ class GitHubReleaseFetcher:
         info = await self._release(plugin, version)
         if not info.release_json_url:
             raise SourceError("release has no release.json asset")
-        with tempfile.TemporaryDirectory(prefix="plugin-release-") as tmp:
-            dest = Path(tmp) / "release.json"
-            await self._source.download(
-                info.release_json_url, dest, max_bytes=MAX_TEXT_FILE_BYTES
-            )
-            return dest.read_bytes()
+        return await download_text_asset(self._source, info.release_json_url)
 
     async def tarball(self, plugin: str, version: str, dest: Path) -> None:
         """Download the tarball of ``plugin`` ``version`` to ``dest``.
@@ -200,6 +210,7 @@ async def http_probe(url: str, *, client: httpx.AsyncClient | None = None) -> in
 
 __all__ = [
     "CommandRunner",
+    "download_text_asset",
     "GitHubReleaseFetcher",
     "ReleaseFetcher",
     "SchemaEnvError",

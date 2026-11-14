@@ -132,6 +132,14 @@ _CREDENTIALS_REGEX = re.compile(
     _PAIR_TEMPLATE.replace("{key}", _CREDENTIAL_KEY), re.IGNORECASE
 )
 
+# The keywords no other keyword contains: a text holding none of these holds
+# no keyword at all (``secret_key`` implies ``secret``).
+_CREDENTIAL_NEEDLES: tuple[str, ...] = tuple(
+    k
+    for k in _CREDENTIAL_KEYWORDS
+    if not any(other != k and other in k for other in _CREDENTIAL_KEYWORDS)
+)
+
 
 def _key_is_sensitive(key: str) -> bool:
     lowered = key.lower()
@@ -150,9 +158,40 @@ def _mask_email(match: re.Match[str]) -> str:
     return f"{masked}@{domain}"
 
 
-def _mask_text(value: str) -> str:
+def _mask_text_unfiltered(value: str) -> str:
+    """Every masking pass, unconditionally: the reference for :func:`_mask_text`."""
     value = _EMAIL_REGEX.sub(_mask_email, value)
     return _mask_credentials(value, _CREDENTIALS_REGEX, _REDACTED)
+
+
+def _mask_text(value: str) -> str:
+    """Mask emails and credentials in ``value``, skipping passes that cannot match.
+
+    This runs on the calling thread for every string of every log line, and
+    nearly all of them hold neither an email nor a credential; the pair regex
+    alone cost ~20 µs on a 110-character line and ~300 µs on a traceback. Each
+    skipped pass is skipped on a *necessary* condition of its regex, so the
+    result is identical to :func:`_mask_text_unfiltered`:
+
+    * an email needs a literal ``@``;
+    * a credential pair needs one of the keywords in its key, and a bearer
+      token needs the word ``bearer`` (itself a keyword). The check is a
+      lowercase substring test, which equals the regexes' case-insensitive
+      match only for ASCII text — ``re.IGNORECASE`` also folds ``ſ``, ``ı``
+      and the Kelvin sign onto ASCII letters — so any non-ASCII string takes
+      every pass;
+    * a JWT or Google token needs one of its three case-sensitive prefixes.
+    """
+    if not value.isascii():
+        return _mask_text_unfiltered(value)
+    if "@" in value:
+        value = _EMAIL_REGEX.sub(_mask_email, value)
+    lowered = value.lower()
+    if any(keyword in lowered for keyword in _CREDENTIAL_NEEDLES):
+        return _mask_credentials(value, _CREDENTIALS_REGEX, _REDACTED)
+    if any(prefix in value for prefix in _TOKEN_PREFIXES):
+        return _JWT.sub(_REDACTED, value)
+    return value
 
 
 def _redact_value(value: Any) -> Any:
@@ -264,6 +303,8 @@ _BEARER = re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}")
 _JWT = re.compile(
     r"\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*|\bya29\.[\w-]{10,}|(?<![\w/])1//[\w-]{20,}"
 )
+# The literal each ``_JWT`` alternative starts with (see ``_mask_text``).
+_TOKEN_PREFIXES: tuple[str, ...] = ("eyJ", "ya29.", "1//")
 _MAX_FREE_TEXT = 4096
 
 

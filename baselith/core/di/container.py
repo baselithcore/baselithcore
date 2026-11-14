@@ -64,7 +64,9 @@ class Scope:
     def __init__(self, container: "DependencyContainer") -> None:
         self._container = container
         self._instances: dict[type, Any] = {}
-        self._lock = threading.Lock()
+        # Reentrant: the lock is held across the user's factory, and a factory
+        # that resolves its own dependency from this scope re-enters it.
+        self._lock = threading.RLock()
         # Token from the ``_current_scope.set`` that entered this scope, so exit
         # can restore whatever was current *before* — see ``_exit``.
         self._token: contextvars.Token[Scope | None] | None = None
@@ -197,7 +199,10 @@ class DependencyContainer:
     def __init__(self) -> None:
         self._services: dict[type, tuple[Callable, ServiceLifetime]] = {}
         self._singletons: dict[type, Any] = {}
-        self._lock = threading.Lock()
+        # Reentrant for the same reason as ``Scope._lock``: factories run under
+        # it, and a service whose factory resolves another service from this
+        # container would otherwise deadlock on the lock it already holds.
+        self._lock = threading.RLock()
 
     def register(
         self,

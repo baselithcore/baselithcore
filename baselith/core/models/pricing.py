@@ -21,8 +21,11 @@ discount:
 - **batch** — the Message Batches API discount, applied uniformly to the
   whole estimate (input, output and cache tiers alike) when ``batch=True``.
 
-Treat this table as a default. Production deployments should override
-via configuration when negotiated rates differ from list price.
+Treat this table as a default. There is no configuration hook yet: the
+framework's own call sites (tenant cost enforcement, the per-request budget,
+routing) all read :data:`DEFAULT_PRICING`. To price with negotiated rates in
+your own code, pass ``table=`` to :func:`estimate_cost` or :func:`get_price`.
+A hosted model with no row is billed at :data:`UNKNOWN_PRICE` on purpose.
 """
 
 from __future__ import annotations

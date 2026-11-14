@@ -39,10 +39,13 @@ def _is_valid_requirement(spec: object) -> bool:
     if not isinstance(spec, str) or spec.strip().startswith("-"):
         return False
     try:
-        Requirement(spec)
+        requirement = Requirement(spec)
     except InvalidRequirement:
         return False
-    return True
+    # ``pkg @ https://host/x.whl`` / ``pkg @ git+https://…`` is valid PEP 508,
+    # and sends pip to an origin of the manifest's choosing — outside the
+    # index, the lock and every vulnerability scan.
+    return requirement.url is None
 
 
 def _load_manifest(plugin_dir: Path) -> dict | None:

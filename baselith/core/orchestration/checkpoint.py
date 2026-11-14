@@ -53,6 +53,7 @@ from baselith.core.orchestration.checkpoint_errors import (
     CheckpointConflictError,
     CheckpointLeaseHeldError,
 )
+from baselith.core.orchestration.checkpoint_gates import ApprovalGateMixin
 from baselith.core.orchestration.checkpoint_lease import LeaseHolder
 from baselith.core.orchestration.checkpoint_scope import ScopeHost
 
@@ -239,7 +240,7 @@ class CheckpointStore(Protocol):
         ...
 
 
-class CheckpointManager(LeaseHolder, ScopeHost):
+class CheckpointManager(ApprovalGateMixin, LeaseHolder, ScopeHost):
     """Runtime façade a handler uses to make its tool steps durable.
 
     Exposed to handlers on the orchestration context as ``context["checkpoint"]``.
@@ -419,35 +420,6 @@ class CheckpointManager(LeaseHolder, ScopeHost):
         self.checkpoint.error = error
         self._sync_budget()
         await self._persist()
-
-    async def await_approval(self, tool_name: str, category: str) -> None:
-        """Pause the run pending human approval and persist that state.
-
-        Records which tool/category is waiting so an operator (or an approval
-        UI) can review it, then resume the run once a decision is recorded via
-        :func:`record_approval_decision`.
-        """
-        self.checkpoint.status = STATUS_AWAITING_APPROVAL
-        self.checkpoint.pending_approval = {
-            "tool_name": tool_name,
-            "category": category,
-            "requested_at": time.time(),
-        }
-        self._sync_budget()
-        await self._persist()
-
-    def approval_decision(self, tool_name: str, category: str) -> bool | None:
-        """Recorded reviewer decision for this tool/category, if any.
-
-        Returns True (approved) / False (denied) when a decision matching the
-        pending request exists, None when nothing was recorded (fresh gate).
-        """
-        pending = self.checkpoint.pending_approval
-        if not pending or "decision" not in pending:
-            return None
-        if pending.get("tool_name") != tool_name or pending.get("category") != category:
-            return None
-        return bool(pending["decision"].get("approved"))
 
 
 # The operator-side approval flow lives in ``checkpoint_approvals`` and

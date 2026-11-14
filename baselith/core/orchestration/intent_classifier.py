@@ -63,6 +63,10 @@ class ClassificationResult:
     alternatives: list[dict] | None = None
 
 
+#: Output cap for the classification call: an intent name, a confidence and
+#: the JSON around them are well under this.
+_CLASSIFICATION_MAX_TOKENS = 96
+
 # Embedded fallback for the registry-served ``intent_classification`` catalog
 # prompt (baselith/core/prompts/catalog/intent_classification.md); ``{{ var }}`` syntax
 # — the literal JSON example keeps single braces (the renderer only matches
@@ -77,8 +81,7 @@ User message: "{{ query }}"
 Respond ONLY with a JSON object in this exact format:
 {
     "intent": "<intent_name>",
-    "confidence": <0.0-1.0>,
-    "reasoning": "<brief explanation>"
+    "confidence": <0.0-1.0>
 }
 
 Choose the most appropriate intent. If unsure, use lower confidence."""
@@ -357,8 +360,13 @@ class IntentClassifier:
                 return None
             # task_category routes this call to the cheap model tier when
             # cost-aware routing is enabled (no-op otherwise).
+            # The answer is one short JSON object: cap it so a model that
+            # elaborates cannot hold retrieval and the first token behind it.
             response = await self._llm_call(
-                prompt, json=True, task_category="classification"
+                prompt,
+                json=True,
+                task_category="classification",
+                max_tokens=_CLASSIFICATION_MAX_TOKENS,
             )
 
             result = json.loads(response)

@@ -383,11 +383,14 @@ spec:
         {{- with .Values.prometheusRule.extraRules }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-    {{- if or (not (has "BaselithcoreUpdateAvailable" $off)) (not (has "BaselithcoreSecurityUpdateAvailable" $off)) }}
-    # A group of its own: these are notices about the release, not about the
-    # cell's health, so they never share an evaluation instant with the
-    # "is it up" alerts above and can be dropped as a unit. The series is
-    # `baselith_update_available{component,security}` (baselith/core/plugin_updates).
+    {{- if or (not (has "BaselithcoreUpdateAvailable" $off)) (not (has "BaselithcoreSecurityUpdateAvailable" $off)) (not (has "BaselithcoreUpdateRollbackFailed" $off)) (not (has "BaselithcoreUpdateRunStuck" $off)) }}
+    # A group of its own: these are about releases and update runs, not about
+    # the cell's health, so they never share an evaluation instant with the
+    # "is it up" alerts above and can be dropped as a unit. The series are
+    # `baselith_update_available{component,security}` and the run metrics
+    # `baselith_update_rollback_failed_runs{subject}` and
+    # `baselith_update_run_inflight_age_seconds{subject}`, swept from the
+    # one-click run store by the API workers (baselith/core/plugin_updates).
     - name: {{ include "baselithcore.fullname" . }}-updates
       {{- with .Values.prometheusRule.interval }}
       interval: {{ . }}
@@ -426,6 +429,40 @@ spec:
               upgrade once it ships. The advisories and their severity are listed
               by `/api/plugins/updates`. It resolves once the cell runs a version
               outside the vulnerable range.
+        {{- end }}
+        {{- if not (has "BaselithcoreUpdateRollbackFailed" $off) }}
+        - alert: BaselithcoreUpdateRollbackFailed
+          expr: max(baselith_update_rollback_failed_runs{namespace="{{ $ns }}"}) by (subject) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: updates
+          annotations:
+            summary: "Update rollback failed for {{ "{{ $labels.subject }}" }} in {{ $ns }}"
+            description: >-
+              A one-click update of `{{ "{{ $labels.subject }}" }}` failed its health
+              check and the automatic rollback failed too, so its state is unknown
+              and it is locked against further runs. Check what it serves now
+              (`baselith plugin-updater status`, the run's journal in the console),
+              put it right by hand, then free it with
+              `baselith plugin-updater resolve <run_id>`. It resolves once no run
+              of the subject is `rollback_failed`.
+        {{- end }}
+        {{- if not (has "BaselithcoreUpdateRunStuck" $off) }}
+        - alert: BaselithcoreUpdateRunStuck
+          expr: max(baselith_update_run_inflight_age_seconds{namespace="{{ $ns }}"}) by (subject) > 3600
+          for: 10m
+          labels:
+            severity: warning
+            component: updates
+          annotations:
+            summary: "Update run of {{ "{{ $labels.subject }}" }} stuck in {{ $ns }}"
+            description: >-
+              A one-click update run of `{{ "{{ $labels.subject }}" }}` has not changed
+              state for over an hour (a wait for approval or a pull request does not
+              count). The updater is likely down or blocked: check
+              `baselith plugin-updater status` and the updater's journal, then
+              restart the updater; its start reconciles the run from its journal.
         {{- end }}
     {{- end }}
 {{- end }}

@@ -364,6 +364,18 @@ capability — they never subtract what a role already implies. This makes the
 whole feature **additive and backward compatible**: an identity that carries
 only roles keeps exactly the access it had before.
 
+A **scoped** identity (role `scoped`: a least-privilege API key, or an RFC 8693
+delegation narrowed to explicit scopes) carries *only* its explicit grants, and
+every data-plane route names the capability it needs through
+`require_scope(...)` (`baselith/core/middleware/scope_gate.py`): the role gate
+runs first, then a scoped identity must hold the scope. Chat, streaming chat,
+the chat WebSocket and `POST /agent/async` need `chat:write`;
+`GET /agent/status/{task_id}` needs `chat:read`; `POST /feedback` needs
+`feedback:write`. A key minted for `webhooks:read` therefore cannot drive the
+agent loop. Role-based identities are adjudicated by the role gate alone, as
+before. A new route that admits `scoped` callers must declare its scope the
+same way — stopping at `require_user` hands a scoped key the whole route.
+
 ### Default role → scope map
 
 | Role        | Scopes                                                      |

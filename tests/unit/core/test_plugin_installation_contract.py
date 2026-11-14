@@ -97,6 +97,7 @@ def test_invalid_core_bounds_fail_before_enable(tmp_path, monkeypatch, bounds):
     [
         {"python_dependencies": "requests"},
         {"python_dependencies": ["requests\n--index-url https://example.test"]},
+        {"python_dependencies": ["pkg @ https://example.test/pkg.whl"]},
         {"plugin_dependencies": {"../outside": ">=1.0.0"}},
         {"plugin_dependencies": {"auth": "bad"}},
         {"frontend": {"package_manager": "unknown"}},

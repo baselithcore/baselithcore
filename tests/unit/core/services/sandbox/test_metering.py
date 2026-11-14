@@ -39,7 +39,7 @@ def mock_docker_client(mock_docker_pkg):
 def mock_container(mock_docker_client):
     """A container whose wait() takes a measurable ~10ms wall-clock."""
     container = MagicMock()
-    container.logs.side_effect = lambda stdout=True, stderr=True: (
+    container.logs.side_effect = lambda stdout=True, stderr=True, stream=False: (
         b"test output" if stdout else b""
     )
     container.wait.side_effect = lambda timeout=None: (

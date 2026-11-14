@@ -112,6 +112,19 @@ class ApprovalPendingError(ApprovalRequiredError):
         )
 
 
+def _accepts_keyword(fn: Any, name: str) -> bool:
+    """Whether ``fn`` takes ``name`` — a duck-typed checkpoint may predate it."""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 async def enforce_approval(
     policy: AutonomyPolicy,
     category: str,
@@ -120,6 +133,8 @@ async def enforce_approval(
     *,
     timeout: int | None = None,
     checkpoint: Any | None = None,
+    args_digest: str | None = None,
+    args_preview: str | None = None,
 ) -> None:
     """Gate a tool invocation behind the autonomy approval matrix.
 
@@ -143,6 +158,13 @@ async def enforce_approval(
         timeout: Optional approval wait timeout in seconds.
         checkpoint: Optional checkpoint manager enabling durable
             pause/resume around the approval.
+        args_digest: Optional SHA-256 of the call's canonicalised arguments.
+            With a ``checkpoint`` it binds the durable request and the
+            recorded decision to this one call, so an approval for one set of
+            arguments never covers another. Without it, a decision matches by
+            tool and category as before.
+        args_preview: Redacted, bounded text of the arguments the reviewer is
+            shown on the durable request (the digest alone is unreadable).
 
     Raises:
         ApprovalPendingError: Run durably paused awaiting an async decision.
@@ -152,8 +174,11 @@ async def enforce_approval(
     if not policy.requires_approval(category):
         return
 
+    # Passed positionally and only when known, so a duck-typed checkpoint that
+    # predates the digest keeps working for callers that supply none.
+    bound = () if args_digest is None else (args_digest,)
     if checkpoint is not None:
-        decision = checkpoint.approval_decision(tool_name, category)
+        decision = checkpoint.approval_decision(tool_name, category, *bound)
         if decision is True:
             return
         if decision is False:
@@ -163,7 +188,13 @@ async def enforce_approval(
 
     if human_intervention is None:
         if checkpoint is not None:
-            await checkpoint.await_approval(tool_name, category)
+            shown = (
+                {"preview": args_preview}
+                if args_preview is not None
+                and _accepts_keyword(checkpoint.await_approval, "preview")
+                else {}
+            )
+            await checkpoint.await_approval(tool_name, category, *bound, **shown)
             raise ApprovalPendingError(tool_name, category, checkpoint.run_id)
         raise ApprovalRequiredError(
             tool_name,

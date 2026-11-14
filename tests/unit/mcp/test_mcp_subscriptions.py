@@ -193,3 +193,30 @@ class TestCapability:
 
         assert legacy["capabilities"]["tools"] == {}
         assert legacy["capabilities"]["resources"] == {}
+
+
+async def test_two_streams_with_the_same_client_id_do_not_replace_each_other() -> None:
+    """Regression: the hub keyed streams by the caller's JSON-RPC id."""
+    from baselith.core.mcp.subscriptions import SubscriptionHub
+
+    hub = SubscriptionHub()
+    sent_a: list[dict] = []
+    sent_b: list[dict] = []
+
+    async def send_a(message: dict) -> None:
+        sent_a.append(message)
+
+    async def send_b(message: dict) -> None:
+        sent_b.append(message)
+
+    a = hub.open(1, send_a, {"toolsListChanged": True})
+    b = hub.open(1, send_b, {"toolsListChanged": True})
+    assert hub.active == 2
+
+    await hub.notify("notifications/tools/list_changed")
+    assert len(sent_a) == 1 and len(sent_b) == 1
+
+    hub.close(a)  # one client disconnecting leaves the other's stream open
+    assert hub.active == 1 and a.closed.is_set() and not b.closed.is_set()
+    await hub.notify("notifications/tools/list_changed")
+    assert len(sent_a) == 1 and len(sent_b) == 2

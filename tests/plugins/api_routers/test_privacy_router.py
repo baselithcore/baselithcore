@@ -96,6 +96,26 @@ def test_retention_sweep(service):
     assert "total" in r.json()
 
 
+def test_retention_sweep_is_refused_to_a_tenant_bound_credential(service):
+    """The sweep deletes every tenant's expired rows: platform credentials only."""
+    from baselith.core.auth.types import AuthRole, AuthUser
+
+    tenant_admin = AuthUser(
+        user_id="acme-admin", tenant_id="acme", roles={AuthRole.ADMIN}
+    )
+    r = _client(tenant_admin, service).post(
+        "/privacy/retention/sweep", json={"older_than_days": 1}
+    )
+    assert r.status_code == 403
+
+
+def test_retention_sweep_refuses_a_zero_horizon(service):
+    r = _client(ADMIN, service).post(
+        "/privacy/retention/sweep", json={"older_than_days": 0}
+    )
+    assert r.status_code == 422
+
+
 def test_export_validates_body(service):
     # Empty subject_id rejected by validation (422).
     r = _client(ADMIN, service).post("/privacy/export", json={"subject_id": ""})

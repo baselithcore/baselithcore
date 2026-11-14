@@ -1,4 +1,4 @@
-"""Plugin updates: models, the trust modes and the release verifier."""
+"""Plugin updates: models, the trust modes, the release verifier and the pre-flight."""
 
 from .announce import AnnouncementGate, build_announcement_gate
 from .cache import UpdateCache
@@ -15,6 +15,7 @@ from .models import (
     UpdateCandidate,
     VerificationResult,
 )
+from .preflight import PreflightItem, PreflightLevel, build_preflight
 from .provenance import RELEASE_WORKFLOW_AUTHOR, check_plugin_provenance
 from .release_manifest import (
     file_digests,
@@ -35,6 +36,8 @@ __all__ = [
     "AnnouncementGate",
     "CheckReport",
     "PluginUpdateService",
+    "PreflightItem",
+    "PreflightLevel",
     "RELEASE_WORKFLOW_AUTHOR",
     "Refusal",
     "ReleaseInfo",
@@ -46,6 +49,7 @@ __all__ = [
     "VerificationResult",
     "affects",
     "build_announcement_gate",
+    "build_preflight",
     "check_plugin",
     "check_plugin_provenance",
     "check_system",

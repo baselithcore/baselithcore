@@ -173,6 +173,31 @@ class TestClientToolExecutionErrors:
             await client.call_tool("broken", {})
 
     @pytest.mark.asyncio
+    async def test_a_tool_error_text_is_bounded_and_single_line(
+        self, monkeypatch: Any
+    ) -> None:
+        """Regression: ``isError`` text skipped the scan and the length cap."""
+        flood = "A" * 50_000
+        client = _stdio_client(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "content": [{"type": "text", "text": f"fail\n{flood}"}],
+                        "isError": True,
+                    },
+                }
+            ],
+            monkeypatch,
+        )
+
+        with pytest.raises(MCPToolError) as raised:
+            await client.call_tool("broken", {})
+        assert len(str(raised.value)) < 3000
+        assert "\n" not in str(raised.value)
+
+    @pytest.mark.asyncio
     async def test_call_tool_returns_content_when_not_error(
         self, monkeypatch: Any
     ) -> None:

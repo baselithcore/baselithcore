@@ -25,10 +25,11 @@ except ImportError:
 
 from .agent_card import AgentCard
 from .protocol import (
-    A2AMessage,
     A2ARequest,
     A2AResponse,
     ErrorCode,
+    JSONRPCRequest,
+    JSONRPCResponse,
 )
 from .security import build_signature_headers, get_a2a_shared_secret
 
@@ -321,13 +322,16 @@ class A2AClient:
         if self._client is None:
             raise RuntimeError("Client not connected. Call connect() first.")
 
-        message = request.to_message(to_agent=self.agent_card.name)
-        url = f"{self.endpoint}/a2a/invoke"
+        # The server (``create_a2a_router``) speaks JSON-RPC 2.0 on ``POST
+        # {endpoint}/a2a``. This used to post a legacy ``A2AMessage`` to a
+        # ``/a2a/invoke`` route that does not exist, so every call 404'd.
+        rpc_request = JSONRPCRequest(method=request.method, params=request.params)
+        url = f"{self.endpoint}/a2a"
 
         # Serialize once so the signature is computed over the exact bytes
         # sent on the wire. Signing is active only when the shared secret
         # (BASELITH_A2A_SHARED_SECRET) is configured.
-        body = json.dumps(message.to_dict()).encode("utf-8")
+        body = json.dumps(rpc_request.to_dict()).encode("utf-8")
         headers: dict[str, str] = {"Content-Type": "application/json"}
         secret = get_a2a_shared_secret()
         if secret is not None:
@@ -339,10 +343,18 @@ class A2AClient:
 
         response.raise_for_status()
 
-        response_data = response.json()
-        response_msg = A2AMessage.from_dict(response_data)
-
-        return A2AResponse.from_message(response_msg, latency_ms=latency)
+        rpc_response = JSONRPCResponse.from_dict(response.json())
+        if rpc_response.error is not None:
+            # An application-level failure the peer reported deliberately:
+            # return it as a failed response (its own code and message) rather
+            # than raising, which would retry a deterministic error.
+            return A2AResponse(
+                success=False,
+                error_code=rpc_response.error.code,
+                error_message=rpc_response.error.message,
+                latency_ms=latency,
+            )
+        return A2AResponse(success=True, result=rpc_response.result, latency_ms=latency)
 
     async def health_check(self) -> bool:
         """

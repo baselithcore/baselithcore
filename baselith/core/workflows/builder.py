@@ -384,7 +384,15 @@ class WorkflowBuilder:
         )
 
     def tool(self, label: str, tool_id: str, **config: Any) -> "WorkflowBuilder":
-        """Add tool node."""
+        """Add tool node.
+
+        Extra keyword arguments become the node's ``config``. Pass
+        ``category="read_only"`` (or ``mutating`` / ``destructive`` /
+        ``external_side_effect``) to declare the tool's risk: when the workflow
+        runs under an orchestration context its calls go through the autonomy
+        approval gate, and a node that declares nothing is treated as
+        ``destructive``.
+        """
         return self._add_node(NodeType.TOOL, label, tool_id=tool_id, config=config)
 
     def condition(self, label: str, expression: str) -> "WorkflowBuilder":

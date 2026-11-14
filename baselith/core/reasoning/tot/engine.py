@@ -18,6 +18,7 @@ from baselith.core.reasoning.prompts import (
 )
 
 from .durable import digest, recorded, search_scope
+from .execution import ENFORCEMENT_CONTEXT, run_thought_code
 from .mcts import backpropagate, get_best_leaf, mcts_search_async, uct_select
 from .tree import ThoughtNode, export_tree_to_mermaid
 
@@ -305,7 +306,9 @@ class TreeOfThoughts:
             tools: Optional list of tools for thought execution.
             strategy: Search strategy ('mcts' or 'bfs').
             initial_state: Optional initial state for the root node.
-            **kwargs: Additional arguments (iterations for MCTS).
+            **kwargs: Additional arguments (iterations for MCTS), and
+                ``enforcement_context``: the orchestration context whose
+                autonomy policy, contract and budget gate each ``[EXECUTE]``.
 
         Returns:
             Dictionary with solution, steps, and tree visualization.
@@ -319,10 +322,14 @@ class TreeOfThoughts:
             "iterations": kwargs.get("iterations"),
             "branching_factor": kwargs.get("branching_factor"),
         }
-        with search_scope(checkpoint, identity):
-            return await self._solve(
-                problem, k, max_steps, tools, strategy, initial_state, **kwargs
-            )
+        gate = ENFORCEMENT_CONTEXT.set(kwargs.pop("enforcement_context", None))
+        try:
+            with search_scope(checkpoint, identity):
+                return await self._solve(
+                    problem, k, max_steps, tools, strategy, initial_state, **kwargs
+                )
+        finally:
+            ENFORCEMENT_CONTEXT.reset(gate)
 
     async def _solve(
         self,
@@ -445,17 +452,7 @@ class TreeOfThoughts:
             )
             if code_match and self.tools:
                 code = code_match.group(1).strip()
-                tool_output = "Tool execution failed"
-                try:
-                    sandbox = self.tools[0]
-                    result = await sandbox.execute_code_async(code)
-                    tool_output = (
-                        result.stdout if result.exit_code == 0 else result.stderr
-                    )
-                except Exception as e:
-                    logger.warning("ToT sandbox execution raised", exc_info=True)
-                    tool_output = f"Error: {e}"
-
+                tool_output = await run_thought_code(self.tools[0], code)
                 thought_content += f"\n[RESULT]\n{tool_output}\n[/RESULT]"
 
             processed.append(thought_content)

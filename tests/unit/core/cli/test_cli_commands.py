@@ -374,3 +374,19 @@ class TestCLIMain:
             ) as mock_docs:
                 main()
                 mock_docs.assert_called_once()
+
+
+class TestInfoCommand:
+    """Tests for the info command."""
+
+    def test_info_json_names_both_versions(self, capsys):
+        """The JSON names the public core release and the distribution."""
+        import json
+
+        from baselith.core._core_version import CORE_VERSION
+        from baselith.core.cli.commands.info import run_info
+
+        assert run_info(json_output=True) == 0
+        fw = json.loads(capsys.readouterr().out)["framework"]
+        assert fw["core_version"] == CORE_VERSION
+        assert "distribution" in fw

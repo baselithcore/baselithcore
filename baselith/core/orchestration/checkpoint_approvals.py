@@ -121,6 +121,10 @@ async def _emit_decision_audit(
             "tool_name": pending.get("tool_name"),
             "category": pending.get("category"),
         }
+        if pending.get("args_digest"):
+            # Which call was approved, not just which tool: the digest of the
+            # arguments the request was bound to (never the arguments).
+            details["args_digest"] = pending["args_digest"]
         if reason:
             details["reason"] = reason
         if label:

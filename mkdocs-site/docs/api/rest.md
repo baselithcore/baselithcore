@@ -357,7 +357,11 @@ Most programmatic endpoints accept either an `X-API-Key` header or an
 `Authorization: Bearer <token>` header. The `SecurityManager` resolves the
 caller's role (`user`, `admin`, `job` — a `service` identity is treated as
 `job` — or `scoped` for least-privilege keys, which only `require_user`
-admits) and applies per-role rate limits through the sliding-window
+admits) — a `scoped` identity is then held to the route's capability: `chat:write`
+for `POST /chat`, `POST /chat/stream`, the chat WebSocket and
+`POST /agent/async`, `chat:read` for `GET /agent/status/{task_id}`,
+`feedback:write` for `POST /feedback`; without it the answer is `403`
+`insufficient_scope` (close code `4403` on the WebSocket) — and applies per-role rate limits through the sliding-window
 [`RateLimiter`](../core-modules/middleware.md#ratelimiter) — the only limiter
 in the stack; no secondary per-route limiter is initialised at startup. HTTP
 Basic credentials are not read on these routes.
@@ -747,7 +751,12 @@ curl -H "X-API-Key: your-admin-api-key" http://localhost:8000/status
 
 ### `GET /metrics` - Prometheus Metrics
 
-Exports metrics in Prometheus format.
+Exports metrics in Prometheus format. On a host with one-click updates on
+(`UPDATE_APPLY_ENABLED`), every API worker also sweeps the run store once a
+minute into the update run series (`baselith_update_run_total` and two
+gauges, see
+[Plugin Updates › Metric and alerts](../core-modules/plugin-updates.md#metric-and-alerts)):
+the updater process itself is not scraped.
 
 !!! warning "Authentication Required"
     Protected by HTTP Basic Auth while `METRICS_AUTH_REQUIRED=true` (the

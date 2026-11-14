@@ -183,6 +183,8 @@ class ReasoningFlowHandler:
                 problem_description=query,
                 max_steps=max_steps,
                 branching_factor=branching_factor,
+                # Gates each model-written [EXECUTE] like any other tool.
+                enforcement_context=context,
             )
 
         checkpoint = resolve_checkpoint(context.get("checkpoint"))

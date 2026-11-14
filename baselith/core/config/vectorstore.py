@@ -123,6 +123,13 @@ class VectorStoreConfig(AliasedSettings):
         alias="QDRANT_HTTPS",
         description="Use TLS for the Qdrant REST endpoint",
     )
+    qdrant_prefer_grpc: bool = Field(
+        default=False,
+        alias="QDRANT_PREFER_GRPC",
+        description=(
+            "Talk to Qdrant over gRPC (VECTORSTORE_GRPC_PORT) instead of REST"
+        ),
+    )
     # Deadline on every Qdrant request: a hung server must fail fast into the
     # retry/breaker wrappers instead of stalling callers indefinitely.
     request_timeout_seconds: float = Field(

@@ -12,6 +12,10 @@ from typing import Any, Protocol
 import httpx
 
 from baselith.core.config.inference import RerankConfig, get_rerank_config
+from baselith.core.services.inference._batching import (
+    REMOTE_BATCH_CONCURRENCY,
+    map_batches,
+)
 from baselith.core.services.inference._http import RemoteClient, tls_context
 from baselith.core.services.inference._protocols import (
     RERANK_PATHS,
@@ -31,6 +35,9 @@ class RerankBackend(Protocol):
 
 class RemoteRerankBackend:
     """HTTP client for the configured rerank protocol; scores in input order."""
+
+    #: Batches one call may have in flight (see ``_batching``).
+    batch_concurrency = REMOTE_BATCH_CONCURRENCY
 
     def __init__(
         self,
@@ -145,13 +152,16 @@ class RerankService:
         are scored.
         """
         candidates = texts[: self._max]
-        scores: list[float] = []
-        for start in range(0, len(candidates), self._batch):
-            scores.extend(
-                await self._backend.score(
-                    query, candidates[start : start + self._batch]
-                )
-            )
+        batches = [
+            candidates[start : start + self._batch]
+            for start in range(0, len(candidates), self._batch)
+        ]
+        results = await map_batches(
+            batches,
+            lambda batch: self._backend.score(query, batch),
+            concurrency=getattr(self._backend, "batch_concurrency", 1),
+        )
+        scores = [score for batch_scores in results for score in batch_scores]
         ranked = sorted(enumerate(scores), key=lambda p: p[1], reverse=True)
         return ranked[: max(0, top_k)]
 

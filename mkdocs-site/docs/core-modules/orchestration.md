@@ -122,9 +122,13 @@ chokepoint helpers in `baselith/core/orchestration/enforcement.py`:
   [Tool burst rate limit](#tool-burst-rate-limit-rate_limitpy)).
 
 Each helper is a no-op when its primitive is absent, so they are safe to call
-from any handler. `ParallelToolExecutor` enforces the same controls
-internally when constructed with `loop_budget` / `contract_validator` /
-`autonomy_policy`.
+from any handler. `ParallelToolExecutor` calls `enforce_tool_invocation`
+itself for every call, so the contract, plugin capability, approval, budget,
+rate limit, pre-hooks and audit trail apply to parallel tool calls too; a
+denied call is skipped with a failed `ToolResult`, never raised into the
+gather. Workflow `TOOL` nodes take the same path when the workflow runs
+under an orchestration context (see
+[Workflows](workflows.md#node-types)).
 
 Every gated invocation is also recorded on the audit trail — `tool.invoke` on
 success, `tool.blocked` (with the refusal reason) when any gate raises. The
@@ -245,7 +249,9 @@ class Orchestrator(IntentMixin, HandlersMixin, ExecutionMixin):
   manager; in the app, `CHAT_LONG_TERM_MEMORY_ENABLED`) and capability
   injection. Chunks pass through the streaming output guard
   (`baselith/core/orchestration/stream_guard.py`: holdback redaction, plus opt-in
-  streaming moderation) before they reach the caller; see
+  streaming moderation) before they reach the caller. The window is re-filtered
+  once `DEFAULT_FILTER_STRIDE` (64) characters have accumulated past it, not on
+  every chunk — pass `stride=0` to filter per chunk; see
   [Content guard pipeline](#content-guard-pipeline-guard_pipelinepy). With a
   memory manager, the background memory write is scheduled only when the
   stream **completes** — a stream that errors or is abandoned by the client
@@ -292,7 +298,11 @@ scans it with `scan_external_content` (source `conversation_history`, same
 `<untrusted_tool_output tool="conversation_history">` envelope, keeping the
 `User:` / `Assistant:` labels readable inside it. Pass the raw turns — the
 function wraps on every call, by design (`wrap_untrusted` has no idempotency
-shortcut), so it runs exactly once per prompt. `RAG_CONTEXT_IS_DATA_RULE`
+shortcut), so it runs exactly once per prompt. Marker escaping matches the tag
+*name*, not a well-formed tag: `</untrusted_tool_output x>`, a self-closing or
+unterminated form, a soft hyphen or zero-width character inside the name and
+fullwidth `＜ ／` brackets are all neutralised, because a model reads each of
+them as the close marker. `RAG_CONTEXT_IS_DATA_RULE`
 names the conversation alongside the retrieved documents and says only the
 current Question is the user's request.
 
@@ -300,7 +310,10 @@ current Question is the user's request.
     Anyone who can get a document into the knowledge base can write text the
     model reads, so retrieved chunks no longer reach the prompt as plain
     `Source [id]: content` lines. `render_rag_context` (`handlers/rag.py`)
-    scans each chunk with `scan_external_content` — findings logged with the
+    scans each chunk with `scan_external_content` (in a worker thread once the
+    chunks, or the conversation history, pass 2 048 characters: the scan is
+    pure CPU, 3–12 ms for a typical retrieval, and would otherwise hold every
+    other stream on the worker) — findings logged with the
     document id, flagged content sanitized under
     `BASELITH_SANITIZE_EXTERNAL_CONTENT` (on by default) — and seals it in the
     same `<untrusted_tool_output tool="document_retrieval">` envelope tool
@@ -379,6 +392,10 @@ print(result.alternatives)    # Optional[list[dict]]
 `ClassificationResult` is a dataclass with fields `intent`, `confidence`,
 `method`, and optional `alternatives`. (There is no `source` field; the
 strategy that produced the result is reported via `method`.)
+
+The LLM strategy answers with one short JSON object (`intent`, `confidence`) and
+the call is capped at 96 output tokens, so a model that elaborates cannot hold
+retrieval and the first token behind it.
 
 The LLM strategy's classification prompt is a registry-served catalog prompt
 (`intent_classification`, rendered via `build_classification_prompt` with the
@@ -646,6 +663,22 @@ one window, and chunk boundaries may shift relative to the handler's output
 `BASELITH_ORCHESTRATOR_GUARDRAILS` kill switch bypasses the streaming guard
 together with the rest of the pipeline.
 
+The window is sized for the short patterns. Two cases are longer than it and
+are handled separately, so that the streamed text equals the non-streaming
+filter's output for them too:
+
+- **A token still growing at the live edge** (a JWT, a prefixed API key, any
+  unbroken run of `[A-Za-z0-9_\-.+/=]`) is kept out of the filter pass until
+  something ends it, up to `MAX_TOKEN_HOLD` (8192) characters. Without this a
+  439-character JWT left the window before its pattern could match, or matched
+  on a prefix and trailed the rest of its signature. The alphabet is ASCII on
+  purpose: text in a script without word spaces keeps streaming.
+- **A private-key block** (`-----BEGIN … PRIVATE KEY-----`) is withheld from
+  its header until its `END` line: the body is dropped, not buffered, and the
+  block is emitted as the guard's own placeholder. A block cut off by the end
+  of the stream stays withheld. Skipped when the operator has disabled that
+  redaction pattern.
+
 With `BASELITH_MODERATION_OUTPUT=true` (and a moderation provider configured),
 `process_stream` composes `moderate_stream(guard_stream(...))`: the
 **accumulated** text is re-moderated every `MODERATION_CHECK_INTERVAL = 512`
@@ -741,7 +774,9 @@ never wrote. `context["memory_context"]` used to be plain `- {content}` lines;
 with `scan_external_content` and seals the bullet list in one
 `<untrusted_tool_output tool="memory_recall">` envelope, so a consumer that puts
 it in a prompt next to `UNTRUSTED_OUTPUT_SYSTEM_RULE` gets background data the
-model will not obey. An empty recall is still `""`.
+model will not obey. An empty recall is still `""`. The swarm sub-task prompt
+(`gather_memory_context`) uses the same helper and rule, so recalled memory is
+sealed there too.
 `context["recent_history"]` (the memory manager's recent-context block) gets
 the same treatment at the same point: `inject_memory_context` passes it
 through `render_history_context`, so it arrives as one
@@ -1477,6 +1512,35 @@ channel exists:
     and never loses the decision. `approver_label` is a display name the
     *requester* chose: it is recorded next to the authenticated id, never
     instead of it.
+
+!!! note "An approval covers one call, not the tool"
+    The pause records the SHA-256 of the call's canonicalised arguments
+    (`args_digest`, the digest the audit trail already carries), and a recorded
+    decision matches only that digest. After `deploy` is approved for
+    `{"env": "staging"}`, a later `deploy` for `{"env": "prod"}` in the same run
+    pauses again and needs its own decision, and a denial of one call does not
+    deny the other. Replaying the approved call on resume still finds its
+    approval: earlier decisions are carried forward on the checkpoint
+    (`pending_approval["decided"]`, the newest 64). A gate that passes no
+    arguments (`HUMAN` nodes, plugin gates, a run paused by an earlier release)
+    keeps matching by tool and category.
+
+!!! note "…and one visit of the gate"
+    A decision is also bound to the **visit** it was made for: the scope the
+    gate ran in (each workflow `ITERATION` item and subgraph has its own) and
+    the occurrence of that `(scope, tool, category, digest)` gate within the
+    pass. Approving `send_payment({"to": "bob"})` once does not cover an
+    identical repeat — that is a new call and pauses again — and a `HUMAN` gate
+    approved for the first item of a list does not open for the others, nor for
+    a second pass through the same gate on a `CONDITION` back-edge. Occurrences
+    are counted per pass, like the content-addressed step keys, so a resumed run
+    replays its approved visits in order and stops at the first undecided one.
+    The pending request carries `scope`, `occurrence` and `args_preview` — the
+    call's arguments, credentials and e-mail local parts masked, each long
+    string cut to 160 characters and the whole to 1000 — which `GET /approvals`
+    returns, so the reviewer reads what they approve instead of a hash. (A
+    `HUMAN` gate shows the value it would pass on.) A pause persisted by an
+    earlier release has neither key and matches any visit once.
 
 A synchronous `human_intervention` channel, when present, still takes
 precedence (the classic blocking `request_approval` flow); the durable path

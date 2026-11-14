@@ -556,11 +556,19 @@ Declared in `baselith.core.config.plugin_update_apply`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `int` | `24 * 3600` | Expiry of approval requests created without their own window |
+| `UPDATE_APPLY_BACKUP_COMMAND` | `Annotated[list[str], NoDecode]` | *computed* | argv (JSON list or comma-separated) run before a core install; no shell; a core install is refused without it |
+| `UPDATE_APPLY_BACKUP_TIMEOUT_SECONDS` | `int` | `1800` | Timeout of the backup command |
+| `UPDATE_APPLY_CORE_ENABLED` | `bool` | `False` | One-click core (distribution) installs on this host; needs UPDATE_APPLY_ENABLED too |
 | `UPDATE_APPLY_ENABLED` | `bool` | `False` | Kill switch: one-click plugin updates on this host |
+| `UPDATE_APPLY_FINALIZE_TIMEOUT_SECONDS` | `int` | `900` | How long a core run may stay finalizing (the updater restarting onto the new version) before it is closed: succeeded when the API serves the target, else failed with finalize_timeout |
 | `UPDATE_APPLY_HEALTH_TIMEOUT_SECONDS` | `int` | `180` | Deadline for the post-restart health check |
 | `UPDATE_APPLY_HEALTH_URL` | `str` | `http://127.0.0.1:8000/health/ready` | Readiness URL probed after a restart |
 | `UPDATE_APPLY_HEARTBEAT_SECONDS` | `int` | `5` | Updater heartbeat period |
+| `UPDATE_APPLY_IGNORED_PATHS` | `Annotated[list[str], NoDecode]` | *computed* | Checkout-relative POSIX paths whose tracked changes do not make the tree dirty for a core install (e.g. a built ui/dist) |
 | `UPDATE_APPLY_KEEP_VERSIONS` | `int` | `2` | Store entries kept per plugin |
+| `UPDATE_APPLY_MIN_FREE_MB` | `int` | `512` | Free disk space (MB) below which the pre-flight warns (disk_low); 0 turns the warning off |
+| `UPDATE_APPLY_POLICY_ESTIMATE_SECONDS` | `int` | `300` | Run duration the policy assumes for a subject with no successful run on record (a run must fit in what is left of the window) |
+| `UPDATE_APPLY_POLICY_TICK_SECONDS` | `int` | `60` | How often the updater evaluates the auto-apply policy |
 | `UPDATE_APPLY_POLL_SECONDS` | `float` | `2.0` | Updater poll period for approved runs |
 | `UPDATE_APPLY_RESTART_COMMAND` | `Annotated[list[str], NoDecode]` | *computed* | argv (JSON list or comma-separated) that restarts the API service; no shell |
 | `UPDATE_APPLY_RESTART_TIMEOUT_SECONDS` | `int` | `60` | Timeout of the restart command |
@@ -568,6 +576,7 @@ Declared in `baselith.core.config.plugin_update_apply`.
 | `UPDATE_APPLY_SCHEMA_INIT` | `bool` | `True` | Run `baselith plugin schema-init --plugin &lt;name>` before the restart |
 | `UPDATE_APPLY_STABLE_SECONDS` | `int` | `20` | Readiness must hold this long without a failure |
 | `UPDATE_APPLY_STATE_DIR` | `Path` | `Path('data/plugin_updates/apply')` | Run store shared by the API and the updater |
+| `UPDATE_APPLY_UPDATER_RESTART_COMMAND` | `Annotated[list[str], NoDecode]` | *computed* | argv that restarts the updater itself after a core install (non-blocking, e.g. systemctl --no-block restart); no shell; a core install is refused without it |
 
 ## Plugin updates (release polling, trust mode and overlay)
 
@@ -576,6 +585,7 @@ Declared in `baselith.core.config.plugin_updates`.
 | Variable | Type | Default | Description |
 | --- | --- | --- | --- |
 | `CORE_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_CORE_UPDATE_REPO` | `str` | `baselithcore/baselithcore` | GitHub owner/repo of the public core project, whose releases and security advisories are compared with the running core release (baselith/core/_core_version.py; env CORE_UPDATE_REPO); empty disables the system update notice |
+| `DISTRIBUTION_UPDATE_REPO`<br>also accepts `PLUGIN_UPDATE_DISTRIBUTION_UPDATE_REPO` | `str` | *empty* | GitHub owner/repo of this downstream distribution, whose releases and security advisories are compared with the distribution's own version (baselith/core/_version.py; env DISTRIBUTION_UPDATE_REPO); empty disables the distribution update notice, and the public core, which is no distribution, never shows one |
 | `PLUGIN_UPDATE_CACHE_DIR` | `Path` | `Path('data/plugin_updates')` | Where downloaded release artifacts and the last check are cached |
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `int` | `21600` | Seconds between automatic update checks; workers share one check per interval (each check costs about one GitHub call per mirror plus a few for the core), so go below the default only with a github_token |
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `str` | `https://api.github.com` | GitHub API base URL (override for GitHub Enterprise); https only, plain http is accepted for a loopback host (a local fake) |
@@ -1009,6 +1019,7 @@ Declared in `baselith.core.config.vectorstore`.
 | `INDEX_MAX_CONCURRENCY` | `int` | `8` |  |
 | `QDRANT_HTTPS` | `bool` | `False` | Use TLS for the Qdrant REST endpoint |
 | `QDRANT_PATH` | `str \| None` | *empty* |  |
+| `QDRANT_PREFER_GRPC` | `bool` | `False` | Talk to Qdrant over gRPC (VECTORSTORE_GRPC_PORT) instead of REST |
 | `VECTORSTORE_COLLECTION_NAME` | `str` | `documents` | Collection name for documents |
 | `VECTORSTORE_EMBEDDING_DIM` | `int` | `1024` | Embedding dimension |
 | `VECTORSTORE_EMBEDDING_FALLBACK_DIM` | `int` | `384` | Vector dimension for VECTORSTORE_EMBEDDING_FALLBACK_MODEL. |
@@ -1107,4 +1118,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-745 settings documented.
+756 settings documented.

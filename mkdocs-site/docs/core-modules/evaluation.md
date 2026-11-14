@@ -176,7 +176,9 @@ await service.shutdown()    # unsubscribes and cancels the workers
 The orchestrator emits the success event **after** the output guard, so
 `response` is the text the user received and `guardrails` holds the guard's
 verdicts (redaction counts, moderation, groundedness). The payload also carries
-`run_id`, `tenant_id` (the ambient tenant: subscribers run outside the request),
+`run_id`, `tenant_id` (the sample's tenant — the worker binds it while the
+sample is processed, so subscribers that read the ambient tenant store under the
+tenant whose conversation produced the text, not `default`),
 `duration_ms`, `cost_usd` and `tokens`. Streamed answers emit the event too,
 with `streamed: true`, once the stream completes; an abandoned stream emits
 nothing.

@@ -73,6 +73,16 @@ def test_existing_hardening_is_preserved():
     assert kwargs["pids_limit"] == 64
 
 
+def test_container_log_is_rotated_small():
+    """The daemon keeps a container's output on the host: bound what it can fill."""
+    from baselith.core.services.sandbox.policy import capped_log_config
+
+    log = capped_log_config()
+
+    assert log["Type"] == "json-file"
+    assert log["Config"] == {"max-size": "1m", "max-file": "1"}
+
+
 class _MissingImage(Exception):
     """Stand-in for docker.errors.ImageNotFound."""
 

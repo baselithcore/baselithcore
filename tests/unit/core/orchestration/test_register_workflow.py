@@ -23,7 +23,9 @@ def _workflow():
     return (
         WorkflowBuilder("graph-intent")
         .start()
-        .tool("shout", tool_id="shout")
+        # An orchestrated TOOL node is gated like any tool; a side-effect-free
+        # one declares it, otherwise it is treated as destructive.
+        .tool("shout", tool_id="shout", category="read_only")
         .end()
         .build()
     )

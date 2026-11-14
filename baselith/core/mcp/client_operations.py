@@ -13,7 +13,12 @@ import json
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any
 
-from baselith.core.mcp.client_errors import MCPProtocolError, MCPToolError, error_text
+from baselith.core.mcp.client_errors import (
+    MCPProtocolError,
+    MCPToolError,
+    bounded,
+    error_text,
+)
 from baselith.core.mcp.client_limits import client_limits
 from baselith.core.mcp.client_types import MCPToolInfo
 from baselith.core.observability.logging import get_logger
@@ -39,6 +44,10 @@ def _scan_part(part: Any, source: str) -> Any:
             "text": scan_external_content(resource["text"], source=source),
         }
     return scanned
+
+
+#: Characters of a server-reported tool error kept in the exception message.
+_ERROR_TEXT_LIMIT = 2000
 
 
 def scan_content_parts(parts: Any, *, source: str) -> Any:
@@ -348,8 +357,19 @@ class OperationsMixin:
         # A tool that reported `isError: true` executed and failed: surfacing
         # its content as a normal result would hand the model a failure message
         # dressed as data.
+        # Its text is still the server's text: scanned and bounded like any
+        # other part, because the exception message is shown to the model.
         if response.get("isError"):
-            raise MCPToolError(error_text(response) or f"Tool '{name}' failed")
+            scanned = {
+                **response,
+                "content": scan_content_parts(
+                    response.get("content", []), source=f"mcp_tool:{name}"
+                ),
+            }
+            raise MCPToolError(
+                bounded(error_text(scanned), _ERROR_TEXT_LIMIT)
+                or f"Tool '{name}' failed"
+            )
 
         # A tool declaring an outputSchema returns the typed payload directly;
         # prefer it over re-parsing the text mirror sent for older clients.
