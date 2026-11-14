@@ -67,6 +67,8 @@ sentry-sdk[fastapi]>=2.0.0
 # Async Alembic environment needs greenlet (the `asyncio` extra).
 sqlalchemy[asyncio]>=2.0.0
 structlog>=24.1.0
+# Maintenance-window zones (zoneinfo fallback on slim images).
+tzdata>=2024.1
 uvicorn[standard]>=0.30.0,<1.0
 
 # --- Section 2: optional extras baked into the images -----------------------

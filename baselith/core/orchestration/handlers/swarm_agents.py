@@ -235,8 +235,19 @@ async def gather_memory_context(colony: Any, description: str) -> str:
     try:
         memories = await colony.memory_manager.recall(query=description, limit=5)
         if memories:
-            memory_context = "\n## Relevant Memories\n" + "\n".join(
-                f"- {m.content}" for m in memories
+            # Recalled text is whatever an earlier run stored (a simulation
+            # query, a document): scanned and sealed as data, never spliced in
+            # under the system prompt as if the operator had written it.
+            from baselith.core.orchestration.mixins._context_assembly import (
+                render_memory_context,
+            )
+            from baselith.core.orchestration.tool_output import (
+                UNTRUSTED_OUTPUT_SYSTEM_RULE,
+            )
+
+            memory_context = (
+                f"\n## Relevant Memories\n{UNTRUSTED_OUTPUT_SYSTEM_RULE}\n"
+                + render_memory_context(memories)
             )
 
         # Graph expansion (GraphRAG)

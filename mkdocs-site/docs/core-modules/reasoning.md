@@ -689,6 +689,17 @@ without starting from zero. The granularity is **one LLM call**:
   of the state it expands and `k`;
 - every thought evaluation is a recorded step keyed by a hash of the thought.
 
+`[EXECUTE]…[/EXECUTE]` in a thought runs model-written code in the sandbox, so
+each run passes through the enforcement chokepoint
+(`enforce_tool_invocation(..., "execute_code", "mutating", args={"code": …})`):
+contract, autonomy approval, budget and audit apply as for any other tool. The
+orchestration context is passed as `solve(..., enforcement_context=…)` (the
+`reasoning_agent` plugin does); with none, the default `SUPERVISED` policy
+applies and, with no approval channel, the execution is refused and the thought
+records the refusal. The sandbox's output is truncated, scanned and sealed in an
+`<untrusted_tool_output tool="execute_code">` envelope before it is spliced
+into later prompts and the answer.
+
 Selection (UCT, ties broken by order), backpropagation and the `patience`
 early stop are deterministic functions of those results, so a resumed search
 **replays the recorded calls, rebuilds the identical tree and returns the

@@ -38,6 +38,7 @@ from typing import Any
 from baselith.core.observability.logging import get_logger
 
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
+from ._source_only import plugin_entry_spec
 from .config_file import PluginConfigs, plugin_enabled, read_plugin_configs
 from .discovery import (
     apply_overlay,
@@ -101,13 +102,7 @@ def _load_plugin_module(plugin_dir: Path) -> Any | None:
     if cached is not None:
         return cached
 
-    spec = importlib.util.spec_from_file_location(
-        module_fqn,
-        plugin_file,
-        submodule_search_locations=(
-            [str(plugin_dir)] if plugin_file.name == "__init__.py" else None
-        ),
-    )
+    spec = plugin_entry_spec(module_fqn, plugin_file)
     if spec is None or spec.loader is None:
         return None
 

@@ -21,8 +21,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from baselith.core.api.versioning import V1_PREFIX, api_v1_enabled
+from baselith.core.auth.scopes import SCOPE_CHAT_READ, SCOPE_CHAT_WRITE
 from baselith.core.context import get_current_tenant_id
-from baselith.core.middleware import require_user
+from baselith.core.middleware import require_scope
+from baselith.core.middleware import require_user as require_user
 from baselith.core.models.chat import MAX_ID_LENGTH
 from baselith.core.observability.logging import get_logger
 from baselith.plugins.api_routers.schemas import (
@@ -33,7 +35,7 @@ from baselith.plugins.api_routers.schemas import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/agent", dependencies=[Depends(require_user)])
+router = APIRouter(prefix="/agent")
 
 
 class AsyncRunRequest(BaseModel):
@@ -71,6 +73,7 @@ def status_path(task_id: str, root_path: str = "") -> str:
 @router.post(
     "/async",
     status_code=202,
+    dependencies=[Depends(require_scope(SCOPE_CHAT_WRITE))],
     response_model=AsyncRunAccepted,
     responses=problem_responses(401, 403, 422, 503),
 )
@@ -94,6 +97,7 @@ async def submit_async_run(
 
 @router.get(
     "/status/{task_id}",
+    dependencies=[Depends(require_scope(SCOPE_CHAT_READ))],
     response_model=AsyncRunStatus,
     # A tracker record carries ``result``/``error`` only once they exist.
     response_model_exclude_unset=True,

@@ -22,15 +22,25 @@ from baselith.core.config.plugins import get_plugin_config
 from baselith.core.events import get_event_bus
 from baselith.core.plugins.signing import load_trust_roots
 
+from ._announcing import EVENT_NAME, SYSTEM_EVENT_NAME, AnnouncingMixin
+from ._preflight_live import live_preflight
 from ._schedule import run_periodic
+from ._system_notice import scope_notice
 from .announce import AnnouncementGate, build_announcement_gate
 from .apply.eligibility import already_reached, apply_status
 from .apply.models import UpdaterHeartbeat
 from .apply.store import RunStore
 from .cache import UpdateCache
 from .checker import installed_versions, run_check
+from .distribution import (
+    distribution_name,
+    distribution_part,
+    installed_distribution_version,
+    scope_distribution,
+)
 from .metrics import publish_update_metrics
 from .models import CheckReport, SystemUpdate, UpdateCandidate
+from .preflight import CoreState, PreflightItem
 from .sources import GitHubReleaseSource, load_sources, safe_error
 from .system import carry_over, check_system
 from .upgrade import (
@@ -49,8 +59,6 @@ FIRST_RUN_DELAY_SECONDS = 60
 #: A check requested over the API within this many seconds of the last one
 #: completed in this process returns that report instead of calling GitHub.
 CHECK_COOLDOWN_SECONDS = 60.0
-EVENT_NAME = "plugin.update_available"
-SYSTEM_EVENT_NAME = "system.update_available"
 
 
 _safe_error = safe_error
@@ -72,7 +80,7 @@ def _apply_config_or_defaults() -> UpdateApplyConfig:
         return UpdateApplyConfig.model_construct()
 
 
-class PluginUpdateService:
+class PluginUpdateService(AnnouncingMixin):
     """Owns the update cache and the background check loop."""
 
     def __init__(
@@ -127,6 +135,33 @@ class PluginUpdateService:
                 base_url=os.getenv("APP_BASE_URL", "").strip() or None,
             )
         return self._deployment
+
+    def preflight(
+        self, subject: str, version: str | None = None, core: CoreState | None = None
+    ) -> list[PreflightItem]:
+        """The pre-flight of installing ``subject`` here now (blocking reads).
+
+        ``core`` means the distribution's own release in a distribution and
+        the public core release otherwise; ``core`` (the state) carries a
+        release verified by the caller. See :mod:`~.preflight`.
+        """
+        try:
+            method = self.deployment().method
+        except Exception as exc:  # unknown shape: judge it as not a host install
+            self._warn_once("preflight_deployment_failed", exc)
+            method = "helm"
+        return live_preflight(
+            subject,
+            version,
+            report=self.report(),
+            config=self._apply_config,
+            method=method,
+            bundled_root=self._bundled_root,
+            core_version=CORE_VERSION,
+            distribution=distribution_name() is not None,
+            store=self._runs,
+            core=core,
+        )
 
     def _warn_once(self, what: str, exc: Exception) -> None:
         """Log a presentation failure once per process, not on every read."""
@@ -234,29 +269,33 @@ class PluginUpdateService:
         if system is not None:
             system = self._with_instructions(system)
         candidates = self._with_guidance(report)
-        return report.model_copy(update={"system": system, "candidates": candidates})
+        return report.model_copy(
+            update={
+                "system": system,
+                "distribution": self._scope_distribution(report.distribution),
+                "candidates": candidates,
+            }
+        )
+
+    def _scope_distribution(self, notice: SystemUpdate | None) -> SystemUpdate | None:
+        installed = installed_distribution_version()
+        return scope_distribution(notice, self._config, installed)
 
     def _scope_system(self, system: SystemUpdate | None) -> SystemUpdate | None:
         """Serve only a notice about this core, with today's guide link.
 
-        A saved notice about another repository or another installed version
-        (a cache from before an upgrade, or from before the notice referenced
-        the public core release) is dropped rather than shown, and so is one
-        saved while the check was on and read after it was switched off. The
-        upgrade guide link always comes from the current configuration.
+        See :func:`~._system_notice.scope_notice`: a notice about another
+        repository or installed version, or one saved while the check was on
+        and read after it was switched off, is dropped.
         """
-        if system is None:
-            return None
-        if (
-            not self._config.system_checks_enabled
-            or system.repo != self._config.core_update_repo.strip()
-            or system.installed_version != CORE_VERSION
-        ):
-            return None
-        guide = self._config.upgrade_guide_url
-        if system.upgrade_guide_url == guide and system.upgrade is None:
-            return system
-        return system.model_copy(update={"upgrade_guide_url": guide, "upgrade": None})
+        return scope_notice(
+            system,
+            component="core",
+            enabled=self._config.system_checks_enabled,
+            repo=self._config.core_update_repo.strip(),
+            installed=CORE_VERSION,
+            guide_url=self._config.upgrade_guide_url,
+        )
 
     async def request_check(self) -> CheckReport:
         """``check_now`` for API callers, throttled per process.
@@ -282,7 +321,10 @@ class PluginUpdateService:
             previous = self._cache.load()
             if previous is not None:
                 previous = previous.model_copy(
-                    update={"system": self._scope_system(previous.system)}
+                    update={
+                        "system": self._scope_system(previous.system),
+                        "distribution": self._scope_distribution(previous.distribution),
+                    }
                 )
             source = GitHubReleaseSource(
                 self._config.github_api_url,
@@ -297,6 +339,7 @@ class PluginUpdateService:
                 candidates=candidates,
                 error=error,
                 system=system,
+                distribution=await distribution_part(self._config, source, previous),
             )
             try:
                 self._cache.save(report)
@@ -309,8 +352,8 @@ class PluginUpdateService:
             publish_update_metrics(served)
             if error is None:
                 await self._announce(report)
-            elif system is not None:
-                await self._announce_system(system)
+            else:
+                await self._announce_notices(report)
             return served
 
     async def _plugin_part(
@@ -366,78 +409,6 @@ class PluginUpdateService:
             return False
         return True
 
-    async def _announce_once(
-        self, key: str, name: str, data: dict[str, object]
-    ) -> bool:
-        """Emit ``name`` unless another process did; True once the key is settled.
-
-        A claim whose emit fails is released, so the next check retries.
-        """
-        if not await self._gate.claim(key):
-            return await self._gate.is_done(key)
-        if await self._emit(name, data):
-            await self._gate.commit(key)
-            return True
-        await self._gate.release(key)
-        return False
-
-    def _save_notified(self, notified: set[str]) -> None:
-        try:
-            self._cache.save_notified(notified)
-        except OSError as exc:
-            logger.warning("plugin_update_cache_write_failed: %s", type(exc).__name__)
-
-    async def _announce_system(self, system: SystemUpdate) -> None:
-        version = system.latest.version if system.latest else None
-        key = f"system:{version}"
-        notified = self._cache.load_notified()
-        if not system.available or version is None or key in notified:
-            return
-        settled = await self._announce_once(
-            key,
-            SYSTEM_EVENT_NAME,
-            {
-                "component": system.component,
-                "repo": system.repo,
-                "installed_version": system.installed_version,
-                "latest_version": version,
-                "behind": system.behind,
-                "major": system.major,
-                "security": system.security,
-                "severity": system.severity,
-            },
-        )
-        if settled:
-            notified.add(key)
-            self._save_notified(notified)
-
-    async def _announce(self, report: CheckReport) -> None:
-        notified = self._cache.load_notified()
-        fresh = []
-        for cand in report.candidates:
-            version = cand.latest.version if cand.latest else None
-            key = f"{cand.plugin}@{version or ''}"
-            if cand.available and key not in notified:
-                fresh.append((key, cand, version))
-        changed = False
-        for key, cand, version in fresh:
-            settled = await self._announce_once(
-                key,
-                EVENT_NAME,
-                {
-                    "plugin": cand.plugin,
-                    "installed_version": cand.installed_version,
-                    "latest_version": version,
-                },
-            )
-            if settled:
-                notified.add(key)
-                changed = True
-        if changed:
-            self._save_notified(notified)
-        if report.system is not None:
-            await self._announce_system(report.system)
-
     async def _loop(self) -> None:
         await run_periodic(
             self.check_now,
@@ -485,6 +456,8 @@ def set_plugin_update_service(svc: PluginUpdateService | None) -> None:
 
 __all__ = [
     "CHECK_COOLDOWN_SECONDS",
+    "EVENT_NAME",
+    "SYSTEM_EVENT_NAME",
     "PluginUpdateService",
     "get_plugin_update_service",
     "set_plugin_update_service",

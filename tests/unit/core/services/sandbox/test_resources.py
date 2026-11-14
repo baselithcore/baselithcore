@@ -14,7 +14,10 @@ from pydantic import ValidationError
 import baselith.core.config.sandbox as sandbox_config
 from baselith.core.config.sandbox import SandboxConfig
 from baselith.core.services.sandbox import Resources
-from baselith.core.services.sandbox.policy import build_sandbox_runtime_kwargs
+from baselith.core.services.sandbox.policy import (
+    build_sandbox_runtime_kwargs,
+    capped_log_config,
+)
 from baselith.core.services.sandbox.resources import clamp, effective_timeout
 from baselith.core.services.sandbox.service import SandboxService
 
@@ -167,7 +170,7 @@ def test_effective_timeout_is_clamped_once_resources_are_given():
 def docker_run(monkeypatch):
     """A SandboxService wired to a fake docker client; returns (service, client)."""
     container = MagicMock()
-    container.logs.side_effect = lambda stdout=True, stderr=True: (
+    container.logs.side_effect = lambda stdout=True, stderr=True, stream=False: (
         b"ok" if stdout else b""
     )
     container.wait.return_value = {"StatusCode": 0}
@@ -219,5 +222,6 @@ def test_execute_code_async_without_resources_is_unchanged(monkeypatch, docker_r
         "mounts": [],
         "environment": {},
         **build_sandbox_runtime_kwargs(),
+        "log_config": capped_log_config(),
     }
     container.wait.assert_called_once_with(timeout=7)

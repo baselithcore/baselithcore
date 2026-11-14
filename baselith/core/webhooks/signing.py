@@ -79,6 +79,15 @@ def _parse_header(header: str) -> tuple[int | None, str | None]:
     return ts, sig
 
 
+def parse_signature_header(header: str) -> tuple[int | None, str | None]:
+    """Parse a signature header into ``(timestamp, v1_signature)``.
+
+    Public so a caller that remembers used signatures can key on the parsed
+    value: the header grammar is lenient, so the raw string is not an identity.
+    """
+    return _parse_header(header)
+
+
 def verify_signature(
     secret: str,
     body: bytes,

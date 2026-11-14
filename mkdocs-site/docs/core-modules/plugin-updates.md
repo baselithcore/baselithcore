@@ -75,6 +75,19 @@ metric and events still go out.
 | `archive.py` | Unpacks a release tarball under the member and size limits, and verifies it exactly as a deployment does (`verify_tarball`, `verify_release_tarball`) |
 | `signed_assets.py` | `verify_signed_assets`: downloads a release's `release.json` and tarball, checks the signature, checksum and file list, and keeps the verified tarball in the cache; the outcome is a `SignedAssets` record |
 | `checker.py` | Per-plugin and whole-deployment checks under the configured trust mode |
+| `system.py` | The core release notice (`check_system`): newer releases and security advisories of a repository, compared with an installed version |
+| `distribution.py` | The [distribution notice](#distribution-update-notice): the same lookup for a downstream distribution's own releases (`check_distribution`, `scope_distribution`, `distribution_part`) |
+| `_system_notice.py` | Pure helpers both notices share: what is served (`scope_notice`) and what is announced (`notice_announcement`) |
+| `_announcing.py` | Announces new releases on the event bus once per key across processes (the service's mixin) |
+| `preflight.py` | The [pre-flight](#pre-flight): `build_preflight`, `PreflightItem`, `PreflightLevel` (pure) |
+| `_preflight_live.py` | The pre-flight's live inputs on this host: run store, task queue, free disk |
+| `apply/drivers/` | The [apply drivers](#apply-drivers): the `ApplyDriver` protocol, the registry and the `DriverRouter` the updater runs |
+| `distribution_manifest.py` | The signed [distribution manifest](#distribution-manifest) (`distribution-release.json`): `DistributionManifest`, `build_manifest_meta`, `load_distribution_manifest` |
+| `policy.py` | The [update policy document](#update-policy-document): `UpdatePolicy`, `MaintenanceWindow`, `PolicyProposal`, `POLICY_OFF` (pure) |
+| `window.py` | [Maintenance window arithmetic](#maintenance-window-arithmetic): `in_window`, `remaining`, `next_start` on aware instants (pure) |
+| `outcomes.py` | The [run metrics](#metric-and-alerts) sweep the API workers run (`sweep`, `run_sweeps`) |
+| `apply/policy_runner.py` | The [policy runner](#auto-apply-the-policy-runner) the updater ticks (`PolicyRunner`, `journal_estimate`); its live wiring is `apply/_policy_live.py` |
+| `apply/_store_policy.py` | The run store's policy, proposal and policy journal (`PolicyMixin`, `PolicyRefused`) |
 
 ## Trust modes
 
@@ -271,6 +284,41 @@ directory when it starts. A tarball verified under the old rules
 is therefore never offered, and neither is an `available` verdict about it. Any
 refusal also removes the cached tarball of the refused version.
 
+### Distribution manifest
+
+A release of the distribution (the core, and in a downstream distribution its
+own components) is installed in place from one commit, so its signed manifest
+lists no files. The release asset `distribution-release.json` is a JSON object
+with these keys, all covered by `manifest_signature_ed25519` exactly as for a
+plugin `release.json` (same canonical form, same domain prefix, same strict
+loader: no duplicate key, no float):
+
+| Key | Value |
+| --- | --- |
+| `release_format` | the integer `2` |
+| `kind` | `"distribution"` (a plugin `release.json` has none, so neither manifest passes for the other) |
+| `name` | the distribution's name: `__distribution__` in `baselith/core/_version.py`, or `baselithcore` for the public core |
+| `version` | the release version, without the leading `v` of its tag |
+| `commit_sha` | the 40-hex commit the release installs; a host checks out this SHA, never the tag |
+| `lock_sha256` | SHA-256 of `uv.lock` at that commit |
+| `migrations` | `none`, `expand` (additive schema changes only) or `breaking`; a rollback never reverts the schema, so `breaking` is never installed with one click |
+| `min_core_version` | optional: the oldest installed public core (`CORE_VERSION`) the release may be installed over; an older host, or a value that does not parse, is `core_too_old` (upgrade through an intermediate release first) |
+| `image_digest` | optional: the release's container image digest (`sha256:<64 hex>`), covered by the signature like the commit, so a deployment that pins the image by digest can take the value from the verified manifest instead of an unsigned release asset |
+
+`load_distribution_manifest(raw, trusted_keys, expected_name=..., expected_version=...)`
+returns a `DistributionManifest` or raises `DistributionRefused`, whose
+`refusal` is a [refusal reason](#refusal-reasons): `no_trusted_keys`,
+`signature_invalid`, `manifest_invalid` (wrong `release_format` or `kind`, a
+malformed or unknown field), `name_mismatch` or `version_mismatch`, checked in
+that order. An unknown key is refused rather than ignored: a field a newer
+release adds cannot be skipped by an older host. The trusted keys are those of
+the distribution's own trust scope, `distribution:<name>`
+(`distribution_trust_scope(name)`, read by `_core_state.distribution_keys`):
+an unscoped publisher key in the trust store covers the distribution, a key
+whose `plugins` scope lists `distribution:<name>` covers it, and a key scoped
+to plugin names never does, not even to a plugin that shares the
+distribution's name (`baselithcore`, say): plugin names cannot contain `:`.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -281,6 +329,7 @@ refusal also removes the cached tarball of the refused version.
 | `PLUGIN_UPDATE_GITHUB_API_URL` | `https://api.github.com` | GitHub API base URL (GitHub Enterprise); must be `https`, except `http` on a loopback host |
 | `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS` | `21600` | Seconds between automatic checks (minimum `300`) |
 | `CORE_UPDATE_REPO` | `baselithcore/baselithcore` | GitHub `owner/repo` of the public core project, whose releases and security advisories are compared with the running core release; empty disables the system notice |
+| `DISTRIBUTION_UPDATE_REPO` | unset | GitHub `owner/repo` of a downstream distribution, whose releases and security advisories are compared with the distribution's own version (`__version__`); unset disables the [distribution notice](#distribution-update-notice), which the public core never shows |
 | `SYSTEM_UPGRADE_GUIDE_URL` | unset | `https` link to this deployment's upgrade instructions, served with the system notice; any other value is ignored |
 | `SYSTEM_INSTALL_METHOD` | detected | `helm`, `docker`, `pip`, `source` or `custom`: which [upgrade instructions](#upgrade-instructions) the notice serves; unset detects it, any other value is ignored with a warning |
 | `SYSTEM_UPGRADE_INSTRUCTIONS_FILE` | unset | Markdown file with this deployment's own upgrade procedure (method `custom`); `{version}` and `{current}` are filled in; empty means unset |
@@ -340,6 +389,44 @@ method, and `SYSTEM_UPGRADE_GUIDE_URL`, when set, is carried as
 `system.upgrade_guide_url` (read from the current configuration every time the
 report is served) for a console to link as "How to upgrade".
 
+### Distribution update notice
+
+A downstream distribution (its `baselith/core/_version.py` carries
+`__distribution__`) also learns about its **own** releases. With
+`DISTRIBUTION_UPDATE_REPO=<owner>/<repo>` set, each check runs the same lookup
+as the system notice — newer stable releases, the repository's published
+security advisories against the installed version, the last known state kept
+for a part that failed — against that repository, comparing
+`__version__` (not `CORE_VERSION`). The result is the report's
+`distribution` section, a `SystemUpdate` with `component: "distribution"`.
+
+- **Public core.** Without the `__distribution__` marker the distribution and
+  the core are one project: `distribution` is always `null`, the setting has no
+  effect, and the core notice is not duplicated.
+- **Independent parts.** A failed distribution lookup sets
+  `distribution.error` and never touches `system`, and the reverse; either
+  check may be off while the other runs.
+- **Scope.** A saved distribution notice about another repository, another
+  installed version, or read after `DISTRIBUTION_UPDATE_REPO` was cleared is
+  never served, exactly like the system notice. A report cached by a release
+  without this section loads with `distribution: null`; a report of an older
+  cache format keeps it, like `system`.
+- **No core instructions.** `distribution.upgrade_guide_url` and
+  `distribution.upgrade` are always `null`: `SYSTEM_UPGRADE_GUIDE_URL` and the
+  [upgrade instructions](#upgrade-instructions) describe upgrading the public
+  core, not the distribution.
+- **Event.** A new distribution version emits `system.update_available` with
+  `component: "distribution"` once, under its own key `distribution:<version>`,
+  so a core release and a distribution release with the same version string
+  are both announced.
+- **Metric.** `baselith_update_available{component="distribution"}` follows it
+  like the `core` series; the series exists only once a distribution notice
+  was seen.
+
+`baselith update status` and `check` print a `distribution <installed> ->
+<latest>` line above the core line when the section is present, and `check`
+exits `1` when the distribution's release lookup failed.
+
 ### Metric and alerts
 
 Each check (and the service's start, from the cached report, so a restart does
@@ -356,10 +443,116 @@ supersedes a dead worker's stale 1, and two workers do not add up to 2. A
 plugin dropped from the sources entirely is zeroed by the process that saw it
 before, but a process started after the removal never emits it.
 
+One-click update runs have three series of their own. The updater process is
+not scraped, so on a host with `UPDATE_APPLY_ENABLED` every API worker sweeps
+the run store once a minute (`baselith.core.plugin_updates.outcomes.sweep`):
+
+| Series | Type | Meaning |
+| --- | --- | --- |
+| `baselith_update_run_total{subject,outcome}` | Counter | Finished runs; `outcome` is the terminal state (`succeeded`, `failed`, `rolled_back`, `rollback_failed`, `denied`, `expired`) |
+| `baselith_update_run_inflight_age_seconds{subject}` | Gauge (`mostrecent`) | Seconds since the subject's executing run last changed state; `0` when none. A run waiting for approval or a pull request is not executing |
+| `baselith_update_rollback_failed_runs{subject}` | Gauge (`mostrecent`) | Runs of the subject that ended `rollback_failed` and wait for `resolve` |
+
+`subject` is `core` or `plugin:<name>`. A run is counted once across workers
+and restarts: the first sweep to see it finished creates its
+`metered/<id>` mark in the store (`O_EXCL`), and later sweeps skip it; a
+worker that dies between the mark and the increment loses that one count
+(an undercount, never a double count). The marks are pruned with their runs.
+The first sweep after an upgrade counts the finished runs already in the
+store. Every subject on record gets both gauges on every sweep, so a run
+that finished returns its series to `0` in every worker's file.
+
 The Helm chart's `PrometheusRule` adds them as a separate group:
-`BaselithcoreUpdateAvailable` (info, `for: 1h`) and
-`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`). Either can be
-silenced through `prometheusRule.disabledAlerts`.
+`BaselithcoreUpdateAvailable` (info, `for: 1h`),
+`BaselithcoreSecurityUpdateAvailable` (warning, `for: 5m`),
+`BaselithcoreUpdateRollbackFailed` (critical, `for: 5m`,
+`max(baselith_update_rollback_failed_runs) by (subject) > 0`) and
+`BaselithcoreUpdateRunStuck` (warning, `for: 10m`,
+`max(baselith_update_run_inflight_age_seconds) by (subject) > 3600`). Any of
+them can be silenced through `prometheusRule.disabledAlerts`; the group goes
+when all four are.
+
+## From the shell
+
+An operator reads the same report without the console:
+
+```bash
+baselith update status                   # the report of the last check
+baselith update status --format json     # the report as JSON (null before any check)
+baselith update check                    # run a check now, then print it
+baselith update preflight core           # can the core be installed here, now?
+baselith update preflight aura --version 0.27.0
+```
+
+`status` reads the cache (`PLUGIN_UPDATE_CACHE_DIR`) and never contacts GitHub;
+it prints the report as the console serves it, so a plugin release the running
+version already reached, or a notice about another installed core version, is
+not shown. Before the first check (or when the report file is unreadable) it
+prints `no update report yet` with a hint to run `baselith update check`, and
+exits `0`. `check` contacts GitHub, saves the cache, may announce a new update
+on the event bus and, in signed mode, downloads and keeps the verified plugin
+tarballs; it does not start the background loop. When none of
+`CORE_UPDATE_REPO`, `DISTRIBUTION_UPDATE_REPO` (in a distribution) and
+`PLUGIN_UPDATE_SOURCES_FILE` is set it says checks are off, writes nothing and
+exits `0`. Run `check` as the service user: a check run as another OS user (for
+example through `sudo`) can leave cache files the service cannot replace, and
+the server then logs `plugin_update_cache_write_failed` and serves stale
+notices. `preflight <subject>` prints the [pre-flight](#pre-flight) of `core`
+or a plugin, one `[level] code: message` line per item, and exits `1` when any
+item blocks; it reads the report, the run store, the task queue and the disk
+and contacts nothing else; for the core it also reads the checkout (`uv.lock`,
+`git status`) and reports the release itself as `release_unverified` (warn),
+because the install request verifies it. None of these installs, removes or
+restarts anything, and none loads plugin code.
+
+`baselith update apply core --version V [--yes]` and `baselith update rollback
+core [--yes]` are the shell's [one-click core updates](#one-click-core-updates):
+`apply` requires `V` to be the latest known release, downloads and verifies its
+`distribution-release.json`, prints the pre-flight with that verdict (a refused
+manifest is `blocker_unsigned_release` with the refusal code), refuses on any
+block, asks for confirmation unless `--yes` and creates a pre-approved run
+pinned to the manifest's commit. `rollback` pins the commit the newest
+successful core update replaced. Both print the run id; `baselith
+plugin-updater status` follows the run.
+
+The text report has one line per item:
+
+- In a distribution with `DISTRIBUTION_UPDATE_REPO` set, first
+  `distribution <installed> -> <latest>` (or `: up to date`, `: check failed
+  (<error>)`), the same shapes as the core line below.
+- `core <installed> -> <latest>`; `core <installed>: up to date`;
+  `core <installed>: check failed (<error>)`; or `core: not checked` when no
+  core source is configured. `SECURITY (<severity>)` is appended whenever an
+  advisory affects the installed version, even when no newer release exists or
+  the release lookup failed. After a failed refresh the last known state is
+  shown with `last check failed: <error>; showing last known state`.
+- Each available plugin as `<plugin> <installed> -> <latest>  sha256=<64 hex>`:
+  the SHA-256 of the verified tarball, the value to pass to the updater.
+- A plugin whose release has no verified signed package (provenance trust)
+  ends in `notice only (no signed package)`: it is announced, not installable
+  from here.
+- `<plugin>: refused: <reason>` for a release that failed a check (see
+  [Refusal reasons](#refusal-reasons)), then `<n> plugin(s) up to date`.
+
+Exit codes: `0` ok, `2` usage error, and `1` when `check` failed: the plugin part
+reported an error, a plugin release could not be fetched (`source_error`), or
+the core or distribution release lookup failed (for example no network, even
+when an older report is shown). An unavailable advisories endpoint (a token without the
+advisories scope) is printed but does not by itself make `check` exit `1`.
+
+To install an offered plugin release, pass its version and SHA-256 to the
+[plugin updater](#the-updater-service):
+`baselith plugin-updater request <plugin> --version <v> --sha256 <sha>`.
+`baselith plugin marketplace update` used to uninstall and reinstall the plugin,
+which deleted its `.env` and runtime state; it is retired, always exits `1` and
+points here.
+
+The state also shows elsewhere: `baselith doctor` has an `Updates` check that
+reads the cached report (a security update for the core is a non-blocking
+warning, never a failure), and `baselith info` shows the `Core release` row and,
+for a downstream distribution, a `Distribution` row (JSON: `framework.core_version`,
+`framework.distribution`). See the
+[CLI reference](../api/cli.md#update-report).
 
 ## Upgrade instructions
 
@@ -569,12 +762,13 @@ to its own plugin name.
 
 ## API
 
-Both routes require an administrator.
+Every route requires an administrator.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/plugins/updates` | `{"enabled": bool, "report": ...}`: the last saved report, without network access |
 | POST | `/api/plugins/updates/check` | Run a check now and return the fresh report; `503` when updates are not configured. Within 60 s of the last completed check in that worker process, the last report is returned and GitHub is not contacted |
+| GET | `/api/plugins/updates/preflight?subject=<s>&version=<v>` | The [pre-flight](#pre-flight) of `subject` (`core` or `plugin:<name>`; `version` defaults to the latest known release) as a list of `{code, level, message}`; `503` when updates are not configured, `422` without a subject. Read-only |
 
 The report carries `checked_at`, one candidate per plugin (installed version,
 latest release, `available`, `refusal`, `detail`, `trust` and `provenance`) and
@@ -588,7 +782,8 @@ On a host install an operator may let administrators install a newer plugin
 release, and roll it back — from the host shell with `baselith
 plugin-updater`, or from an external console if one is installed (the core
 ships none) — instead of pulling the code by hand.
-The core itself is never updated this way. The web process only records a
+The core itself is updated this way only on a git checkout, behind its own
+switch: see [one-click core updates](#one-click-core-updates). The web process only records a
 request: a separate updater process verifies, installs, restarts the API,
 checks its health and rolls back on its own. It is **off by default**
 (`UPDATE_APPLY_ENABLED=false`). The sections after this one describe each
@@ -624,6 +819,28 @@ ones fail, one line per blocker, and keeps showing the manual instructions.
 | `needs_environment_update` | A Python dependency of the release is not installed | Install the dependency, or install by hand |
 | `host_build_required` | The release needs a build on the host (a Node sidecar, for example) | Install by hand |
 | `run_active` | A run for this plugin is not finished yet | Wait for it, or see `baselith plugin-updater status` |
+
+A **core** install (the distribution on a git checkout) has its own verdict:
+no overlay is involved, so `overlay_unconfigured`, `signature_failed` and
+`host_build_required` never apply to it, and these come in:
+
+| Blocker | Meaning | What to do |
+| --- | --- | --- |
+| `core_disabled` | `UPDATE_APPLY_CORE_ENABLED` is off (the default) | Set it, with the other core settings, for the API and the updater |
+| `core_install_unsupported` | A host install that is not a git checkout (`pip`, or `custom`) | Upgrade by hand: the core host driver only checks out commits |
+| `backup_unconfigured` | No `UPDATE_APPLY_BACKUP_COMMAND` | Configure a backup command; a core install never runs without one |
+| `updater_restart_unconfigured` | No `UPDATE_APPLY_UPDATER_RESTART_COMMAND` | Configure the updater's own non-blocking restart; a core run ends with it |
+| `tree_dirty` | Tracked files of the checkout are modified outside `UPDATE_APPLY_IGNORED_PATHS`, or the checkout's state cannot be read | Commit, stash or discard the changes, or list a generated path as ignored |
+| `unsigned_release` | The release carries no verified `distribution-release.json` | Sign it ([distribution manifest](#distribution-manifest)), or upgrade by hand |
+| `needs_environment_update` | The release's `uv.lock` differs from the installed one, or the installed one cannot be read | Upgrade by hand: `uv sync --frozen` at the release commit; nothing installs a package implicitly |
+| `breaking_migration` | The signed manifest says `migrations: breaking` | Upgrade by hand following the release notes: a rollback never reverts the schema |
+| `major_jump` | The release crosses a major version | Follow the upgrade instructions |
+| `core_too_old` | The installed public core is older than the release's signed `min_core_version` (or either does not parse) | Install an intermediate release first |
+
+`apply_disabled`, `not_host_install`, `updater_offline`, `updater_mismatch`
+(which for the core also compares the distribution version the updater
+imported, `framework_version` in its heartbeat) and `run_active` mean what they
+mean for a plugin.
 
 ### What happens during a run
 
@@ -721,6 +938,86 @@ the same absolute `UPDATE_APPLY_STATE_DIR`:
   option (and the sandboxing options that imply it for a non-root unit) would
   break the restart. Turn it on if the restart is granted through a polkit
   rule instead. See [systemd units](#systemd-units).
+- With [one-click core updates](#one-click-core-updates) on, the updater also
+  checks out commits in its working directory, so its user must own the
+  checkout, and it restarts itself last through a second sudoers rule
+  (`UPDATE_APPLY_UPDATER_RESTART_COMMAND`). Without an overlay it then runs core
+  installs only.
+
+### One-click core updates
+
+On a **source** install (a git checkout with an editable install) the updater
+can also install a signed release of the distribution itself, from the console
+or with `baselith update apply core --version V`. It is a second, separate
+switch, off by default; everything above about the kill switch, the updater
+unit and the restart applies, plus:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `UPDATE_APPLY_CORE_ENABLED` | `false` | One-click core installs on this host (the kill switch must be on too) |
+| `UPDATE_APPLY_BACKUP_COMMAND` | `[]` | argv run before every core install, without a shell; required (`backup_unconfigured` without it), its failure ends the run `backup_failed` |
+| `UPDATE_APPLY_BACKUP_TIMEOUT_SECONDS` | `1800` | Timeout of the backup command (10–14400) |
+| `UPDATE_APPLY_IGNORED_PATHS` | `[]` | Checkout-relative paths whose tracked changes do not make the tree dirty (a generated file the deployment rewrites, for example) |
+| `UPDATE_APPLY_UPDATER_RESTART_COMMAND` | `[]` | argv that restarts the updater itself after a core install, without blocking on it (`systemctl --no-block restart ...`); required (`updater_restart_unconfigured` without it) |
+| `UPDATE_APPLY_FINALIZE_TIMEOUT_SECONDS` | `900` | How long a core run may stay `finalizing` before it is closed by what the API serves (60–86400) |
+
+A core release is installable only when its GitHub release carries a signed
+[`distribution-release.json`](#distribution-manifest), the checkout has no
+tracked changes, its `uv.lock` equals the release's (nothing installs a
+package implicitly: a release that changes the lock is upgraded by hand) and
+the release's migrations are not `breaking`. The run checks out the pinned
+commit, runs `baselith db migrate` and `baselith plugin schema-init`, restarts
+the API, checks that every worker reports the new version with the same
+active plugins, and otherwise checks out the previous commit and restarts
+again. The restart command should restart the workers with the API.
+
+The run then ends `finalizing`: the updater, which still runs the old code,
+issues `UPDATE_APPLY_UPDATER_RESTART_COMMAND` and stops. Make that command
+non-blocking (`systemctl --no-block restart <updater unit>`): the updater
+restarts its own unit, and a blocking `systemctl restart` waits for the
+updater to stop while the updater waits for `systemctl` to return, until
+`TimeoutStopSec` kills the unit. At its next start it
+reconciles the run to `succeeded` once it imports the version the run
+installed and the newest boot report shows it. A core install is refused
+without the command (`updater_restart_unconfigured`), because the updater
+would otherwise keep running the old code over the new tree.
+
+`finalizing` is bounded: a run still there after
+`UPDATE_APPLY_FINALIZE_TIMEOUT_SECONDS` (the command failed, or the restarted
+updater runs another interpreter than the API, so the versions never line up)
+is closed by what the API serves. When the newest boot report shows the target
+it ends `succeeded` and the pre-flight shows `updater_mismatch` until the updater
+is restarted onto it; otherwise it ends `failed` with `finalize_timeout`
+(nothing is rolled back). An operator can close it at once with
+`baselith update resolve <run_id>`, by the same rule.
+
+#### Example: core updates on a source checkout
+
+The checkout `/opt/baselithcore` is owned by `deploy`, the API unit is
+`baselithcore.service` and its worker `baselithcore-worker.service`. Next to the
+plugin settings of the [example above](#example-a-source-checkout-under-systemd):
+
+```bash
+UPDATE_APPLY_CORE_ENABLED=true
+CORE_UPDATE_REPO=baselithcore/baselithcore      # DISTRIBUTION_UPDATE_REPO in a distribution
+UPDATE_APPLY_BACKUP_COMMAND=["/usr/local/bin/baselith-backup","--all"]
+UPDATE_APPLY_RESTART_COMMAND=["sudo","-n","/usr/bin/systemctl","restart","baselithcore.service","baselithcore-worker.service"]
+UPDATE_APPLY_UPDATER_RESTART_COMMAND=["sudo","-n","/usr/bin/systemctl","--no-block","restart","baselithcore-plugin-updater.service"]
+```
+
+and the sudoers drop-in (`/etc/sudoers.d/baselith-updater`, mode `0440`) allows
+exactly those two command lines:
+
+```bash
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart baselithcore.service baselithcore-worker.service
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block restart baselithcore-plugin-updater.service
+```
+
+Check it with `sudo visudo -cf /etc/sudoers.d/baselith-updater`, restart the
+updater and the API once, then `baselith update preflight core` lists what
+still blocks. The trust store must hold a key that covers the distribution (an
+unscoped key, or one whose `plugins` scope lists `distribution:<name>`, for
+example `"plugins": ["distribution:baselithcore"]`).
 
 ### Settings
 
@@ -741,6 +1038,9 @@ start, so restart it after a change.
 | `UPDATE_APPLY_SCHEMA_ENV_FILE` | unset | dotenv with the schema owner's database credentials, read only into the `schema-init` environment; refused unless owner-writable only (`0600`) |
 | `UPDATE_APPLY_HEARTBEAT_SECONDS` | `5` | Updater heartbeat period (1–60) |
 | `UPDATE_APPLY_POLL_SECONDS` | `2.0` | How often the updater looks for approved runs (0.2–30) |
+| `UPDATE_APPLY_MIN_FREE_MB` | `512` | Free disk space, in MB, below which the [pre-flight](#pre-flight) warns `disk_low` (0–1048576; `0` turns the warning off) |
+| `UPDATE_APPLY_POLICY_TICK_SECONDS` | `60` | How often the updater evaluates the [auto-apply policy](#auto-apply-the-policy-runner) (10–3600) |
+| `UPDATE_APPLY_POLICY_ESTIMATE_SECONDS` | `300` | Run duration the policy assumes for a subject with no successful run on record (30–14400) |
 | `UPDATE_APPLY_APPROVAL_TTL_SECONDS` | `86400` | Expiry of an approval request. Matters only when an external console creates runs that need approval without setting its own window; runs created by `baselith plugin-updater` (the only creator in the core) are pre-approved and carry no approval expiry |
 
 They come on top of `BASELITH_PLUGIN_OVERLAY_DIR`, the trust store
@@ -832,7 +1132,32 @@ skipped on read. `UPDATE_APPLY_STATE_DIR` is resolved to an absolute path at
 load; a relative value is refused when the switch is on and `APP_ENV=production`.
 
 `RunStore.runs(states=None)` lists every run of every plugin, oldest first
-(optionally only those in `states`).
+(optionally only those in `states`). A run file this release cannot read — a
+state written by a newer release, a torn hand edit — is logged and left out,
+so one bad file never breaks a listing; `RunStore.get` returns `None` for it.
+
+### Run subject and driver
+
+Every run records what it updates and who executes it. `ApplyRun.subject` is
+`core` or `plugin:<name>`; `None`, which every run file written before
+subjects existed carries, means `plugin:<plugin>` (`ApplyRun.subject_key`
+reads it that way). `ApplyRun.driver` names the implementation that executes
+the run and defaults to `host`, the updater on this machine. Both are set by
+`RunStore.create(..., subject=None, driver="host")` and can never change
+afterwards.
+
+`ApplyRun.plugin` stays the claim and lock key. A core run claims the reserved
+key `baselith_core` (`CORE_CLAIM`) with `subject="core"` (`CORE_SUBJECT`), so
+a core run and a plugin run never block each other but two core runs do.
+`RunStore.create` refuses with `ValueError`, before writing anything, the
+reserved key for any other subject, the `core` subject under any other key,
+and a `plugin:<name>` subject that does not match `plugin`.
+
+Four states exist for drivers that wait on something outside the updater:
+`pr_open` and `awaiting_merge` (a pull request opened, then approved),
+`rolling_out` (the merged change reaches the deployment) and `finalizing` (the
+new version serves and the updater closes the run after restarting itself).
+None of them is terminal: a run in any of them keeps its claim.
 
 A consumer that audits finished runs — several web workers may share one
 store — does it in three steps: `RunStore.claim_audit(run_id)` (True for one
@@ -852,6 +1177,196 @@ that were audited, and finished runs nobody audited after a year. The newest
 succeeded update of each plugin is always kept (a roll back needs it) and
 `rollback_failed` runs are never pruned. The updater calls it when it starts
 and then at most once an hour.
+
+### Maintenance windows and auto-apply
+
+On a host install, patch releases can install themselves inside a maintenance
+window the administrators set. The pieces, each described below:
+
+- the [policy document](#update-policy-document) (`policy.json` in the run
+  store): a channel for the core and one for the plugins (`off` or `patch`), an
+  optional plugin allowlist and the window;
+- the [window arithmetic](#maintenance-window-arithmetic) (`window.py`), which
+  survives DST changes;
+- the [policy runner](#auto-apply-the-policy-runner) the updater ticks, which
+  creates at most one pre-approved run per tick, requested by
+  `policy:auto-patch`, under these rules: patch releases only, signed only,
+  never one with a `block` pre-flight item, plugins before the core, the core
+  only with `migrations: none` and an unchanged `uv.lock`, never a run that
+  would not fit in what is left of the window, never while queue jobs run;
+- the events `update.policy_applied` and `update.policy_deferred` (codes
+  `queue_busy`, `probe_failed`, `window_too_short`, and `window_closed` /
+  `policy_off` when a created run is deferred at pick-up) on the updater's bus;
+- the [run metrics and alerts](#metric-and-alerts), swept by the API workers.
+
+The host shell sets the policy directly (`baselith update policy set`, audited
+as `cli:<user>`; see the [CLI reference](../api/cli.md)); a console sets it
+through a proposal a second administrator approves. Auto-apply is a
+host-install feature: a Kubernetes deployment runs no host
+updater, so a policy stored there applies nothing.
+
+```bash
+baselith update policy set --plugins patch --days sat,sun \
+  --start 01:30 --end 05:00 --tz Europe/Rome
+baselith update policy get
+baselith update runs --limit 5
+```
+
+### Update policy document
+
+`baselith.core.plugin_updates.policy.UpdatePolicy` says which releases install
+themselves. It has a channel for the core and one for the plugins, each `off`
+or `patch`, an optional `plugin_allowlist` (empty means every plugin), a
+`window` (`MaintenanceWindow`: `days` 0 = Monday to 6 = Sunday, wall-clock
+`start` and `end`, an IANA `tz`) and `require_signed`, which is always `true`.
+A channel other than `off` needs a window; an unknown time zone, a day outside
+0 to 6, an empty day set, `start` equal to `end`, an unknown field or a name in
+the allowlist that is not a plugin name is a validation error. `POLICY_OFF`
+(the default document) applies nothing.
+
+The run store keeps the live policy in `policy.json`. `RunStore.get_policy()`
+returns it, or `POLICY_OFF` when the file is missing, unreadable or invalid,
+so a damaged file switches auto-apply off instead of guessing.
+`RunStore.set_policy(policy, actor=...)` replaces it directly; that is what the
+trusted host shell does. A console change is a two-step delegated approval:
+`RunStore.propose_policy(policy, actor=..., ttl_seconds=...)` stores a
+`PolicyProposal` in `policy.proposal.json` without touching the live policy,
+`RunStore.pending_proposal()` returns it until it expires, and
+`RunStore.approve_policy(approver=..., expected_digest=...)` makes it live.
+`expected_digest` is mandatory: it is the proposal's `digest` the approver was
+shown, compared in constant time, so a proposal swapped after review is never
+approved. The approval raises `PolicyRefused` with `code` `no_proposal`,
+`expired`, `self_approval` (the approver is the proposer) or `changed` (an
+empty digest, or not the proposal the approver saw). A new proposal replaces
+an expired one or the proposer's own; a live proposal of another actor is
+refused `pending` until `RunStore.discard_proposal(actor=...)` drops it, which
+is journaled. Every change runs under
+`locks/.policy.lock`, writes by atomic replace and appends one line to
+`policy.log.jsonl` with the operation, the actor, the proposer on an approval,
+and the SHA-256 of the document before and after; the journal carries hashes,
+not the policy itself.
+
+### Maintenance window arithmetic
+
+`baselith.core.plugin_updates.window` answers three questions about a
+`MaintenanceWindow` at an aware instant (a naive datetime is a `ValueError`):
+`in_window(window, now)`, `remaining(window, now)` (real time left until the
+open window closes, zero outside it) and `next_start(window, now)` (the UTC
+start of the first window starting at or after `now`; while a window is open,
+the following one). The rules:
+
+- Each allowed day has one window, from `start` to `end` in the window's zone.
+  An `end` earlier than `start` spans midnight, and the window belongs to the
+  day it starts on: a Friday 23:00 to 01:00 window is open on Saturday at
+  00:30, and `days` is checked against Friday.
+- The interval is `[start, end)`: open at `start`, closed at `end`.
+- A wall-clock time that does not exist (the spring-forward gap) resolves to
+  the first instant after the gap. In `Europe/Rome` on 2026-03-29 a window
+  starting at 02:30 opens at 03:00 CEST.
+- A wall-clock time that happens twice (the fall-back hour) resolves to its
+  first occurrence for `start` and its last for `end`, so the window is as long
+  as it can be.
+- A window entirely inside a gap does not open that day.
+- Durations are real elapsed time, so a window across a DST change is an hour
+  shorter or longer than its wall-clock span.
+
+Zones are resolved with `zoneinfo`; `tzdata` is a declared dependency so slim
+images and Windows, which have no system time-zone database, resolve them too.
+
+### Auto-apply: the policy runner
+
+`baselith.core.plugin_updates.apply.policy_runner.PolicyRunner` turns the
+[policy](#update-policy-document) into runs. The updater calls its `tick()`
+when it starts and then every `UPDATE_APPLY_POLICY_TICK_SECONDS`, between runs
+(a run in flight is never interrupted, so a run started inside the window
+always finishes after the window closes). A tick creates at most one run,
+through `RunStore.create` exactly like a manual request: pinned to the signed
+tarball's SHA-256 for a plugin, or to the commit the verified distribution
+manifest names for the core (claim `baselith_core`, subject `core`), with
+`requested_by="policy:auto-patch"` and no approval step. Every rule fails
+closed:
+
+- nothing happens with the policy off, outside the window, or with no cached
+  update report;
+- only a **patch** release is applied: same major and minor, higher patch,
+  no pre-release on either side (`apply._bump.bump_kind`). A version that
+  does not parse is never applied, unlike the checker, which announces it;
+- only a signed release whose assets verified, never a refused one, one that
+  needs a host build, one whose [pre-flight](#pre-flight) has a `block` item
+  (or cannot be computed), and never a release a run already tried (a run of
+  the same version that succeeded, failed or rolled back; a denied or expired
+  request does not count);
+- plugins first, in name order and only those in `plugin_allowlist` when it is
+  set, then the core when its channel is `patch`, no plugin run is unfinished,
+  its signed manifest says `migrations: none` and its `uv.lock` hash equals the
+  installed one;
+- a subject whose estimated duration is longer than what is left of the
+  window waits for the next window (`update.policy_deferred`, code
+  `window_too_short`). The estimate is the median duration of the subject's
+  last five succeeded runs (from `preparing` to the end), else
+  `UPDATE_APPLY_POLICY_ESTIMATE_SECONDS`;
+- a task queue with waiting or running jobs, or one that cannot be read
+  (Redis down), defers the run (`update.policy_deferred`, code `queue_busy` or
+  `probe_failed`). The queue is read only when there is something to apply;
+- the window is checked again when the updater **picks the run up**: it
+  executes the oldest approved run first, so a policy run created near the end
+  of the window could otherwise wait behind a manual run and start after the
+  window closed. A run requested by `policy:auto-patch` starts only while the
+  policy still covers its subject, the window is open and its estimate fits in
+  what is left; otherwise it is deferred, not started: it ends `expired` with
+  `failure` `window_closed` (or `policy_off` when the policy was turned off or
+  no longer covers it), frees the subject's claim, and `update.policy_deferred`
+  is emitted with that code. An expired run does not count as a try, so the
+  next window creates it again.
+
+A created run emits `update.policy_applied` with `subject`, `from_version`,
+`to_version` and `run_id`, and logs an `AUDIT | PLUGIN_UPDATE | policy request`
+line. Both events go out on the updater's own bus and carry names, versions
+and codes only. Two updaters, or a manual request racing the tick, never
+create two runs for one subject: the store's claim refuses the second
+(`RunConflict`, swallowed). A tick that raises is logged with the exception's
+type name and the updater goes on serving runs; a runner that cannot be built
+at start leaves auto-apply off.
+
+### Pre-flight
+
+Before a run is requested, `baselith.core.plugin_updates.build_preflight` answers
+whether an update can be installed here and now, as a list rather than a yes
+or no: each `PreflightItem` has a `code`, a `level` (`ok`, `warn` or `block`)
+and one sentence a person can act on. It is pure — the report, the settings,
+the heartbeat, the active run, the installed plugins' core bounds and every
+probe are passed in — and computed on request; the updater checks again
+before it touches anything. A probe that fails becomes a `warn` item, never an
+exception. `PluginUpdateService.preflight(subject, version=None)` builds it
+with this host's live inputs: the saved report as served, the run store, the
+task queue (Redis) and the free disk space of the overlay (or the state
+directory when no updater reported one).
+
+The subject is `core` or `plugin:<name>` (a bare name is a plugin). In a
+distribution `core` means the distribution's own release (the report's
+`distribution` section), in the public core the core release (`system`).
+
+| Code | Level | When |
+| --- | --- | --- |
+| `candidate_unknown` | block | No release of the subject is known, it was refused, or `version` is not the latest known release. The list ends here |
+| `already_installed` | block | The target is already installed. The list ends here |
+| `blocker_<blocker>` | block | One item per [installability](#installability-verdict) blocker (`blocker_updater_offline`, `blocker_unsigned_release`, …): for a plugin from the same `apply_status` the console shows, for the core subject from `core_blockers` (see below) |
+| `plugin_incompatible` | warn | Core subject: installed plugins whose `min_core_version`/`max_core_version` exclude the target, named in the message |
+| `plugin_compatibility_unknown` | warn | Core subject: the bounds cannot be read, or the target is a distribution release that does not yet say which public core it contains |
+| `major_jump` | block (core), warn (plugin) | The target crosses a major version |
+| `release_unverified` | warn | Core subject in a read-only pre-flight: the release's signed manifest is checked when the install is requested, not here |
+| `security_advisory` | ok | A security advisory affects the installed core or distribution |
+| `queue_busy` | warn | Jobs are waiting or running in the task queue |
+| `disk_low` | warn | Less free space than `UPDATE_APPLY_MIN_FREE_MB` |
+| `queue_probe_unavailable`, `disk_probe_unavailable` | warn | The queue (for example Redis down) or the disk could not be read |
+| `no_boot_report`, `boot_report_unavailable` | warn | The API never booted with one-click updates on (the updater would refuse the run), or the boot report could not be read |
+| `ready` | ok | Last, and only when nothing blocks |
+
+A missing updater heartbeat is not a probe failure: it is the
+`blocker_updater_offline` item, because no run can execute without the
+updater. `GET /api/plugins/updates/preflight` serves the list (see [API](#api))
+and `baselith update preflight <subject> [--version V]` prints it, one
+`[level] code: message` line per item, exiting `1` when any item blocks.
 
 ### Installability verdict
 
@@ -874,7 +1389,30 @@ yields `apply_disabled` with a detail naming which. The verdict is re-stamped
 on every read, including a "Check now" answered from the cooldown, so a run
 started moments ago shows as `run_active` at once. Plugin names the run store
 rejects (for example hyphenated ones) get no verdict (`apply` is `null`), so
-they are never installable: the check fails closed.
+they are never installable: the check fails closed. None of the six core-only
+blockers below ever appears in a plugin verdict.
+
+The core's verdict is
+`baselith.core.plugin_updates.apply.drivers._core_guards.core_blockers(release, ...)`,
+pure like `apply_status`, in this order: `core_disabled`; `not_host_install`
+(Kubernetes or a container) or `core_install_unsupported` (a host install
+other than `source`); `apply_disabled`; `updater_offline` or `updater_mismatch`
+(the heartbeat's `core_version` or `framework_version` differs from the API's);
+`backup_unconfigured`; `updater_restart_unconfigured`; `tree_dirty`; then, for
+a verified release, `needs_environment_update` (its `lock_sha256` differs from
+the installed `uv.lock`), `breaking_migration`, `major_jump` and
+`core_too_old` (the API's `CORE_VERSION` is older than the signed
+`min_core_version`, or either does not parse), or `unsigned_release` when
+there is no verified release; and `run_active`. An unknown tree state or lock
+hash (`None`) blocks. `tree_is_dirty(porcelain, ignored)` reads `git status
+--porcelain`: untracked files never count, both sides of a rename do, and an
+ignored path matches itself and what is under it (`ui/dist` covers
+`ui/dist/a.js`, not `ui/distant/a.js`). The pre-flight of the core subject
+takes the host's state and the verified release as a `CoreState`
+(`installed_version`, `installed_lock_sha256`, `tree_dirty`, `release`,
+`release_detail`) and turns each blocker into a `blocker_<code>` item; without
+one everything about the host is unknown and blocks. `major_jump` then appears
+once, as `blocker_major_jump`.
 
 ### Overlay swap and store pruning
 
@@ -951,7 +1489,10 @@ After the plugins are up, every API worker calls
 activates each plugin that has a pending expectation (a lazily loaded plugin
 would otherwise never show up), then writes
 `boot/<pid>.json` by atomic replace: the worker's pid, boot time, core
-version, and per plugin its version, directory, `active` and `healthy` flags.
+version, the distribution version it imported (`framework_version`, the
+`__version__` a core run's health check compares; `null` in reports written
+before it existed), and per plugin its version, directory, `active` and
+`healthy` flags.
 Nothing else is recorded. The directory is the resolved path: the loader
 registers a plugin under its overlay link, so the report records the store
 entry that link pointed to at boot, which is what the worker loaded and what
@@ -1112,6 +1653,7 @@ stale approval requests first, then, per unfinished run:
 | `migrating` | `schema-init` ran (or was running) against a scratch overlay and the live link was never switched: its scratch and staging directories are removed, `failed: interrupted` ("nothing changed on the running API"). `Executor.undo_swap` only acts on a link an older updater had already switched, putting it back on `previous_target`; one that cannot be switched back is `rollback_failed` (CRITICAL log) |
 | `activating`, `health_checking` | `Executor.resume_activation`: the updater died before or after switching the link, so it switches (idempotently) and restarts again, then judges it; pass → `succeeded`, fail → rollback. `schema-init` is not run again |
 | `rolling_back` | `Executor.redo_rollback` (idempotent) |
+| `finalizing` | a core run whose new version serves: `succeeded` once this updater imported the version the run installed and the newest boot report's `framework_version` shows it; otherwise left alone (`updater_mismatch` explains it), never failed |
 
 It ends with `RunStore.clear_stale_expectations()`. Each handled run is logged
 as `AUDIT | PLUGIN_UPDATE | reconciled`. When one run's recovery raises, the
@@ -1119,6 +1661,134 @@ remaining runs are still settled and stale expectations cleared before the
 first error is re-raised. A run recorded before `must_stay_active` existed
 that is resumed with no boot report at all is never judged healthy: it is
 rolled back (`health_failed`, "no boot report yet …").
+
+### Apply drivers
+
+The updater does not call the executor directly: `build_executor` registers the
+plugin overlay `Executor` as the driver `plugin-overlay` and returns a
+`baselith.core.plugin_updates.apply.drivers.DriverRouter`, which hands each run,
+and each recovery step of the table above, to the driver the run selects.
+`ApplyDriver` is the `Protocol` a driver implements: `execute`,
+`resume_activation`, `redo_rollback` (all async, returning the run) and
+`undo_swap` (sync, raising `OSError` or `ValueError` when it cannot restore).
+The `Executor` satisfies it unedited. Drivers are registered by name with
+`register_driver(name, factory)` (a later registration replaces an earlier
+one), looked up with `get_driver(name)` and listed with `registered_drivers()`;
+an unknown name raises `UnknownDriver`, a `ValueError`.
+
+| Run | Driver | Without that driver |
+| --- | --- | --- |
+| `driver` other than `host` | none: it does not run in this updater | `failed: unknown_driver`, never executed |
+| `host`, subject `core` | `core-host` | `failed: core_driver_unavailable`, never executed |
+| `host`, any other subject | `plugin-overlay` | `failed: unknown_driver` |
+
+Recovery cannot know what an interrupted run of a missing driver left behind,
+so `resume_activation` and `redo_rollback` end it `rollback_failed` (the claim
+stays until an operator resolves it), and `undo_swap` raises, which
+reconciliation turns into `rollback_failed` too. The router's `overlay_root` is
+the plugin driver's, so reconciliation still removes a dead run's staging
+directories. The `core-host` driver is registered only when
+`UPDATE_APPLY_CORE_ENABLED` is on (see [the core host driver](#the-core-host-driver));
+without it a core run fails before anything is touched.
+
+### The core host driver
+
+`baselith.core.plugin_updates.apply.drivers.CoreHostDriver` installs a signed
+distribution release in place on a git checkout with an editable install. The
+run pins the release's commit at request time in `tarball_sha256` (for a core
+run that field holds a 40-hex commit SHA, never a tarball digest), and the
+driver checks out that SHA, never a tag name, so a moved tag cannot redirect an
+install. Every transition is journaled first:
+
+1. `preparing` (a compare-and-set on `approved`). `apply_disabled` when
+   `UPDATE_APPLY_CORE_ENABLED` or the kill switch is off, no restart command is
+   configured, or no boot report exists yet.
+2. An update downloads `distribution-release.json` of `to_version`, verifies it
+   against `load_trust_roots(<distribution name>)` and holds its `commit_sha` to
+   the pinned one. A refused manifest fails with its refusal code
+   (`signature_invalid`, `name_mismatch`, …), an unreachable release or a
+   malformed file with `verification_failed`, another commit with
+   `commit_mismatch`.
+3. `core_blockers` runs again with what the host says now (the `uv.lock` hash,
+   `git status`); any blocker fails the run with its code (`tree_dirty`,
+   `needs_environment_update`, `breaking_migration`, …) before anything runs.
+   The schema owner's environment (`UPDATE_APPLY_SCHEMA_ENV_FILE`) is read
+   here, as for a plugin.
+4. `UPDATE_APPLY_BACKUP_COMMAND` runs (`backup_failed` on a non-zero exit, with
+   nothing changed).
+5. `migrating` records HEAD as `previous_target` (the rollback anchor), the
+   pinned commit as `target` and the plugins active in the newest boot report
+   as `must_stay_active`.
+6. The commit is fetched by SHA and checked out detached, never forced. A
+   commit that cannot be fetched or checked out fails `checkout_failed` with
+   HEAD where it was. The checked-out `uv.lock` must hash as signed, or HEAD
+   goes back and the run fails `lock_mismatch`.
+7. `baselith db migrate`, then `baselith plugin schema-init` for every enabled
+   plugin (skipped when `UPDATE_APPLY_SCHEMA_INIT` is off), with the owner's
+   credentials. A failure puts HEAD back without a restart and fails
+   `migration_failed`: "nothing changed on the running API; the schema may have
+   advanced".
+8. `activating`: `UPDATE_APPLY_RESTART_COMMAND` restarts the API, then
+   `health_checking` waits for the [core health verdict](#core-install-seams).
+   A failed restart (`restart_failed`) or verdict (`health_failed`) moves to
+   `rolling_back`: HEAD goes back to `previous_target`, the API restarts and is
+   judged on the previous version; success ends `rolled_back` (its message says
+   `schema changes from <version> remain`), failure ends `rollback_failed`
+   (CRITICAL `AUDIT | CORE_UPDATE | rollback_failed` log line, the
+   `plugin.update_rollback_failed` event, the claim kept).
+9. Success ends `finalizing`: the new version serves, but the updater itself
+   still runs the code it imported. It restarts itself and closes the run (see
+   [the updater service](#the-updater-service)).
+
+A rollback run (`kind=rollback`) pins the commit to return to, downloads no
+manifest and runs no migration (a rollback never reverts the schema); its
+`uv.lock` must equal the installed one. Otherwise it runs the same steps and
+ends `finalizing` the same way. Between steps 6 and 8 the running API has the
+new files on disk: a worker that respawns, or a module imported lazily, in that
+window loads the new code before the restart. Keep migrations short. The
+editable install is not reinstalled: the `uv.lock` gate guarantees the
+dependencies are unchanged, but a release that adds a console-script entry
+point needs `pip install -e .` by hand.
+
+Reconciliation uses the same entry points as for a plugin: `undo_swap` puts
+HEAD back on `previous_target` for a run that died while `migrating` (a HEAD
+that cannot be put back ends `rollback_failed`), `resume_activation` checks out
+`target` again, restarts and judges, and `redo_rollback` checks out
+`previous_target` again and restarts. All git steps hold the core's run lock
+(`RunStore.plugin_lock("baselith_core")`).
+
+### Core install seams
+
+The core host driver reaches the host through three seams under
+`baselith.core.plugin_updates.apply.drivers`, each replaceable in tests:
+
+- `_git.subprocess_git(argv, *, cwd, timeout)` runs `git <argv>` without a
+  shell and returns a `GitResult(returncode, stdout)` (`-1` when it could not
+  run or timed out). Its environment is this process's minus the signing key
+  (`BASELITH_PLUGIN_SIGNING_KEY`), `PLUGIN_UPDATE_GITHUB_TOKEN`, the operator
+  passwords and every `UPDATE_APPLY_*` setting, with `GIT_TERMINAL_PROMPT=0` so
+  a fetch never waits for a password; stdout is spooled to a temporary file
+  and capped at 1 MiB. The helpers built on it: `head_sha`, `porcelain`
+  (`git status --porcelain --untracked-files=no`), `fetch_commit(git, cwd,
+  remote_url, sha)` (a commit already present is not fetched; otherwise it is
+  fetched by SHA, then by tags when the server refuses that, and only the SHA
+  itself resolving counts, whatever `fetch --tags` exits with: it fails when
+  any upstream tag moved, even though the commit arrived), `checkout_detached(git, cwd, sha)` (never forced:
+  git refuses to overwrite local changes and HEAD stays put; true only when HEAD
+  is then exactly `sha`) and `lock_sha256(cwd)`.
+- `_fetch.GitHubDistributionFetcher(source, slug).manifest(version)` downloads
+  the `distribution-release.json` asset of release `v<version>` through the
+  same size-capped path as a plugin's `release.json`
+  (`_io.download_text_asset`); a missing release or asset is a `SourceError`
+  naming which. The parsed release exposes the asset as
+  `ReleaseInfo.distribution_manifest_url`.
+- `_core_health.wait_core_healthy(store, CoreExpectation(...), config, ...)`
+  judges a core restart: every worker that booted after `restart_at` reports
+  `framework_version` equal to the target, exactly the plugins active before
+  the run are active (one lost or one gained both fail: a release that changes
+  the active set is a decision for a person), none of them unhealthy, and
+  `UPDATE_APPLY_HEALTH_URL` answers 200 for `UPDATE_APPLY_STABLE_SECONDS`. The
+  polling loop is the plugin health check's (`health.wait_until_healthy`).
 
 ### The updater service
 
@@ -1164,11 +1834,23 @@ The event name and payload builder are public:
 records the outcome re-announces it with the same payload.
 
 `build_executor(config)` wires the production executor: the overlay from
-`BASELITH_PLUGIN_OVERLAY_DIR` (unset → exit `2`), the bundled root from
+`BASELITH_PLUGIN_OVERLAY_DIR` (unset → exit `2`, unless
+`UPDATE_APPLY_CORE_ENABLED` is on: then the updater runs core installs only and
+the heartbeat reports no overlay), the bundled root from
 `PLUGINS_PATH`, the release sources, GitHub API and download cap from the
 `PLUGIN_UPDATE_*` settings (the sources file is read once at start), trusted
 keys re-read for every run, `http_probe(UPDATE_APPLY_HEALTH_URL)` and
-`subprocess_runner`.
+`subprocess_runner`. With the core switch on it also registers the
+`core-host` driver for the checkout holding the `baselith` package, verifying
+against `DISTRIBUTION_UPDATE_REPO` in a distribution (`CORE_UPDATE_REPO` in the
+public core). The drivers live in a registry of that executor's own, so a
+driver it did not build never resolves.
+
+**Finalizing.** When a run ends `finalizing` (a core install whose new version
+serves), `serve` runs `UPDATE_APPLY_UPDATER_RESTART_COMMAND` after the state is
+in the store, and stops when the command succeeds; reconciliation at the next
+start closes the run. Without the command, or when it fails, the updater keeps
+running the old code and the run stays `finalizing`.
 
 ### systemd units
 
@@ -1218,3 +1900,10 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 ```
+
+The sudoers drop-in needs one rule for the API restart and, for core installs, one for
+`systemctl --no-block restart baselithcore-plugin-updater.service` (the
+updater's own restart, which must not wait for its own unit to stop). sudo matches the whole command line, so each rule must equal the
+configured argv word for word; install it with mode `0440` and check it with
+`sudo visudo -cf`. The unit files are not checked with `systemd-analyze verify`
+here; run it on the host after editing them.

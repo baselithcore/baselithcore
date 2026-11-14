@@ -29,7 +29,8 @@ def validate_install_manifest(manifest: dict[str, Any]) -> list[str]:
                     or "\r" in requirement
                 ):
                     raise InvalidRequirement("Invalid requirement")
-                Requirement(requirement)
+                if Requirement(requirement).url is not None:
+                    raise InvalidRequirement("Direct-URL requirement")
             except InvalidRequirement:
                 errors.append("invalid python_dependencies entry")
     dependencies = manifest.get("plugin_dependencies") or {}

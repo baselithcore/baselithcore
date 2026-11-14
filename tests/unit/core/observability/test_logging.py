@@ -110,3 +110,73 @@ def test_safe_logger_redacts_sensitive_kwargs():
     assert "super-secret" not in rendered
     assert "api_key=[REDACTED]" in rendered
     assert "user=bob" in rendered
+
+
+def _json_lines_logged(emit) -> list[dict]:
+    """Configure JSON logging into a buffer, run ``emit``, return the entries."""
+    import io
+    import json
+    import logging as _logging
+
+    from baselith.core.observability import logging as log_mod
+
+    root = _logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    try:
+        buf = io.StringIO()
+        log_mod.configure_logging(level="INFO", json_output=True, stream=buf)
+        emit(log_mod)
+        log_mod._stop_log_listener()
+        return [json.loads(line) for line in buf.getvalue().splitlines() if line]
+    finally:
+        log_mod._stop_log_listener()
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+
+
+def test_a_value_without_a_literal_repr_does_not_drop_the_line():
+    """The queue hand-off used to ``repr`` the event dict and parse it back:
+    a UUID, a Path or an exception in a kwarg failed the parse and the entry
+    was lost to a "--- Logging error ---" on stderr."""
+    import uuid
+    from pathlib import Path
+
+    run = uuid.uuid4()
+
+    def emit(log_mod) -> None:
+        log = log_mod.get_logger("test.event_dict")
+        log.info("with-uuid", run=run)
+        log.info("with-path", path=Path("/srv/data"))
+        log.info("with-error", cause=ValueError("boom"))
+
+    entries = {e["event"]: e for e in _json_lines_logged(emit)}
+
+    assert str(run) in entries["with-uuid"]["run"]
+    assert "/srv/data" in entries["with-path"]["path"]
+    assert "boom" in entries["with-error"]["cause"]
+
+
+def test_structlog_and_foreign_entries_both_carry_a_timestamp():
+    import logging as _logging
+
+    def emit(log_mod) -> None:
+        log_mod.get_logger("test.native").info("native-entry", n=1)
+        _logging.getLogger("test.foreign").info("foreign-entry %s", 2)
+
+    entries = {e["event"]: e for e in _json_lines_logged(emit)}
+
+    assert entries["native-entry"]["n"] == 1
+    assert entries["native-entry"]["timestamp"]
+    assert entries["foreign-entry 2"]["timestamp"]
+
+
+def test_a_foreign_message_that_looks_like_a_dict_stays_text():
+    import logging as _logging
+
+    def emit(log_mod) -> None:
+        _logging.getLogger("test.foreign").info("{'looks': 'like a dict'}")
+
+    (entry,) = _json_lines_logged(emit)
+
+    assert entry["event"] == "{'looks': 'like a dict'}"

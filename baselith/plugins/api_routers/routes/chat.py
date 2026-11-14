@@ -46,9 +46,11 @@ import orjson
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
+from baselith.core.auth.scopes import SCOPE_CHAT_WRITE
 from baselith.core.chat import chat_service
 from baselith.core.config import get_app_config
-from baselith.core.middleware import require_user
+from baselith.core.middleware import require_scope
+from baselith.core.middleware import require_user as require_user
 from baselith.core.models.chat import ChatRequest, ChatResponse
 from baselith.core.observability.logging import get_logger
 from baselith.core.observability.setup import request_id_ctx
@@ -124,6 +126,13 @@ def sse_error_event(event_id: int | None = None, request_id: str | None = None) 
 # test doubles stub the config with a partial namespace).
 DEFAULT_STREAM_TIMEOUT_SECONDS = 300.0
 
+#: How often ``sse_stream`` asks the transport whether the client is still
+#: there while chunks are flowing. Asking before every chunk cost more loop
+#: time than framing the chunk did; a client that leaves mid-burst is noticed
+#: within this window (and at once on a quiet interval), and the response's
+#: own disconnect handling still cancels the stream independently.
+DISCONNECT_POLL_SECONDS = 0.5
+
 
 class SSEResponse(StreamingResponse):
     """A ``StreamingResponse`` that also tells OpenAPI what it sends.
@@ -139,7 +148,7 @@ class SSEResponse(StreamingResponse):
     media_type = "text/event-stream"
 
 
-router = APIRouter(dependencies=[Depends(require_user)])
+router = APIRouter(dependencies=[Depends(require_scope(SCOPE_CHAT_WRITE))])
 
 
 def _apply_transparency(resp: ChatResponse, svc: TransparencyService) -> dict[str, str]:
@@ -356,13 +365,18 @@ async def sse_stream(
     deadline = time.monotonic() + timeout_seconds
     reader = HeartbeatSource(source, heartbeat_interval)
     event_id = 0
+    # 0.0 = "check now": the first pass always asks.
+    next_disconnect_check = 0.0
     if reset:
         yield SSE_RESET_EVENT
     try:
         while True:
-            if await request.is_disconnected():
-                logger.info("chat_stream_client_disconnected")
-                break
+            now = time.monotonic()
+            if now >= next_disconnect_check:
+                if await request.is_disconnected():
+                    logger.info("chat_stream_client_disconnected")
+                    break
+                next_disconnect_check = now + DISCONNECT_POLL_SECONDS
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 logger.warning(
@@ -375,6 +389,8 @@ async def sse_stream(
             except StopAsyncIteration:
                 break
             if chunk is HEARTBEAT:
+                # A quiet interval: re-check the client before the next wait.
+                next_disconnect_check = 0.0
                 if deadline - time.monotonic() > 0:
                     yield KEEPALIVE_FRAME
                 continue

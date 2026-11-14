@@ -6,7 +6,7 @@ Execute workflow definitions step by step.
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -55,6 +55,10 @@ class ExecutionContext:
     node_results: dict[str, NodeResult] = field(default_factory=dict)
 
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    #: Orchestration context (contract validator, autonomy policy, loop budget,
+    #: tool hooks...) that TOOL nodes push their calls through. ``None`` runs
+    #: the graph ungated, as a standalone executor always did.
+    gate_context: Mapping[str, Any] | None = field(default=None, repr=False)
 
     def set_variable(self, name: str, value: Any) -> None:
         """Set a context variable."""
@@ -161,6 +165,7 @@ class WorkflowExecutor:
         workflow: WorkflowDefinition,
         initial_input: Any = None,
         checkpoint: Any = None,
+        gate_context: Mapping[str, Any] | None = None,
     ) -> WorkflowResult:
         """
         Execute a workflow.
@@ -176,6 +181,14 @@ class WorkflowExecutor:
                 them. Durable runs require node outputs to be
                 JSON-serializable for the persistent store, and execute
                 PARALLEL branches sequentially (deterministic replay cursors).
+            gate_context: Optional orchestration context. When given, every
+                TOOL node call goes through
+                :func:`~baselith.core.orchestration.enforcement.enforce_tool_invocation`
+                (agent contract, plugin capability, autonomy approval,
+                tool-call budget, rate limit, hooks, audit) like the Agent and
+                ReAct loops. A node declares its risk with
+                ``config["category"]``; an undeclared or unknown category is
+                treated as ``destructive``.
 
         Returns:
             WorkflowResult with execution details
@@ -203,7 +216,7 @@ class WorkflowExecutor:
             )
 
         # Create execution context
-        context = ExecutionContext(workflow_id=workflow.id)
+        context = ExecutionContext(workflow_id=workflow.id, gate_context=gate_context)
         context.set_variable("input", initial_input)
         # Workflow reference for handlers that need the graph (e.g. MERGE
         # collecting its incoming branches). Private attr, same pattern as

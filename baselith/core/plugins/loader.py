@@ -14,6 +14,7 @@ from ._audit import audit_plugin_load
 from ._env import apply_plugin_env
 from ._module_paths import ensure_parent_packages as _ensure_parent_packages
 from ._resolve import safe_plugin_path, sort_by_dependencies
+from ._source_only import plugin_entry_spec
 from .bulk_load import load_all_plugins as _load_all_plugins
 from .discovery import (
     apply_overlay,
@@ -284,13 +285,7 @@ class PluginLoader:
             else:
                 module_fqn = f"baselith.plugins.{package_name}.plugin"
 
-            spec = importlib.util.spec_from_file_location(
-                module_fqn,
-                plugin_file,
-                submodule_search_locations=(
-                    [str(plugin_dir)] if plugin_file.name == "__init__.py" else None
-                ),
-            )
+            spec = plugin_entry_spec(module_fqn, plugin_file)
             if spec is None or spec.loader is None:
                 logger.error(f"Failed to create module spec for {safe_name}")
                 return None

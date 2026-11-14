@@ -153,7 +153,12 @@ async def handle_iteration(
                 if make_scope is not None
                 else None
             )
-            result = await executor.execute(sub, initial_input=item, checkpoint=scope)
+            result = await executor.execute(
+                sub,
+                initial_input=item,
+                checkpoint=scope,
+                gate_context=context.gate_context,
+            )
         if result.status is ExecutionStatus.COMPLETED:
             return result.output
         message = f"item {index} failed: {result.error or result.status.value}"

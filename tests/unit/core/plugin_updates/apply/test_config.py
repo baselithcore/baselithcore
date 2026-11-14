@@ -65,3 +65,50 @@ def test_relative_state_dir_refused_when_enabled_in_production(
     assert UpdateApplyConfig(
         enabled=True, state_dir="/var/lib/x"
     ).state_dir.is_absolute()
+
+
+def test_core_install_settings_default_off_and_empty() -> None:
+    cfg = UpdateApplyConfig()
+    assert cfg.core_enabled is False and not cfg.backup_configured
+    assert cfg.backup_command == [] and cfg.ignored_paths == []
+    assert cfg.updater_restart_command == [] and cfg.backup_timeout_seconds == 1800
+
+
+def test_backup_and_updater_restart_commands_parse_like_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "UPDATE_APPLY_BACKUP_COMMAND", '["/usr/local/bin/backup","--all"]'
+    )
+    monkeypatch.setenv(
+        "UPDATE_APPLY_UPDATER_RESTART_COMMAND", "sudo,-n,systemctl,restart,updater"
+    )
+    monkeypatch.setenv("UPDATE_APPLY_IGNORED_PATHS", "ui/dist/,configs/plugins.yaml")
+    monkeypatch.setenv("UPDATE_APPLY_CORE_ENABLED", "true")
+    cfg = UpdateApplyConfig()
+    assert cfg.backup_command == ["/usr/local/bin/backup", "--all"]
+    assert cfg.backup_configured and cfg.core_enabled
+    assert cfg.updater_restart_command[-1] == "updater"
+    assert cfg.ignored_paths == ["ui/dist", "configs/plugins.yaml"]
+
+
+@pytest.mark.parametrize("argv", [[""], ["ok", "bad\x00"]])
+def test_backup_command_rejects_empty_and_nul(argv: list[str]) -> None:
+    with pytest.raises(ValidationError):
+        UpdateApplyConfig(backup_command=argv)
+    with pytest.raises(ValidationError):
+        UpdateApplyConfig(updater_restart_command=argv)
+
+
+@pytest.mark.parametrize(
+    "path", ["/etc", "../up", "a/../b", "./a", "a//b", "", "/", "a\\b", "a\x00"]
+)
+def test_ignored_paths_reject_absolute_and_dotdot(path: str) -> None:
+    with pytest.raises(ValidationError):
+        UpdateApplyConfig(ignored_paths=[path])
+
+
+@pytest.mark.parametrize("seconds", [9, 14401])
+def test_backup_timeout_is_bounded(seconds: int) -> None:
+    with pytest.raises(ValidationError):
+        UpdateApplyConfig(backup_timeout_seconds=seconds)

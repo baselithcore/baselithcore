@@ -35,6 +35,18 @@ _ULIMITS: tuple[tuple[str, int], ...] = (
 )
 
 
+def capped_log_config() -> dict[str, Any]:
+    """``json-file`` driver capped at one 1 MiB file: the log the daemon keeps.
+
+    The read side is capped separately (``_logs.read_capped_logs``); this bounds
+    what a ``print`` loop can write to the host before the timeout kills it.
+    ``docker-py`` coerces the mapping into a ``LogConfig``. Not part of
+    :func:`build_sandbox_runtime_kwargs`: the file-transfer path streams over
+    stdin/stdout and runs with the log driver off, which is stricter.
+    """
+    return {"Type": "json-file", "Config": {"max-size": "1m", "max-file": "1"}}
+
+
 def _build_ulimits() -> list[Any]:
     """Return the rlimit set as docker ``Ulimit`` objects, or plain dicts.
 

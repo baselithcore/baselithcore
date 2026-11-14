@@ -13,7 +13,9 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
 
-from baselith.core import __version__ as CORE_VERSION
+from baselith.core import __version__ as FRAMEWORK_VERSION
+from baselith.core import _version
+from baselith.core._core_version import CORE_VERSION
 from baselith.core.cli.ui import Timer, console, print_header, print_timing
 
 
@@ -30,7 +32,9 @@ def run_info(json_output: bool = False) -> int:
         try:
             core_version = version("baselith-core")
         except PackageNotFoundError:
-            core_version = CORE_VERSION
+            core_version = FRAMEWORK_VERSION
+
+        distribution: str | None = getattr(_version, "__distribution__", None)
 
         # Identify project
         is_project = False
@@ -58,6 +62,8 @@ def run_info(json_output: bool = False) -> int:
         output = {
             "framework": {
                 "version": core_version,
+                "core_version": CORE_VERSION,
+                "distribution": distribution,
                 "python": platform.python_version(),
                 "os": f"{platform.system()} {platform.release()}",
             },
@@ -84,6 +90,9 @@ def run_info(json_output: bool = False) -> int:
     fw_table.add_column("Key", style="dim")
     fw_table.add_column("Value", style="bold cyan")
     fw_table.add_row("Version", core_version)
+    fw_table.add_row("Core release", CORE_VERSION)
+    if distribution:
+        fw_table.add_row("Distribution", distribution)
     fw_table.add_row("Python", platform.python_version())
     fw_table.add_row("OS", f"{platform.system()} {platform.release()}")
 

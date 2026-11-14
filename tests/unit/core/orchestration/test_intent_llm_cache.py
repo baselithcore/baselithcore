@@ -35,3 +35,26 @@ async def test_successful_result_is_cached():
     await classifier._classify_with_llm_cached("rain tomorrow?")
     assert await classifier._classify_with_llm_cached("rain tomorrow?") is good
     assert classifier._classify_with_llm.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_classification_call_is_capped_and_asks_for_no_reasoning():
+    """The answer is one short JSON object: it is capped, and the prompt no
+    longer asks for an explanation nothing reads."""
+    classifier = IntentClassifier()
+    classifier._plugin_intent_patterns = {"weather": {"description": "forecasts"}}
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_llm(prompt: str, **kwargs):
+        calls.append((prompt, kwargs))
+        return '{"intent": "weather", "confidence": 0.9}'
+
+    classifier._llm_call = fake_llm
+
+    result = await classifier._classify_with_llm("rain tomorrow?")
+
+    assert result is not None and result.intent == "weather"
+    prompt, kwargs = calls[0]
+    assert kwargs["max_tokens"] == 96
+    assert kwargs["json"] is True
+    assert "reasoning" not in prompt

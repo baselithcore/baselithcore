@@ -319,3 +319,17 @@ async def test_overlay_link_is_reported_as_its_store_entry(tmp_path: Path) -> No
     expect = store.read_expectation("demo")
     assert expect is not None
     assert evaluate_boot_reports(reports, expect).ok
+
+
+async def test_framework_version_is_written_and_old_files_load(tmp_path: Path) -> None:
+    from baselith.core import _version
+    from baselith.core.plugin_updates.apply.boot_report import BootReport
+
+    store = RunStore(tmp_path)
+    await write_boot_report(
+        _Registry({}, {}), store, core_version="1.3.1", now=T0, pid=7
+    )
+    [report] = read_boot_reports(store, since=T0)
+    assert report.framework_version == _version.__version__
+    old = '{"pid": 1, "booted_at": "2026-09-30T12:00:00Z", "core_version": "1.0.0", "plugins": {}}'
+    assert BootReport.model_validate_json(old).framework_version is None

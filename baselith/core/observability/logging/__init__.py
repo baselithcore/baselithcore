@@ -67,6 +67,28 @@ def _stop_log_listener() -> None:
         _log_listener = None
 
 
+class _EventDictQueueHandler(QueueHandler):
+    """Hand a structlog record to the listener thread without formatting it.
+
+    The stock ``prepare()`` formats the record on the calling thread so it can
+    be pickled across processes. A structlog record's message is its event
+    dict, so that turned every entry into the dict's ``repr`` — which the
+    formatter then had to parse back with ``ast.literal_eval``, on a thread
+    that shares the GIL with the event loop. Any value whose ``repr`` is not a
+    Python literal (a ``UUID``, a ``Path``, an exception) made the parse fail,
+    and the line was dropped with a "--- Logging error ---" on stderr. The
+    queue here is in-process, so the record can cross it as it is.
+    """
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        """Pass an event-dict record through; format foreign records as usual."""
+        if isinstance(record.msg, dict):
+            return record
+        # typeshed types the stock prepare() as returning Any.
+        prepared: logging.LogRecord = super().prepare(record)
+        return prepared
+
+
 # --- Sensitive-data redaction (moved to baselith.core.observability.redaction; ------
 # re-exported here for backward compatibility with existing importers). ------
 from baselith.core.observability.redaction import (  # noqa: E402
@@ -149,29 +171,10 @@ def configure_logging(
             colors=True, exception_formatter=exception_formatter
         )
 
-    # 1. Custom Formatter to bridge the gap between stdlib and structlog.
-    class UnifiedFormatter(structlog.stdlib.ProcessorFormatter):
-        """Standardizes inputs from 3rd party libraries into the structured pipeline."""
-
-        def format(self, record: logging.LogRecord) -> str:
-            if isinstance(record.msg, str):
-                if record.msg.startswith("{") and record.msg.endswith("}"):
-                    try:
-                        import ast
-
-                        record.msg = ast.literal_eval(record.msg)
-                    except (
-                        ValueError,
-                        TypeError,
-                        SyntaxError,
-                        MemoryError,
-                        RecursionError,
-                    ):  # the documented literal_eval failures: keep the raw text
-                        pass
-            formatted: str = super().format(record)
-            return formatted
-
-    formatter = UnifiedFormatter(
+    # 1. One formatter for both origins: structlog event dicts arrive as
+    # ``record.msg`` (see ``_EventDictQueueHandler``), foreign records go
+    # through the pre-chain first.
+    formatter = structlog.stdlib.ProcessorFormatter(
         processor=final_renderer,
         foreign_pre_chain=common_processors,
     )
@@ -188,6 +191,9 @@ def configure_logging(
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
+            # Stamped here, on the caller: the listener thread renders later,
+            # and the foreign pre-chain never sees a structlog event.
+            structlog.processors.TimeStamper(fmt=fmt, utc=utc),
             # Redact secrets/PII by key and mask credentials/emails in strings.
             # Runs after format_exc_info so rendered tracebacks are masked too,
             # and last before hand-off to the formatter.
@@ -215,7 +221,7 @@ def configure_logging(
     stream_handler.setFormatter(formatter)
 
     log_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
-    root_l.addHandler(QueueHandler(log_queue))
+    root_l.addHandler(_EventDictQueueHandler(log_queue))
     root_l.setLevel(log_level)
 
     global _log_listener

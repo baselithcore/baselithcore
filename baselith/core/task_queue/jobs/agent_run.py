@@ -38,6 +38,7 @@ from typing import Any
 
 from rq import get_current_job
 
+from baselith.core.context import get_current_tenant_id
 from baselith.core.observability.logging import get_logger
 from baselith.core.orchestration.run_completion import COMPLETION_NOTIFY_KEY
 
@@ -112,7 +113,11 @@ async def _emit(event: str, data: dict[str, Any]) -> None:
     terminal event delivered; otherwise it is the plain in-process emit.
     """
     try:
-        await _get_webhooks().publish(event, data)
+        # The worker and the recovery sweep both run with the job's tenant
+        # bound. Without it ``publish`` falls back to ``default``: the owning
+        # tenant's subscribers got nothing and the default tenant's got the
+        # answer of every other tenant's run.
+        await _get_webhooks().publish(event, data, tenant_id=get_current_tenant_id())
     except Exception as exc:
         logger.warning("agent_run_webhook_failed event=%s error=%s", event, exc)
 

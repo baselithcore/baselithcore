@@ -246,3 +246,54 @@ class TestConversationHistory:
         history = context["recent_history"]
         assert history.startswith('<untrusted_tool_output tool="conversation_history">')
         assert history.count(UNTRUSTED_CLOSE_TAG) == 1
+
+
+class TestScanOffload:
+    """Large scans leave the event loop; the rendered text is the same."""
+
+    @staticmethod
+    def _results(size: int) -> list:
+        from types import SimpleNamespace
+
+        return [
+            SimpleNamespace(document=SimpleNamespace(id=f"d{i}", content="x" * size))
+            for i in range(3)
+        ]
+
+    @pytest.mark.parametrize("size", [10, 5_000])
+    async def test_context_matches_the_sync_renderer(self, size: int) -> None:
+        from baselith.core.orchestration.handlers import rag
+
+        results = self._results(size)
+
+        assert await rag.render_rag_context_async(results) == rag.render_rag_context(
+            results
+        )
+
+    @pytest.mark.parametrize("history", ["", "user: hi", "user: " + "y" * 5_000])
+    async def test_prompt_matches_the_sync_builder(self, history: str) -> None:
+        from baselith.core.orchestration.handlers import rag
+
+        assert await rag.build_rag_user_prompt_async(
+            "ctx", "q?", history
+        ) == rag.build_rag_user_prompt("ctx", "q?", history)
+
+    async def test_only_large_inputs_take_a_thread(self, monkeypatch) -> None:
+        import threading
+
+        from baselith.core.orchestration.handlers import rag
+
+        main = threading.get_ident()
+        seen: list[bool] = []
+        original = rag.render_rag_context
+
+        def spy(results: list) -> str:
+            seen.append(threading.get_ident() == main)
+            return original(results)
+
+        monkeypatch.setattr(rag, "render_rag_context", spy)
+
+        await rag.render_rag_context_async(self._results(10))
+        await rag.render_rag_context_async(self._results(5_000))
+
+        assert seen == [True, False]

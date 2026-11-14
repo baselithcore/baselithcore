@@ -14,6 +14,7 @@ from baselith.core.cli.commands.doctor_llm import (
     check_llm_local_endpoints,
 )
 from baselith.core.cli.commands.doctor_migrations import check_migrations_mode
+from baselith.core.cli.commands.doctor_updates import check_updates
 from baselith.core.cli.ui import Timer, console, print_header, print_timing
 
 _ENV_CONFIG_MARKERS = checks._ENV_CONFIG_MARKERS
@@ -87,6 +88,7 @@ def run_checks(include_plugins: bool = True) -> list[CheckResult]:
         check_graph_db(),
         check_telemetry(),
         check_migrations_mode(),
+        check_updates(),
     ]
     if not include_plugins:
         return core_checks

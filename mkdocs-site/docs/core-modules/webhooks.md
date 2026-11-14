@@ -132,6 +132,14 @@ endpoint = await service.register_endpoint(
 await service.emit("chat.completed", {"conversation_id": "c1"}, tenant_id="acme")
 ```
 
+`tenant_id` selects whose endpoints receive the event and defaults to
+`"default"`. A caller running on behalf of a tenant must pass it
+(`get_current_tenant_id()` inside a request or a job): omitting it delivers
+that tenant's payload to the default tenant's subscribers instead.
+`parse_signature_header` (`baselith/core/webhooks/signing.py`) returns the
+parsed `(timestamp, v1)` pair for callers that remember used signatures — the
+header grammar is lenient, so the raw string is not an identity.
+
 Framework components emit through the same seam:
 
 | Event | Emitted by | Payload highlights |

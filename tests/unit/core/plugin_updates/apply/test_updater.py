@@ -369,3 +369,76 @@ async def test_serve_prunes_old_runs_at_most_once_an_hour(
     )
     assert len(prunes) == 2  # at start, then once 3600 s had passed
     assert threading.main_thread().name not in prunes
+
+
+async def _serve_policy(
+    store: RunStore,
+    ex: Any,
+    stop: asyncio.Event,
+    root: Path,
+    runner: Any,
+    **kw: Any,
+) -> None:
+    await asyncio.wait_for(
+        serve(
+            config=CFG,
+            store=store,
+            executor=ex,
+            overlay_root=root,
+            core_version="1.50.0",
+            stop=stop,
+            policy_runner=runner,
+            **kw,
+        ),
+        timeout=10,
+    )
+
+
+async def test_run_started_in_window_is_not_aborted_when_window_closes(
+    tmp_path: Path,
+) -> None:
+    from ._policy_env import OUT, cand, make_runner, report
+
+    runner, env = make_runner(tmp_path, report([cand()]))
+    stop = asyncio.Event()
+
+    async def slow(ex: _Ex, r: ApplyRun) -> ApplyRun:
+        ex.store.transition(r.id, RunState.PREPARING)
+        env.clock[0] = OUT  # the window closes while the run is in flight
+        await asyncio.sleep(0.05)
+        ex.stop.set()
+        return ex.store.transition(r.id, RunState.SUCCEEDED)
+
+    ex = _Ex(env.store, stop, slow)
+    await _serve_policy(
+        env.store,
+        ex,
+        stop,
+        tmp_path / "root",
+        runner,
+        wall_clock=lambda: env.clock[0],  # the updater reads the same clock
+    )
+    (run,) = env.store.runs()
+    assert run.state is RunState.SUCCEEDED and run.requested_by == "policy:auto-patch"
+    assert ex.calls == ["execute"]
+
+
+async def test_tick_exception_does_not_stop_serve(tmp_path: Path) -> None:
+    store = RunStore(tmp_path)
+    run = _create(store)
+    stop = asyncio.Event()
+
+    class _Broken:
+        calls = 0
+
+        async def tick(self) -> list[str]:
+            _Broken.calls += 1
+            raise RuntimeError("policy exploded")
+
+    async def ok(ex: _Ex, r: ApplyRun) -> ApplyRun:
+        ex.stop.set()
+        return ex.store.transition(r.id, RunState.SUCCEEDED)
+
+    await _serve_policy(store, _Ex(store, stop, ok), stop, tmp_path, _Broken())
+    assert _Broken.calls == 1
+    assert store.get(run.id).state is RunState.SUCCEEDED

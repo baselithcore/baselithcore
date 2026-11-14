@@ -77,9 +77,19 @@ async def notify_resumed_completion(checkpoint: Any, result: Any) -> bool:
     if notifier is None:
         logger.warning("run_completion_notifier_unknown kind=%s", kind)
         return False
+    # The sweep has already left the run's tenant scope by the time it calls
+    # this, so the notifier is re-bound to the checkpoint's owner: a webhook
+    # or tracker write made here must land in the tenant that ran the job.
+    from baselith.core.context import reset_tenant_context, set_tenant_context
+
+    tenant_id = getattr(checkpoint, "tenant_id", None)
+    token = set_tenant_context(tenant_id) if tenant_id else None
     try:
         await notifier(spec, result)
     except Exception as exc:
         logger.warning("run_completion_notify_failed kind=%s error=%s", kind, exc)
         return False
+    finally:
+        if token is not None:
+            reset_tenant_context(token)
     return True

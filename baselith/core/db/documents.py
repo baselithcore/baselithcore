@@ -6,6 +6,7 @@ Provides functions for building and retrieving document-level feedback statistic
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -36,6 +37,9 @@ SUMMARY_CACHE_TTL = _app_config.feedback_summary_cache_ttl
 # is deterministic, so retrying it just multiplies the latency and the pool
 # checkouts before failing the request anyway.
 RETRYABLE_DB_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
+
+#: Feedback rows above which the summary aggregation leaves the event loop.
+_STATS_OFFLOAD_ROWS = 500
 
 # The rollup sits on the RAG hot path (retrieval_scoring.apply_feedback) and
 # aggregates up to ANALYTICS_DOC_SCAN_LIMIT rows in Python. Cache it per
@@ -245,7 +249,12 @@ async def _build_summary(
 
     rows = await fetch_document_feedback_rows(tenant_id, since)
 
-    document_stats, alias_map = build_document_stats(rows)
+    # Pure CPU over up to the scan cap of rows (~90 ms at 10k): off the loop
+    # once it is big enough to be felt, inline when a thread hop costs more.
+    if len(rows) > _STATS_OFFLOAD_ROWS:
+        document_stats, alias_map = await asyncio.to_thread(build_document_stats, rows)
+    else:
+        document_stats, alias_map = build_document_stats(rows)
 
     summary: dict[str, dict[str, Any]] = {}
     for primary_key, entry in document_stats.items():

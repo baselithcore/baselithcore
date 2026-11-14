@@ -14,6 +14,7 @@ from baselith.core.cache.protocols import TTLCacheProtocol
 from baselith.core.config.storage import get_storage_config
 from baselith.core.context import get_tenant_or_default
 from baselith.core.observability.logging import get_logger
+from baselith.core.optimization._cache_json import _dumps, _loads
 
 if TYPE_CHECKING:
     from baselith.core.services.vectorstore.service import VectorStoreService
@@ -115,7 +116,7 @@ class RedisCache:
             data = await self._client.get(full_key)
             if data:
                 try:
-                    return json.loads(str(data))
+                    return _loads(str(data))
                 except json.JSONDecodeError:
                     return data
             return None
@@ -139,7 +140,7 @@ class RedisCache:
             full_key = self._make_key(key)
             # Serialize complex objects to JSON
             if isinstance(value, (dict, list, bool, int, float)):
-                serialized = json.dumps(value)
+                serialized = _dumps(value)
             else:
                 serialized = str(value)
 
@@ -189,7 +190,7 @@ class RedisCache:
                     results.append(None)
                     continue
                 try:
-                    results.append(json.loads(str(data)))
+                    results.append(_loads(str(data)))
                 except json.JSONDecodeError:
                     results.append(data)
             return results
@@ -224,7 +225,7 @@ class RedisCache:
             for key, value in items:
                 full_key = self._make_key(key)
                 if isinstance(value, (dict, list, bool, int, float)):
-                    serialized = json.dumps(value)
+                    serialized = _dumps(value)
                 else:
                     serialized = str(value)
                 pipe.set(full_key, serialized, ex=effective_ttl)

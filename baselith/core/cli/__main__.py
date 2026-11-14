@@ -33,6 +33,7 @@ from baselith.core.cli.handlers import (
     cmd_shell,
     cmd_test,
     cmd_up,
+    cmd_update,
     cmd_verify,
     cmd_workflow,
     run_command,
@@ -70,7 +71,7 @@ COMMANDS_MAP = {
     "SCAFFOLDING": ["init", "setup", "plugin"],
     "DEVELOPMENT": ["run", "up", "shell", "docs", "workflow"],
     "SYSTEM & HEALTH": ["doctor", "verify", "info", "config"],
-    "INFRASTRUCTURE": ["db", "cache", "queue", "plugin-updater"],
+    "INFRASTRUCTURE": ["db", "cache", "queue", "plugin-updater", "update"],
     "QUALITY & TESTS": ["test", "lint"],
 }
 
@@ -91,6 +92,7 @@ COMMAND_HANDLERS_MAP: dict[str, Any] = {
     "cache": lambda *args, **kwargs: cmd_cache(*args, **kwargs),
     "queue": lambda *args, **kwargs: cmd_queue(*args, **kwargs),
     "plugin-updater": lambda *args, **kwargs: cmd_plugin_updater(*args, **kwargs),
+    "update": lambda *args, **kwargs: cmd_update(*args, **kwargs),
     "workflow": lambda *args, **kwargs: cmd_workflow(*args, **kwargs),
     "docs": lambda *args, **kwargs: cmd_docs(*args, **kwargs),
     "doctor": lambda *args, **kwargs: cmd_doctor(*args, **kwargs),
@@ -318,6 +320,29 @@ def _register_plugin_clis(subparsers: Any, formatter_class: Any) -> None:
             _debug_log(f"failed to register plugin CLI '{plugin_path.name}': {e!r}")
 
 
+#: Commands that must never execute plugin code: the operator runs them when
+#: a plugin is broken or mid-update.
+_PLUGIN_FREE_COMMANDS = frozenset({"plugin-updater", "update"})
+
+
+def _skips_plugin_clis(argv: list[str]) -> bool:
+    """Return True when the command named by ``argv`` must not load plugin CLIs.
+
+    Only the first positional token counts (the global ``--format`` and its
+    value are skipped), so the name appearing as an unrelated argument does
+    not trigger it.
+    """
+    words = iter(argv)
+    for word in words:
+        if word == "--format":
+            next(words, None)
+            continue
+        if word.startswith("-"):
+            continue
+        return word in _PLUGIN_FREE_COMMANDS
+    return False
+
+
 def main() -> int:
     """Main CLI entry point."""
     # Before anything else: if we are standing in a source checkout but the
@@ -379,7 +404,7 @@ def main() -> int:
             _debug_log(f"failed to register command '{cmd_name}': {e!r}")
 
     # Dynamic Plugin CLI registration
-    if "plugin-updater" not in sys.argv:
+    if not _skips_plugin_clis(sys.argv[1:]):
         _register_plugin_clis(subparsers, formatter_class)
 
     # Make --format usable before or after any (sub)command token.

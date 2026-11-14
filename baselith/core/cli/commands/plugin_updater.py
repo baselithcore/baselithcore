@@ -22,8 +22,12 @@ import signal
 import sys
 from pathlib import Path
 
-from baselith.core.config.plugin_update_apply import get_update_apply_config
+from baselith.core.config.plugin_update_apply import (
+    UpdateApplyConfig,
+    get_update_apply_config,
+)
 from baselith.core.plugin_updates.apply.models import RunKind, RunState
+from baselith.core.plugin_updates.apply.policy_runner import PolicyRunner
 from baselith.core.plugin_updates.apply.store import (
     RunConflict,
     RunStateConflict,
@@ -74,7 +78,9 @@ def register_parser(
     )
     rollback.add_argument("plugin")
     resolve = sub.add_parser(
-        "resolve", help="Release a rollback_failed run", formatter_class=formatter_class
+        "resolve",
+        help="Release a rollback_failed run, or close a stuck finalizing one",
+        formatter_class=formatter_class,
     )
     resolve.add_argument("run_id")
     return parser
@@ -209,19 +215,26 @@ def _resolve(kwargs: dict[str, object]) -> int:
         return 1
     actor = _operator()
     try:
-        store.transition(
-            run.id,
-            RunState.FAILED,
-            actor=actor,
-            message="resolved by operator",
-            expect=RunState.ROLLBACK_FAILED,
-        )
+        if run.state is RunState.FINALIZING:
+            from baselith.core.plugin_updates.apply.reconcile import close_finalizing
+
+            done = close_finalizing(
+                store, run, actor=actor, reason="resolved by operator"
+            )
+        else:
+            done = store.transition(
+                run.id,
+                RunState.FAILED,
+                actor=actor,
+                message="resolved by operator",
+                expect=RunState.ROLLBACK_FAILED,
+            )
     except RunStateConflict as exc:
-        _err(f"run {run.id} is {exc.actual.value}, not rollback_failed")
+        _err(f"run {run.id} is {exc.actual.value}, not rollback_failed or finalizing")
         return 1
     store.clear_expectation(run.plugin, run.id)
     _audit("resolve", run.id, run.plugin, actor)
-    print(f"{run.id} resolved; {run.plugin} is free for new runs")
+    print(f"{run.id} resolved ({done.state.value}); {run.plugin} is free for new runs")
     return 0
 
 
@@ -251,6 +264,17 @@ def _status(fmt: str) -> int:
     return 0
 
 
+def _policy_runner(config: UpdateApplyConfig, store: RunStore) -> PolicyRunner | None:
+    """The auto-apply runner; None (auto-apply off) when it cannot be built."""
+    from baselith.core.plugin_updates.apply._policy_live import build_policy_runner
+
+    try:
+        return build_policy_runner(config, store)
+    except Exception as exc:  # fail closed: the updater still serves manual runs
+        logger.warning("update_policy_unavailable error=%s", type(exc).__name__)
+        return None
+
+
 def _serve() -> int:
     from baselith.core._core_version import CORE_VERSION
 
@@ -258,17 +282,19 @@ def _serve() -> int:
 
     async def main() -> None:
         executor, root = build_executor(config)
+        store = RunStore(config.state_dir)
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
         await serve(
             config=config,
-            store=RunStore(config.state_dir),
+            store=store,
             executor=executor,
             overlay_root=root,
             core_version=CORE_VERSION,
             stop=stop,
+            policy_runner=_policy_runner(config, store),
         )
 
     try:

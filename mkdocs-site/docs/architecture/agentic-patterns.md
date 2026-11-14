@@ -161,7 +161,10 @@ safe_output = output.filtered_output
     around a stream handler (`baselith/core/orchestration/mixins/_streaming.py`) —
     filters streamed chunks through `guard_stream`
     (`baselith/core/orchestration/stream_guard.py`) with a holdback window, so
-    redaction patterns split across chunk boundaries are still caught. The
+    redaction patterns split across chunk boundaries are still caught (the window
+    is re-filtered every 64 characters, not every chunk); a token still growing
+    at the live edge and an open private-key block are held whole, so secrets
+    longer than the window are redacted as well. The
     inbound gate (`guard_input_async`) also layers **content moderation**
     (`baselith/core/guardrails/moderation.py`, fail-open) on top of the regex guard
     when `BASELITH_MODERATION_PROVIDER` names a provider; a surface that
@@ -182,11 +185,13 @@ safe_output = output.filtered_output
     (`wrap_untrusted`, tool name `document_retrieval`); the `Source [id]:`
     label stays outside the envelope so answers can still cite it. The
     system prompt carries `RAG_CONTEXT_IS_DATA_RULE`. Recalled memories are
-    scanned too and injected as one `memory_recall` envelope, and replayed
+    scanned too and injected as one `memory_recall` envelope (the swarm sub-task prompt included), and replayed
     conversation history (`history_text` in the RAG prompt,
     `recent_history` on the context) as one `conversation_history` envelope
     via `render_history_context`. A poisoned document, memory or earlier turn
-    therefore reaches the model as quoted data, never as an instruction. See
+    therefore reaches the model as quoted data, never as an instruction. The
+    scans are pure CPU, so past 2 048 characters of chunks or history the
+    handler runs them in a worker thread rather than on the event loop. See
     [Orchestration › Untrusted-output envelope](../core-modules/orchestration.md#untrusted-output-envelope).
     Queries are embedded with the index's own model
     (`VectorStoreConfig.embedding_model`), through the remote embedding server
@@ -463,7 +468,8 @@ Other interaction primitives on `HumanIntervention`: `ask_input()`,
     (persist `awaiting_approval`, raise `ApprovalPendingError`, resume via
     the `/approvals` API) — the same contract for the ReAct autonomy gate and
     for `HUMAN` nodes in workflow graphs (`WorkflowBuilder.human(...)`, which
-    fail **closed** without a checkpoint). See
+    fail **closed** without a checkpoint). A tool approval is bound to the
+    digest of the call's arguments, so it covers that call and no other. See
     [Orchestration › Durable approvals](../core-modules/orchestration.md#durable-human-in-the-loop-approvals-pause-decide-resume)
     and [Workflows › Human approval gates](../core-modules/workflows.md#human-approval-gates-human-nodes).
 
@@ -989,7 +995,7 @@ live under `baselith/core/` and stay out of the way of plugin code.
 | Workflow-as-handler bridge (durable node replay, `HUMAN` approval gates, crews/colonies as nodes, first-class intent registration) | `baselith/core/workflows/flow_handler.py`, `baselith/core/workflows/executor.py`, `baselith/core/workflows/adapters.py` | `Orchestrator.register_workflow`, `WorkflowFlowHandler`, `WorkflowExecutor.execute(checkpoint=...)`, `WorkflowBuilder.human`, `CrewNodeAdapter`, `ColonyNodeAdapter` | [Workflow Engine](../core-modules/workflows.md#orchestrator-bridge-workflowflowhandler) |
 | Declarative agent spec | `baselith/core/orchestration/contract.py` | `AgentContract`, `ContractValidator`, `load_contract` | [Orchestration](../core-modules/orchestration.md) |
 | Autonomy spectrum (incl. `self_modify` category) | `baselith/core/orchestration/autonomy.py` | `AutonomyLevel`, `AutonomyPolicy`, `AutonomyUpgradeGate`, `enforce_approval`, `ApprovalRequiredError`, `SELF_MODIFY` | [Orchestration](../core-modules/orchestration.md) |
-| Tool-invocation chokepoint (contract → autonomy → budget → rate limit → pre-hooks; audited) | `baselith/core/orchestration/enforcement.py`, `hooks.py`, `rate_limit.py` | `enforce_tool_invocation`, `ToolHookRegistry`, `get_tool_hook_registry`, `ToolRateLimiter` | [Orchestration](../core-modules/orchestration.md#tool-hooks-hookspy) |
+| Tool-invocation chokepoint (contract → autonomy → budget → rate limit → pre-hooks; audited; every tool loop goes through it: Agent, ReAct, `ParallelToolExecutor`, workflow `TOOL` nodes) | `baselith/core/orchestration/enforcement.py`, `hooks.py`, `rate_limit.py` | `enforce_tool_invocation`, `ToolHookRegistry`, `get_tool_hook_registry`, `ToolRateLimiter` | [Orchestration](../core-modules/orchestration.md#tool-hooks-hookspy) |
 | Indirect-injection scan of tool observations (on by default; kill switch `BASELITH_INDIRECT_SCAN_TOOL_OUTPUT`) | `baselith/core/orchestration/tool_output.py`, `baselith/core/guardrails/indirect.py` | `sanitize_tool_output`, `scan_external_content` | [Guardrails](../core-modules/guardrails.md#indirect-injection-scanning) |
 | Untrusted-output envelope (provenance boundary the model is told to distrust; **not idempotent** — one seam only) | `baselith/core/orchestration/tool_output.py` | `wrap_untrusted`, `unwrap_untrusted`, `escape_untrusted_markers`, `UNTRUSTED_OUTPUT_SYSTEM_RULE` | [Orchestration](../core-modules/orchestration.md#untrusted-output-envelope) |
 | Neutral message history (tool-call correlation, `is_error`, verbatim thinking, stable cache prefix) | `baselith/core/services/llm/messages.py`, `message_runtime.py` | `Message`, `ToolUseBlock`, `ToolResultBlock`, `ThinkingBlock`, `to_anthropic`, `to_openai`, `message_from_result`, `render_as_prompt`, `MessageCapableProvider` | [Neutral Message API](../core-modules/messages.md) |

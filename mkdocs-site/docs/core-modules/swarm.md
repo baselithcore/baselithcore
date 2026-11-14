@@ -46,7 +46,7 @@ baselith/core/swarm/
 baselith/core/orchestration/handlers/
 ├── swarm_handler.py        # Orchestration with Dynamic Personas
 ├── swarm_colony.py         # Per-request / per-tenant Colony ownership
-├── swarm_agents.py         # VirtualAgentSpec, default roster, memory/persona resolution
+├── swarm_agents.py         # VirtualAgentSpec, default roster, memory/persona resolution (recalled memory scanned and sealed as untrusted data)
 └── simulation_handler.py   # Multi-turn Scenario Simulation
 
 baselith/core/memory/
@@ -71,6 +71,14 @@ task = Task(
     context_requirements={"depth": "semantic"}
 )
 ```
+
+Recalled memories are whatever an earlier run, document or tool put into the
+store, so they are not operator text: each is scanned for indirect prompt
+injection and the list is sealed in an `<untrusted_tool_output
+tool="memory_recall">` envelope (any marker inside it is escaped), introduced by
+the one-sentence rule telling the model the envelope is data it must not obey.
+The same helper (`render_memory_context`) serves the orchestrator's own context
+assembly.
 
 ### GraphRAG & Entity Relationships
 

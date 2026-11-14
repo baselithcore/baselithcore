@@ -14,6 +14,7 @@ for the client to demultiplex.
 from __future__ import annotations
 
 import asyncio
+import itertools
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -49,6 +50,8 @@ class Subscription:
     list_changed: set[str] = field(default_factory=set)
     resource_uris: set[str] = field(default_factory=set)
     closed: asyncio.Event = field(default_factory=asyncio.Event)
+    #: Server-minted identity, set when the hub registers the stream.
+    key: int = -1
 
     def wants(self, method: str, uri: str | None = None) -> bool:
         if method == RESOURCES_UPDATED:
@@ -71,7 +74,12 @@ class SubscriptionHub:
     """Fan-out of change notifications to the streams that asked for them."""
 
     def __init__(self) -> None:
-        self._subscriptions: dict[Any, Subscription] = {}
+        # Keyed by a server-minted number, never by the caller's JSON-RPC id:
+        # ids are chosen by each client (``1`` is the common one), so keyed on
+        # them one client's ``listen`` replaced another tenant's stream and its
+        # disconnect closed the other's. The caller's id is only echoed back.
+        self._subscriptions: dict[int, Subscription] = {}
+        self._sequence = itertools.count()
 
     def open(
         self, subscription_id: Any, send: Sender, notifications: dict[str, Any]
@@ -87,7 +95,8 @@ class SubscriptionHub:
             },
             resource_uris=set(notifications.get("resourceSubscriptions") or []),
         )
-        self._subscriptions[subscription_id] = subscription
+        subscription.key = next(self._sequence)
+        self._subscriptions[subscription.key] = subscription
         logger.info(
             "mcp_subscription_opened",
             subscription_id=subscription_id,
@@ -95,15 +104,25 @@ class SubscriptionHub:
         )
         return subscription
 
-    def close(self, subscription_id: Any) -> None:
-        subscription = self._subscriptions.pop(subscription_id, None)
-        if subscription is not None:
+    def close(self, target: Any) -> None:
+        """Close one stream (a :class:`Subscription`), or every stream whose
+        client-chosen id is ``target`` (for an operator who only has the id)."""
+        if isinstance(target, Subscription):
+            doomed = [target] if target.key in self._subscriptions else []
+        else:
+            doomed = [
+                s for s in self._subscriptions.values() if s.subscription_id == target
+            ]
+        for subscription in doomed:
+            self._subscriptions.pop(subscription.key, None)
             subscription.closed.set()
-            logger.info("mcp_subscription_closed", subscription_id=subscription_id)
+            logger.info(
+                "mcp_subscription_closed", subscription_id=subscription.subscription_id
+            )
 
     def close_all(self) -> None:
-        for subscription_id in list(self._subscriptions):
-            self.close(subscription_id)
+        for subscription in list(self._subscriptions.values()):
+            self.close(subscription)
 
     @property
     def active(self) -> int:
@@ -139,7 +158,7 @@ class SubscriptionHub:
                     subscription_id=subscription.subscription_id,
                     error=str(exc),
                 )
-                self.close(subscription.subscription_id)
+                self.close(subscription)
 
     async def acknowledge(self, subscription: Subscription) -> None:
         """Send the mandatory first message of a subscription's stream."""
@@ -176,7 +195,7 @@ class SubscriptionHandlerMixin:
         try:
             await subscription.closed.wait()
         finally:
-            self._subscriptions.close(subscription_id)
+            self._subscriptions.close(subscription)
         return {"_meta": {SUBSCRIPTION_ID_KEY: subscription_id}}
 
     async def notify_tools_changed(self) -> None:

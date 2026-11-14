@@ -94,3 +94,56 @@ def test_invalid_server_names_are_refused(bad: str) -> None:
 def test_plain_string_tools_still_compose() -> None:
     [d] = make_mcp_tool_fns(_Pool(), "s", ["plain"])  # type: ignore[arg-type]
     assert d.name == "s.plain"
+
+
+def test_schema_prose_is_cleaned_but_structure_is_kept() -> None:
+    """Regression: a property description, title or enum value skipped the cleaner."""
+    schema = {
+        "type": "object",
+        "required": ["city"],
+        "properties": {
+            "city": {
+                "type": "string",
+                "title": "City‮",
+                "description": "Name.​ " + "A" * 5000,
+                "enum": ["paris", "ro​me"],
+                "default": "paris",
+            },
+            "description": {"type": "integer"},  # a property that is NAMED description
+        },
+    }
+    [d] = make_mcp_tool_fns(
+        _Pool(),
+        "ghost",
+        _tools(MCPToolInfo("t", "d", schema)),  # type: ignore[arg-type]
+    )
+    params = d.parameters
+    assert params is not None
+    city = params["properties"]["city"]
+
+    assert params["required"] == ["city"] and city["type"] == "string"
+    assert "‮" not in city["title"] and "​" not in city["description"]
+    assert len(city["description"]) <= 500
+    assert city["enum"] == ["paris", "rome"]
+    assert city["default"] == "paris"
+    assert params["properties"]["description"] == {"type": "integer"}
+
+
+def test_schema_walk_is_bounded() -> None:
+    deep: dict[str, Any] = {"type": "object"}
+    node = deep
+    for _ in range(50):
+        node["properties"] = {"x": {"type": "object"}}
+        node = node["properties"]["x"]
+    wide = {
+        "type": "object",
+        "properties": {f"p{i}": {"type": "string"} for i in range(5000)},
+    }
+
+    [d1, d2] = make_mcp_tool_fns(
+        _Pool(),
+        "ghost",
+        _tools(MCPToolInfo("a", "d", deep), MCPToolInfo("b", "d", wide)),  # type: ignore[arg-type]
+    )
+    assert d1.parameters is not None and d2.parameters is not None
+    assert len(d2.parameters["properties"]) < 5000

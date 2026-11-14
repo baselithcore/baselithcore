@@ -46,6 +46,8 @@ class TestIpIsInternal:
             "::ffff:127.0.0.1",
             "not-an-ip",  # unparseable = fail-closed
             "100.64.0.1",  # RFC 6598 CGNAT
+            "168.63.129.16",  # Azure WireServer (public address, host-local)
+            "fec0::1",  # deprecated IPv6 site-local
             "100.127.255.254",  # RFC 6598 CGNAT
             "192.88.99.1",  # Deprecated 6to4 relay anycast
         ],

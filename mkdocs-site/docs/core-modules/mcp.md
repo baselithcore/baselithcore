@@ -645,7 +645,10 @@ The first message is always `notifications/subscriptions/acknowledged`, whose
 `notifications` field reports the subset the server actually honours. Every
 message on the stream carries `io.modelcontextprotocol/subscriptionId` in
 `_meta` — the JSON-RPC id of the listen request — because on stdio all
-subscriptions share one channel and the client must demultiplex them.
+subscriptions share one channel and the client must demultiplex them. That id
+is chosen by the client and is only echoed back: the server keys each stream by
+an identity it mints itself, so two clients that both send `id: 1` never replace
+each other's stream, and one disconnecting never closes the other's.
 
 Registering a tool, resource, template or prompt — or removing a tool with
 `server.unregister_tool(name)`, which returns whether the tool existed —
@@ -1075,7 +1078,12 @@ Safety posture, in order:
   (`ValueError` otherwise); a tool whose name is not `[A-Za-z0-9_.-]{1,64}`, or
   repeats an earlier one, is skipped; descriptions lose control and bidi
   characters, pass through `scan_external_content` with sanitising on, and are
-  capped at 2000 characters.
+  capped at 2000 characters. The tool's `inputSchema` is shown to the model as
+  its parameters, so its free-text slots get the same treatment: every
+  `description`, `title`, `$comment`, `default`, `const` and `enum` string is
+  cleaned and cut at 500 characters, while the structure (`type`, `properties`,
+  `required`) is left alone so argument validation still works. The walk is
+  bounded to 8 levels and 2000 nodes; what lies beyond is dropped.
 
 ### Tool execution errors
 
@@ -1126,7 +1134,9 @@ sanitizing by default; `BASELITH_SANITIZE_EXTERNAL_CONTENT=false` for log-only.
 an embedded `resource` part, and the `contents` of `resources/read`. Only a
 lone text item used to be scanned, so text beside an image — or a second text
 part — reached the model unscanned. Binary parts (`image`, `audio`, `blob`)
-pass through untouched. See [Guardrails](guardrails.md).
+pass through untouched. The text of an `isError: true` result gets the same scan
+and is cut to 2000 characters on one line before it becomes the `MCPToolError`
+message, since that message is shown to the model. See [Guardrails](guardrails.md).
 
 A tool's `structuredContent` gets the same treatment
 (`scan_structured_content`): it used to be returned unscanned, so a server

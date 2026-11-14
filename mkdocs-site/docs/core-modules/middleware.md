@@ -82,6 +82,7 @@ from baselith.core.middleware import (
     SecurityHeadersMiddleware, RequestSizeLimitMiddleware,
     RateLimiter, rate_limiter,
     require_user, require_admin, require_admin_or_job,
+    require_scope, enforce_scoped_capability,
     verify_admin_password, verify_admin_password_async, check_admin_lockout,
     record_admin_failure, clear_admin_failures,
     # CSRF / idempotency

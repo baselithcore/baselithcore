@@ -19,15 +19,16 @@ laziness decides what connects.
 ## Import-time laziness
 
 A package whose `__init__.py` imports every submodule makes the cost of
-touching *any* of its names the cost of *all* of them. `baselith.core.plugins` and
-`baselith.core.orchestration` both did, and the bill landed on code that wanted one
-small thing:
+touching *any* of its names the cost of *all* of them. `baselith.core.plugins`,
+`baselith.core.orchestration` and `baselith.core.optimization` all did, and the bill
+landed on code that wanted one small thing:
 
 | Import | Before | After |
 | --- | --- | --- |
 | `import baselith` | 79 modules | 79 modules |
 | `from baselith.core.plugins import SkillResult` | 955 modules, 0.36 s | 226 modules, 0.05 s |
 | `from baselith.core.orchestration import AutonomyPolicy` | 3 209 modules | 95 modules |
+| `from baselith.core.optimization.caching import RedisCache` | 870 modules, 0.31 s | 646 modules, 0.18 s |
 | `from baselith.core.agent import Agent` | 3 209 modules, 0.61 s | 1 107 modules, 0.28 s |
 
 `SkillResult` is four Pydantic fields. Reaching it imported the plugin

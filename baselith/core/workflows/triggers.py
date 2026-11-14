@@ -24,7 +24,11 @@ from collections import OrderedDict
 
 from pydantic import SecretStr
 
-from baselith.core.webhooks.signing import SIGNATURE_HEADER, verify_signature
+from baselith.core.webhooks.signing import (
+    SIGNATURE_HEADER,
+    parse_signature_header,
+    verify_signature,
+)
 
 __all__ = [
     "MAX_TRIGGER_BODY_BYTES",
@@ -104,7 +108,12 @@ class TriggerVerifier:
             tolerance_seconds=self._tolerance,
         ):
             raise TriggerAuthError("invalid or expired signature")
-        key = f"{workflow_id}:{header}"
+        # Keyed on the parsed signature, not the raw header: the parser is
+        # lenient (extra parts, whitespace, reordering, ``t=0<ts>``), so one
+        # captured request had unlimited spellings that all verified and none
+        # of which matched the remembered string.
+        _, signature = parse_signature_header(header)
+        key = f"{workflow_id}:{(signature or header).lower()}"
         now = time.time()
         self._evict(now)
         if key in self._seen:

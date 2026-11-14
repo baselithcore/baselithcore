@@ -33,7 +33,13 @@ class HotReloadController:
     - Hot-reload individual plugins
     - Safe enable/disable with dependency checking
     - Resource cleanup on unload
-    - Rollback on failure
+
+    A reload is **not** transactional. The outgoing generation is disabled,
+    unloaded and its modules purged *before* the new one is enabled, so a
+    failed re-enable leaves the plugin not running: there is no rollback to the
+    previous generation. :meth:`reload_plugin` returns ``False`` in that case;
+    fix the plugin and reload again. (The signed plugin updater, not this
+    controller, is what swaps a plugin atomically and rolls back.)
     """
 
     def __init__(

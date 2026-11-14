@@ -117,7 +117,7 @@ class AuditMixin:
     def prune_finished(
         self, now: datetime | None = None, *, older_than: timedelta = RETENTION
     ) -> list[str]:
-        """Delete old finished runs (snapshot, journal, markers); the ids removed.
+        """Delete old finished runs (snapshot, journal, audit and meter marks); the ids removed.
 
         A run goes once it released its claim and was last updated more than
         ``older_than`` ago *and* is audited — or more than
@@ -144,6 +144,7 @@ class AuditMixin:
                 self._run_path(run.id).unlink(missing_ok=True)
                 self._log_path(run.id).unlink(missing_ok=True)
                 self._marker("audited", run.id).unlink(missing_ok=True)
+                self._marker("metered", run.id).unlink(missing_ok=True)
                 self.release_audit(run.id)
             removed.append(run.id)
         return removed

@@ -91,6 +91,26 @@ class ApplyBlocker(StrEnum):
     SIGNATURE_FAILED = "signature_failed"
     NEEDS_ENVIRONMENT_UPDATE = "needs_environment_update"
     HOST_BUILD_REQUIRED = "host_build_required"
+    #: Core only: no ``UPDATE_APPLY_BACKUP_COMMAND``; a core run needs a backup.
+    BACKUP_UNCONFIGURED = "backup_unconfigured"
+    #: Core only: no ``UPDATE_APPLY_UPDATER_RESTART_COMMAND``; a core run ends
+    #: with the updater restarting itself onto the new version.
+    UPDATER_RESTART_UNCONFIGURED = "updater_restart_unconfigured"
+    #: Core only: the checkout has tracked changes outside the ignored paths
+    #: (or its state cannot be read).
+    TREE_DIRTY = "tree_dirty"
+    #: Core only: the signed manifest says ``migrations: breaking``.
+    BREAKING_MIGRATION = "breaking_migration"
+    #: Core only: the release crosses a major version.
+    MAJOR_JUMP = "major_jump"
+    #: Core only: ``UPDATE_APPLY_CORE_ENABLED`` is off.
+    CORE_DISABLED = "core_disabled"
+    #: Core only: a host install the core driver cannot update (not a git
+    #: checkout, e.g. ``pip``).
+    CORE_INSTALL_UNSUPPORTED = "core_install_unsupported"
+    #: Core only: the installed public core is older than the release's signed
+    #: ``min_core_version`` (upgrade through an intermediate release first).
+    CORE_TOO_OLD = "core_too_old"
     RUN_ACTIVE = "run_active"
 
 
@@ -118,6 +138,9 @@ class ReleaseInfo(BaseModel):
     html_url: str = ""
     tarball_url: str | None = None
     release_json_url: str | None = None
+    #: API URL of the ``distribution-release.json`` asset (a distribution
+    #: release signed for one-click core installs), when the release has one.
+    distribution_manifest_url: str | None = None
     #: Login of the account that created the release (``author.login``).
     author: str | None = None
     #: Numeric id of that account (``author.id``).
@@ -213,12 +236,20 @@ class SystemUpdate(BaseModel):
 
 
 class CheckReport(BaseModel):
-    """Result of a full update check across plugins and the framework."""
+    """Result of a full update check across plugins and the framework.
+
+    ``system`` compares the public core release the tree contains with the
+    public core's releases. ``distribution`` (``component="distribution"``)
+    compares a downstream distribution's own version with that
+    distribution's releases; it is ``None`` in the public core, when its check
+    is off, and in every report saved before it existed.
+    """
 
     checked_at: datetime
     candidates: list[UpdateCandidate]
     error: str | None = None
     system: SystemUpdate | None = None
+    distribution: SystemUpdate | None = None
 
 
 __all__ = [

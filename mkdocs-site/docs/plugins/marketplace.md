@@ -50,8 +50,11 @@ baselith plugin marketplace info weather-agent
 baselith plugin marketplace install weather-agent
 baselith plugin marketplace install weather-agent --version v1.2.0
 
-# 4. Update an installed plugin to the latest version
-baselith plugin marketplace update weather-agent
+# 4. Update an installed plugin: `plugin marketplace update` is retired (it
+#    reinstalled the plugin and deleted its .env and state). See what is
+#    available, then pass the version and SHA-256 to the plugin updater:
+baselith update status
+baselith plugin-updater request weather-agent --version <v> --sha256 <sha>
 
 # 5. Remove a plugin from your system
 baselith plugin marketplace uninstall weather-agent

@@ -11,8 +11,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import ValidationError
 
+from baselith.core.auth.scopes import SCOPE_FEEDBACK_WRITE
 from baselith.core.context import get_current_tenant_id
-from baselith.core.middleware.security import require_admin, require_user
+from baselith.core.middleware.scope_gate import require_scope
+from baselith.core.middleware.security import require_admin
+from baselith.core.middleware.security import require_user as require_user
 from baselith.core.models.chat import FeedbackDocumentReference, FeedbackRequest
 from baselith.core.observability import telemetry
 from baselith.core.observability.logging import get_logger
@@ -74,7 +77,7 @@ def _normalize_sources_payload(raw_sources: Any) -> list[dict[str, Any]] | None:
 )
 async def feedback(
     payload: dict[str, Any] = Body(...),
-    _: str = Depends(require_user),
+    _: str = Depends(require_scope(SCOPE_FEEDBACK_WRITE)),
 ) -> dict[str, object]:
     """
     Records a feedback (positive|negative) for a generated response.

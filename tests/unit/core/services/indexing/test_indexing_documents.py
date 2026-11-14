@@ -117,7 +117,7 @@ async def test_index_documents_delete_stale(indexing_service, mock_vectorstore):
         stats = await indexing_service.index_documents(incremental=True)
 
         assert stats.deleted_documents == 1
-        mock_vectorstore.delete_document.assert_called_once_with("doc2")
+        mock_vectorstore.delete_documents.assert_called_once_with(["doc2"])
         assert "doc2" not in indexing_service.indexed_documents
 
 
@@ -274,7 +274,7 @@ def test_build_document_skips_empty_content():
 
 @pytest.mark.asyncio
 async def test_delete_stale_documents_error(indexing_service, mock_vectorstore):
-    mock_vectorstore.delete_document = AsyncMock(side_effect=Exception("Delete fail"))
+    mock_vectorstore.delete_documents = AsyncMock(side_effect=Exception("Delete fail"))
     # Hits lines 399-400
     deleted = await indexing_service._delete_stale_documents({"doc1"})
     assert deleted == 0
@@ -425,3 +425,53 @@ async def test_index_version_bumps_on_registry_change(
         await indexing_service.index_documents(incremental=True)
         assert indexing_service.index_version != v1
         assert indexing_service.indexed_count == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_stale_documents_batches_ids_and_keeps_failed_chunks(
+    indexing_service, mock_vectorstore, monkeypatch
+):
+    """One filtered delete per chunk; a failed chunk stays registered."""
+    from baselith.core.services.indexing import service as service_module
+    from baselith.core.services.indexing.state import IndexedDocument
+
+    monkeypatch.setattr(service_module, "_STALE_DELETE_CHUNK", 2)
+    ids = [f"doc{i}" for i in range(5)]
+    for doc_id in ids:
+        indexing_service._indexed_items[doc_id] = IndexedDocument(
+            fingerprint="f", metadata={}
+        )
+
+    async def delete(chunk):
+        if "doc0" in chunk:
+            raise RuntimeError("store down")
+
+    mock_vectorstore.delete_documents = AsyncMock(side_effect=delete)
+
+    deleted = await indexing_service._delete_stale_documents(set(ids))
+
+    calls = mock_vectorstore.delete_documents.call_args_list
+    assert len(calls) == 3
+    assert sorted(i for call in calls for i in call.args[0]) == ids
+    failed = next(call.args[0] for call in calls if "doc0" in call.args[0])
+    assert deleted == 5 - len(failed)
+    assert set(indexing_service._indexed_items) == set(failed)
+
+
+def test_the_registry_does_not_keep_reader_chunks():
+    """Pre-computed chunks repeat the document text; the registry drops them."""
+    from types import SimpleNamespace
+
+    from baselith.core.services.indexing._batch import _record_indexed
+
+    registry: dict = {}
+    item = SimpleNamespace(
+        uid="doc1",
+        fingerprint="abc",
+        metadata={"source": "a.pdf", "ingestion_chunks": [{"text": "x" * 10_000}]},
+    )
+
+    _record_indexed(item, registry)
+
+    assert registry["doc1"].metadata == {"source": "a.pdf"}
+    assert "ingestion_chunks" in item.metadata  # the item itself is untouched

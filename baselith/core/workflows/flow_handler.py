@@ -51,6 +51,7 @@ class WorkflowFlowHandler:
             self._workflow,
             initial_input=query,
             checkpoint=context.get("checkpoint"),
+            gate_context=context,
         )
         metadata = {
             "workflow": self._workflow.name,

@@ -66,3 +66,9 @@ class TestLazyPackage:
         from baselith.core.cli import main
 
         assert main is cli_main.main
+
+
+class TestUpdateCommandRegistered:
+    def test_update_is_a_core_command_with_a_handler(self):
+        assert "update" in cli_main.COMMANDS
+        assert "update" in cli_main.COMMAND_HANDLERS_MAP

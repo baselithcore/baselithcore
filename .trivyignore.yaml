@@ -72,7 +72,12 @@ vulnerabilities:
       default OCR backend then); exercised solely by mineru's own pipeline over
       local documents, under byte/page/time caps. The `huggingface` extra that
       core actually imports resolves transformers 5.12.1 (unaffected).
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-5241
     paths:
       - uv.lock
@@ -84,7 +89,12 @@ vulnerabilities:
       False and emits a security warning when enabled
       (baselith/core/config/services.py) — and the core huggingface branch resolves
       transformers 5.14.1, which carries the fix.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-9856
     paths:
       - uv.lock
@@ -100,7 +110,12 @@ vulnerabilities:
       resolution is gated on `extra == 'extra-13-baselith-core-mineru'`, and
       the other branch resolves transformers 5.14.1, which is above the 5.10.0
       fix. Re-argued together with the two entries above at the shared expiry.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
   - id: CVE-2026-80047
     paths:
       - uv.lock
@@ -117,7 +132,12 @@ vulnerabilities:
       did not flag. Re-argued with the entries above at the shared expiry:
       check the advisory for a first patched version and re-lock to it the day
       one exists.
-    expired_at: 2026-11-19
+      Re-argued 2026-11-13: mineru 4.2.1 (latest) lifts the transformers cap
+      (`torch` extra, transformers>=5.10.1) but still has no `pipeline` extra
+      and no `mineru.cli.common`/`do_parse`, so baselith/plugins/document_sources/
+      readers/ocr_mineru.py cannot move to it without a port; the 3.x line stays
+      capped at <5.0.0 and the argument above is unchanged.
+    expired_at: 2026-12-11
 
   # ----------------------------------------------------------------
   # accelerate 1.14.0 — present only with the `huggingface` extra installed
@@ -158,9 +178,12 @@ vulnerabilities:
       still "<= 1.14.0" with no fix, both upstream PRs remain closed unmerged,
       and 1.15.0 is still the latest release, without them. Reachability and
       blast radius are unchanged.
+      Re-argued 2026-11-13: unchanged. GHSA-4j2p-28q2-5m79 still lists
+      "<= 1.14.0" with no first patched version, PRs #4070 and #4138 are still
+      closed unmerged, and 1.15.0 is still the latest release.
       Re-argue at expiry: check the advisory for a first patched version and
       re-lock to it the day one exists.
-    expired_at: 2026-11-10
+    expired_at: 2026-12-11
 
   # ----------------------------------------------------------------
   # pip's own vendored tree — visible only since pip 26 ships an SBOM
@@ -173,11 +196,15 @@ vulnerabilities:
   # the scanner, which is the point of an SBOM.
   #
   # Re-checked 2026-11-05 against the PR #127 image scan, with every entry of
-  # this section already expired: the vendored msgpack (GHSA-6v7p-g79w-8964),
-  # the three vendored urllib3 advisories (CVE-2026-97687/-97688/-97689) and the
-  # second phantom-setuptools advisory (CVE-2026-59890) no longer reproduce, so
-  # their entries were dropped rather than renewed. Only CVE-2025-47273 still
-  # does.
+  # this section already expired: the vendored msgpack (GHSA-6v7p-g79w-8964) and
+  # the three vendored urllib3 advisories (CVE-2026-97687/-97688/-97689) no
+  # longer reproduce, so their entries were dropped rather than renewed.
+  # CVE-2025-47273 still does, and so does the second phantom-setuptools
+  # advisory, CVE-2026-59890: its entry was dropped too, wrongly. The PR image
+  # scan gates on HIGH,CRITICAL only and CVE-2026-59890 is MEDIUM, so that scan
+  # could never show it; the MEDIUM report pass of the release image on main
+  # (release-image.yml) reported it again on 2026-11-05 as code-scanning alert
+  # #384. Check a MEDIUM entry against that pass, not against the PR gate.
   #
   # Why pip is in the image at all, and cannot simply be dropped: the runtime
   # pip is what `baselith plugin deps install` runs, via `sys.executable -m
@@ -199,18 +226,65 @@ vulnerabilities:
       fixed in 78.1.1. There is nothing to upgrade, because setuptools 70.3.0
       is NOT INSTALLED: it appears only as a component of pip's vendored SBOM.
       pip lists it in _vendor/vendor.txt and bom.cdx.json as a build-time
-      requirement, but ships no code for it — verified on the image,
-      pip/_vendor/setuptools does not exist, and the base image has no
-      setuptools module at all. The only real setuptools in this image is the
-      one the Dockerfile installs into /install (>=83.0.0, well above the
-      78.1.1 fix), which Trivy reports separately from its own dist-info and
+      requirement, but ships only one file of it, pip/_vendor/pkg_resources/
+      __init__.py (the resource and entry-point helper). pip/_vendor/setuptools
+      does not exist, and the code this advisory concerns (PackageIndex) is
+      not in pip's tree; the base image has no setuptools module at all. The
+      only real setuptools in this image is the one the Dockerfile installs
+      into /install (>=84.1.0, well above the 78.1.1 fix), which Trivy reports
+      separately from its own dist-info and
       which is clean. So this is a scanner artifact of pip's SBOM, not an
       accepted risk — but it is kept on the same expiry as the entry above so
       both get re-checked together rather than decaying into a permanent mute.
       Re-argued 2026-11-05: still reported by the image scan, still a phantom
       (the finding carries no "(METADATA)" dist-info target, only pip's SBOM).
-      Re-evaluate at expiry by confirming pip still ships no setuptools code.
-    expired_at: 2026-11-19
+      Re-evaluate at expiry by confirming pip still ships neither a
+      setuptools/ package nor any of the code the advisories concern.
+      Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
+      still vendors setuptools only as an SBOM component; the image installs
+      its own setuptools >=84.1.0.
+      Re-argued 2026-11-14: unchanged, and the earlier "ships no code" wording
+      was too strong — pip 26.3 does ship pkg_resources/__init__.py from
+      setuptools 70.3.0, but it holds none of the code either advisory is
+      about (no PackageIndex, no FileList, no MANIFEST.in handling). Checked
+      by unpacking the pip 26.3 wheel, and reproduced with the pinned Trivy
+      0.71.0 on a venv holding pip 26.3: both advisories are reported against
+      "Python" with no entry, and none with this register.
+    expired_at: 2026-12-11
+  - id: CVE-2026-59890
+    statement: >-
+      The SECOND advisory against the same phantom setuptools 70.3.0, and the
+      reason this shape of entry will keep recurring: a MANIFEST.in exclusion
+      bypass in sdist via an NFC/NFD Unicode normalization collision on macOS
+      APFS/HFS+ (GHSA-h35f-9h28-mq5c), fixed in 83.0.0. Everything said for
+      CVE-2025-47273 above applies unchanged — the version comes from pip's
+      vendored SBOM, pip/_vendor/setuptools does not exist, and the only real
+      setuptools in the image is the one the Dockerfile installs into /install
+      at >=84.1.0, above this advisory's fixed version (83.0.0). The advisory
+      is also about building an sdist on macOS, which this Linux image does
+      not do.
+      Kept per-CVE rather than muting the package, deliberately: a
+      setuptools-wide mute would also hide findings against that real 83.0.0
+      copy, which is the one that could actually hurt. If a third phantom CVE
+      shows up, revisit the SHAPE of the exception rather than adding a fourth
+      — the honest fix would be Trivy learning that a vendored SBOM entry with
+      no code on disk is not an installed package.
+      Restored 2026-11-07 after a wrong removal: it is MEDIUM, so only the
+      report pass of the release image sees it, and that pass reported it again
+      on the v1.3.0 image. Same expiry as CVE-2025-47273, re-argued with it.
+      Re-argued 2026-11-13: unchanged. pip 26.3 is the latest release and
+      still vendors setuptools only as an SBOM component; the image installs
+      its own setuptools >=84.1.0.
+      Re-argued 2026-11-14, with code-scanning alert #384 still open on main:
+      that alert is the last release-image scan (2026-11-06), taken before this
+      entry was restored, and main does not carry the entry yet. Reproduced
+      with the pinned Trivy 0.71.0 on a venv holding pip 26.3 (the same
+      "Python" target, setuptools 70.3.0, MEDIUM): reported with the register
+      from main, not reported with this one. The alert closes by itself at the
+      first release-image scan from main after this entry lands there; it is
+      left open rather than dismissed by hand, because a dismissal is not tied
+      to the expiry below and could keep the finding hidden after it lapses.
+    expired_at: 2026-12-11
 # ==================================================================
 # Secret-scanner exceptions
 # ==================================================================

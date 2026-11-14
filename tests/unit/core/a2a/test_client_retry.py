@@ -13,7 +13,7 @@ from baselith.core.a2a.client import _is_retryable_error
 
 
 def _status_error(status: int) -> httpx.HTTPStatusError:
-    request = httpx.Request("POST", "http://peer/a2a/invoke")
+    request = httpx.Request("POST", "http://peer/a2a")
     response = httpx.Response(status, request=request)
     return httpx.HTTPStatusError("boom", request=request, response=response)
 

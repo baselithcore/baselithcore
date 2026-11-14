@@ -38,6 +38,10 @@ BUDGETS: dict[str, tuple[int, int]] = {
     "from baselith.core.plugins import SkillResult": (350, 226),
     "from baselith.core.orchestration import AutonomyPolicy": (200, 95),
     "from baselith.core.agent import Agent": (1500, 1107),
+    # The vector store's only use of the optimization package. An eager
+    # ``__init__`` made this 870 modules: the prompt compiler, the evaluation
+    # package and the guardrail pattern tables rode along with a Redis cache.
+    "from baselith.core.optimization.caching import RedisCache": (750, 646),
 }
 
 

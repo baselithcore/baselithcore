@@ -100,3 +100,102 @@ def test_factory_registers_updates_before_plugin_management() -> None:
     assert src.index("plugin_api_routers = [plugin_updates_router]") < src.index(
         "plugin_api_routers.append(plugin_management_router)"
     )
+
+
+class _PreflightService(_FakeService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[tuple[str, str | None]] = []
+
+    def preflight(self, subject: str, version: str | None = None) -> list[object]:
+        from baselith.core.plugin_updates.preflight import PreflightItem
+
+        self.asked.append((subject, version))
+        return [PreflightItem(code="ready", level="ok", message="go")]
+
+
+def test_preflight_route_serves_the_items(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    svc = _PreflightService()
+    monkeypatch.setattr(api_mod, "get_plugin_update_service", lambda: svc)
+    res = client.get(
+        "/api/plugins/updates/preflight", params={"subject": "core", "version": "1.4.0"}
+    )
+    assert res.status_code == 200
+    assert res.json() == [{"code": "ready", "level": "ok", "message": "go"}]
+    assert svc.asked == [("core", "1.4.0")]
+
+
+def test_preflight_route_without_service_is_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api_mod, "get_plugin_update_service", lambda: None)
+    res = client.get("/api/plugins/updates/preflight", params={"subject": "core"})
+    assert res.status_code == 503
+
+
+def test_preflight_route_needs_a_subject(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        api_mod, "get_plugin_update_service", lambda: _PreflightService()
+    )
+    assert client.get("/api/plugins/updates/preflight").status_code == 422
+
+
+def test_preflight_route_requires_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.include_router(api_mod.router)
+    monkeypatch.setattr(
+        api_mod, "get_plugin_update_service", lambda: _PreflightService()
+    )
+    res = TestClient(app).get(
+        "/api/plugins/updates/preflight", params={"subject": "core"}
+    )
+    assert res.status_code in (401, 403)
+
+
+async def test_service_preflight_reads_the_live_inputs(tmp_path, monkeypatch) -> None:
+    """The real service: a known candidate, no updater: blocks, never raises."""
+    from baselith.core.config.plugin_updates import PluginUpdateConfig
+    from baselith.core.plugin_updates import _preflight_live
+    from baselith.core.plugin_updates import service as svc_mod
+
+    def no_redis() -> int:
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(_preflight_live, "queue_jobs", no_redis)
+    svc = svc_mod.PluginUpdateService(
+        PluginUpdateConfig(sources_file=None, cache_dir=tmp_path / "c"),
+        bundled_root=tmp_path / "plugins",
+    )
+    svc._cache.save(
+        _report().model_copy(
+            update={
+                "candidates": [
+                    UpdateCandidate(
+                        plugin="demo",
+                        installed_version="1.0.0",
+                        latest=_release("1.1.0"),
+                        available=True,
+                        trust="provenance",
+                    )
+                ]
+            }
+        )
+    )
+    codes = [i.code for i in svc.preflight("demo")]
+    assert "blocker_updater_offline" in codes
+    assert "blocker_unsigned_release" in codes
+    assert "queue_probe_unavailable" in codes
+    assert "no_boot_report" in codes
+    assert "ready" not in codes
+
+
+def _release(version: str):
+    from baselith.core.plugin_updates.models import ReleaseInfo
+
+    return ReleaseInfo(
+        plugin="demo", version=version, tag=f"v{version}", published_at=None
+    )

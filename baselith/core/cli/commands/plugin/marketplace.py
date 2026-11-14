@@ -9,6 +9,7 @@ import asyncio
 import os
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from baselith.core.marketplace import PluginCategory, PluginInstaller, PluginRegistry
@@ -191,39 +192,30 @@ def uninstall_plugin_cmd(plugin_id: str) -> int:
 
 
 def update_plugin_cmd(plugin_id: str) -> int:
-    """
-    Update an existing plugin from the marketplace.
+    """Refuse to update a plugin by reinstalling it, and name the safe path.
+
+    The old implementation uninstalled the plugin and installed it again, which
+    deleted its directory, including its ``.env`` and runtime state. Nothing is
+    installed or removed here.
+
+    Args:
+        plugin_id: The plugin the caller wanted to update (only echoed back).
 
     Returns:
-        ``0`` when the plugin is reinstalled, ``1`` when it is unknown to the
-        marketplace or the reinstall failed.
+        Always ``1``: the operation is not performed.
     """
-
-    async def _run() -> int:
-        # Simply uninstall and reinstall for now
-        installer = PluginInstaller()
-        registry = PluginRegistry()
-
-        plugin = await registry.get_plugin(plugin_id)
-        if not plugin:
-            console.print(
-                f"[red]Error: Plugin '{plugin_id}' not found in marketplace.[/red]"
-            )
-            return 1
-
-        console.print(f"[cyan]Updating {plugin.name}...[/cyan]")
-        await installer.uninstall(plugin.name)
-        result = await installer.install(plugin)
-
-        if result.status.value == "success":
-            console.print(
-                f"[bold green]Successfully updated {plugin.name}.[/bold green]"
-            )
-            return 0
-        console.print(f"[red]Failed to update {plugin.name}: {result.error}[/red]")
-        return 1
-
-    return asyncio.run(_run())
+    console.print(
+        f"[red]'plugin marketplace update' was removed: it uninstalled "
+        f"'{escape(plugin_id)}' and reinstalled it, deleting the plugin's .env and "
+        "state.[/red]"
+    )
+    console.print(
+        "Use the safe path instead:\n"
+        "  1. baselith update status   (an installable release shows a sha256)\n"
+        f"  2. baselith plugin-updater request {escape(plugin_id)} "
+        "--version <v> --sha256 <sha>   (use the plugin's directory name)"
+    )
+    return 1
 
 
 def login_cmd(github_token: str | None = None) -> int:
