@@ -10026,7 +10026,7 @@
     "/privacy/retention/sweep": {
       "post": {
         "deprecated": true,
-        "description": "Purge records older than the horizon across retention-aware providers.",
+        "description": "Purge records older than the horizon across retention-aware providers.\n\nThe sweep is deployment-wide \u2014 it deletes expired rows of every tenant \u2014 so\nit is a platform operation: a credential bound to another tenant, whatever\nits scopes, is refused, and a zero horizon (everything) is not accepted.",
         "operationId": "retention_sweep_privacy_retention_sweep_post",
         "requestBody": {
           "content": {
@@ -15765,7 +15765,7 @@
     },
     "/v1/privacy/retention/sweep": {
       "post": {
-        "description": "Purge records older than the horizon across retention-aware providers.",
+        "description": "Purge records older than the horizon across retention-aware providers.\n\nThe sweep is deployment-wide \u2014 it deletes expired rows of every tenant \u2014 so\nit is a platform operation: a credential bound to another tenant, whatever\nits scopes, is refused, and a zero horizon (everything) is not accepted.",
         "operationId": "retention_sweep_v1_privacy_retention_sweep_post",
         "requestBody": {
           "content": {
