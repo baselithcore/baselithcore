@@ -299,12 +299,13 @@ class SQLiteAuditSink:
             return int(cur.fetchone()["n"])
 
     def query(self, spec: AuditQuery | None = None) -> list[dict[str, Any]]:
-        """Return matching records, newest first."""
+        """Return matching records, newest first (oldest first with ``ascending``)."""
         spec = spec or AuditQuery()
         where, params = spec.where()
+        direction = "ASC" if spec.ascending else "DESC"
         sql = (
-            f"SELECT {_COLUMNS} FROM audit_log{where} "  # noqa: S608  # nosec B608 - fixed columns
-            "ORDER BY seq DESC LIMIT ? OFFSET ?"
+            f"SELECT {_COLUMNS} FROM audit_log{where} "  # noqa: S608  # nosec B608 - fixed columns, fixed direction
+            f"ORDER BY seq {direction} LIMIT ? OFFSET ?"
         )
         with self._lock:
             cur = self._conn.execute(sql, [*params, spec.limit, spec.offset])

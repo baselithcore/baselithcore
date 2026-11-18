@@ -135,3 +135,7 @@ sink = get_durable_audit_sink()
 if sink is not None:
     print(sink.verify_chain().to_dict())
 ```
+
+To copy the trail off the host (a copy the host cannot rewrite), read it with the
+sequence cursor described in
+[Audit Trail](../core-modules/audit-trail.md#shipping-the-trail-out-a-cursor-for-exporters).

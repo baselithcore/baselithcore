@@ -45,6 +45,13 @@ class AuditQuery:
     until: datetime | None = None
     limit: int = 100
     offset: int = 0
+    #: Only records whose chain sequence number is greater than this (``0`` is
+    #: everything). The cursor an exporter keeps between polls: ``seq`` is monotonic,
+    #: unique and survives a retention purge, which removes a prefix, never a middle link.
+    after_seq: int | None = None
+    #: Oldest first (``seq`` ascending), the order an exporter reads. The default is
+    #: newest first, which suits a screen.
+    ascending: bool = False
 
     def where(self) -> tuple[str, list[Any]]:
         """Render the filter as a SQL ``WHERE`` fragment plus its parameters."""
@@ -64,6 +71,9 @@ class AuditQuery:
         if self.until is not None:
             clauses.append("timestamp <= ?")
             params.append(self.until.astimezone(UTC).isoformat())
+        if self.after_seq is not None:
+            clauses.append("seq > ?")
+            params.append(int(self.after_seq))
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 

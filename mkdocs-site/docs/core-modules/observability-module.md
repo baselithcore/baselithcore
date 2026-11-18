@@ -626,7 +626,9 @@ every uvicorn or task-queue worker opens its own sink on the same file, and each
 append reads the chain head and inserts the new row inside one
 `BEGIN IMMEDIATE` transaction, so concurrent workers never link two rows to the
 same predecessor. Chain layout, keyed hashing and verification are covered in
-[Audit Trail](audit-trail.md).
+[Audit Trail](audit-trail.md). To export the trail (a SIEM collector), read it with the
+sequence cursor, `AuditQuery(after_seq=..., ascending=True)`, described there under
+[Shipping the trail out](audit-trail.md#shipping-the-trail-out-a-cursor-for-exporters).
 
 ---
 

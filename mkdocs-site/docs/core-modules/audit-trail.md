@@ -235,6 +235,33 @@ rows = sink.query(AuditQuery(event_type="privacy.erase", tenant_id="acme", limit
 Filters compose over event type, user, tenant, and a time window; results come
 back newest-first with `details` already decoded.
 
+### Shipping the trail out (a cursor for exporters)
+
+A copy of the trail that left the host is what lets it survive the host being
+compromised: an attacker who rewrites the chain on the machine cannot rewrite what a
+collector already shipped. Newest-first with an offset suits a screen; an exporter needs
+*everything after the record I last shipped, in order, with no gap and no repeat*.
+`AuditQuery.after_seq` and `AuditQuery.ascending` are that cursor, on the chain's own
+`seq`, which is monotonic, unique and survives a retention purge (a purge removes a
+prefix of the chain, never a middle link):
+
+```python
+cursor = 0                      # persist this between polls; 0 means "from the start"
+while True:
+    page = sink.query(AuditQuery(after_seq=cursor, ascending=True, limit=1000))
+    if not page:
+        break
+    ship(page)                  # each record carries prev_hash and entry_hash
+    cursor = page[-1]["seq"]
+```
+
+Both fields default to the old behaviour (newest first, no cursor), so existing callers
+are unaffected, and they compose with the other filters. Each record carries the
+`prev_hash` and `entry_hash` that tie it to its neighbours, so the receiving side can
+check continuity (and, holding the HMAC key, the hashes themselves); keep
+`sink.head_hash()` somewhere the host cannot write as an anchor. Ship more often than
+`AUDIT_RETENTION_DAYS`, or the oldest records are purged before they leave.
+
 ## Design notes
 
 - **Storage is stdlib `sqlite3`**, matching `baselith/core/incidents/persistence.py`:
