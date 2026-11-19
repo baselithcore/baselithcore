@@ -42,7 +42,10 @@ remains responsible for completeness and for the regulatory submission.
   providers, functions, or subcontractors, and rejects an arrangement that
   claims to support a critical function without referencing one with
   critical/important criticality.
-- **Auditable.** Every mutation emits an `AUDIT | DORA-REGISTER | …` log line.
+- **Auditable.** Every mutation emits an `AUDIT | DORA-REGISTER | …` log line and a
+  `compliance.register` record on the [audit trail](audit-trail.md)
+  (`register: dora`; action `provider`, `function` or `arrangement`). A change
+  the register refuses leaves no record.
 
 ## Usage
 

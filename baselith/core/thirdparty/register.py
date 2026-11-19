@@ -10,12 +10,18 @@ renders the register in the ESA ITS template layout via
 The store is a Protocol with an in-memory reference implementation; production
 deployments register a durable store. Outbound regulatory submission of the
 register remains the operator's action.
+
+Every change to the register also lands on the audit trail as a
+``compliance.register`` record (``register: dora``): a supervisor reading the
+Register of Information asks who changed an arrangement and when, and the log
+line alone is not a record anyone can query.
 """
 
 from __future__ import annotations
 
 from typing import Any, Protocol
 
+from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 from baselith.core.thirdparty.export import build_register
 from baselith.core.thirdparty.types import (
@@ -115,6 +121,12 @@ class RegisterOfInformation:
                 )
         await self._store.save_provider(provider)
         logger.info("AUDIT | DORA-REGISTER | provider | id=%s", provider.id)
+        await get_audit_logger().log(
+            AuditEventType.COMPLIANCE_REGISTER,
+            resource=provider.id,
+            action="provider",
+            details={"register": "dora", "name": provider.name},
+        )
         return provider
 
     async def get_provider(self, provider_id: str) -> ICTProvider | None:
@@ -129,6 +141,16 @@ class RegisterOfInformation:
         """Insert or update a supported business function."""
         await self._store.save_function(function)
         logger.info("AUDIT | DORA-REGISTER | function | id=%s", function.id)
+        await get_audit_logger().log(
+            AuditEventType.COMPLIANCE_REGISTER,
+            resource=function.id,
+            action="function",
+            details={
+                "register": "dora",
+                "name": function.name,
+                "criticality": function.criticality.value,
+            },
+        )
         return function
 
     async def get_function(self, function_id: str) -> ICTFunction | None:
@@ -156,6 +178,18 @@ class RegisterOfInformation:
             arrangement.reference_number,
             arrangement.provider_id,
             arrangement.assessment.supports_critical_function,
+        )
+        await get_audit_logger().log(
+            AuditEventType.COMPLIANCE_REGISTER,
+            resource=arrangement.reference_number,
+            action="arrangement",
+            details={
+                "register": "dora",
+                "provider_id": arrangement.provider_id,
+                "supports_critical_function": (
+                    arrangement.assessment.supports_critical_function
+                ),
+            },
         )
         return arrangement
 

@@ -123,9 +123,12 @@ Classification follows the criteria of **Commission Delegated Regulation (EU)
 2024/1772**: clients/financial counterparts affected, reputational impact,
 service downtime, geographical spread, data losses, criticality of services
 affected, and economic impact. `DoraImpactAssessment` records which criteria are
-met; `DoraClassification.is_major` applies the RTS-aligned default rule —
-*critical services affected* plus **two or more** other criteria — and accepts an
-explicit `major_override` when the operator's threshold analysis differs.
+met; `DoraClassification.is_major` applies Art. 8(1) of the RTS —
+*critical services affected* **and** either the *data losses* threshold (which a
+successful, malicious, unauthorised access to the entity's systems meets) **or**
+**two or more** of the other criteria — and accepts an explicit `major_override`
+when the operator's threshold analysis differs, for instance for the Art. 8(2)
+recurring-incident case, which is not derived.
 
 ```python
 from baselith.core.incidents import DoraImpactAssessment, get_dora_incident_service
