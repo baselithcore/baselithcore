@@ -35,7 +35,10 @@ class IncidentReportingConfig(AliasedSettings):
     notification_hours: int = Field(
         default=72, alias="INCIDENT_NOTIFICATION_HOURS", ge=1
     )
-    # Final report is due within one month of the incident notification.
+    # Final report is due within one month of the incident notification. The
+    # calendar month is the outer limit whatever this says: the value can only
+    # bring the deadline forward (30 days overshoots it after a notification
+    # late in January).
     final_report_days: int = Field(default=30, alias="INCIDENT_FINAL_REPORT_DAYS", ge=1)
 
     # DORA (EU 2022/2554) Art. 19 major-incident reporting clock. The initial

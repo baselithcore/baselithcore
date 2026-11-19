@@ -101,6 +101,60 @@ class TestClassification:
         )
         assert result.category is RiskCategory.GPAI_SYSTEMIC_RISK
 
+    def test_a_gpai_model_in_an_annex_iii_use_stays_high_risk(self):
+        """The GPAI flag is a second axis, not a way out of Chapter III."""
+        result = classify_system(
+            AiSystem(
+                name="hr-screener",
+                is_gpai_model=True,
+                annex_iii_areas=[AnnexIIIArea.EMPLOYMENT],
+            )
+        )
+        assert result.category is RiskCategory.HIGH_RISK
+        assert result.requires_registration is True
+        assert "Art. 6(2)" in result.citations
+        assert "Art. 53" in result.citations
+        assert "general-purpose" in result.rationale
+
+    def test_a_systemic_gpai_model_as_an_annex_i_safety_component(self):
+        result = classify_system(
+            AiSystem(
+                name="brake-controller",
+                is_gpai_model=True,
+                gpai_systemic_risk=True,
+                annex_i_product=True,
+            )
+        )
+        assert result.category is RiskCategory.HIGH_RISK
+        assert result.citations == ["Art. 6(1)", "Annex I", "Art. 55"]
+
+    def test_a_gpai_model_under_a_valid_derogation_keeps_its_paper_trail(self):
+        """Chapter V is live, and the derogation must still be documented."""
+        result = classify_system(
+            AiSystem(
+                name="cv-formatter",
+                is_gpai_model=True,
+                annex_iii_areas=[AnnexIIIArea.EMPLOYMENT],
+                art6_derogations=[Art6Derogation.NARROW_PROCEDURAL_TASK],
+            )
+        )
+        assert result.category is RiskCategory.GPAI
+        assert result.derogation_claimed is True
+        assert result.requires_registration is True
+        assert "Art. 6(4)" in result.citations
+
+    def test_a_profiling_gpai_model_cannot_use_the_derogation(self):
+        result = classify_system(
+            AiSystem(
+                name="candidate-ranker",
+                is_gpai_model=True,
+                annex_iii_areas=[AnnexIIIArea.EMPLOYMENT],
+                art6_derogations=[Art6Derogation.PREPARATORY_TASK],
+                performs_profiling=True,
+            )
+        )
+        assert result.category is RiskCategory.HIGH_RISK
+
     def test_chatbot_is_limited_risk(self):
         result = classify_system(AiSystem(name="bot", interacts_with_humans=True))
         assert result.category is RiskCategory.LIMITED_RISK

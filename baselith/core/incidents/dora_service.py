@@ -4,7 +4,9 @@ Records major ICT-related incidents, classifies them against the DORA criteria,
 advances them through the regulatory milestones (initial notification →
 intermediate report → final report → closed), and surfaces overdue obligations
 so the 4h/72h/one-month clock is never silently missed. Every transition emits
-an ``AUDIT | DORA-INCIDENT | …`` log line for traceability.
+an ``AUDIT | DORA-INCIDENT | …`` log line and an audit-trail record
+(``incident.open`` / ``incident.milestone`` / ``incident.close`` with
+``regime: dora``), the same evidence the NIS2, AI Act and GDPR registers keep.
 
 The store is a Protocol with an in-memory reference implementation; production
 deployments register a durable store. Outbound regulatory filing (to the
@@ -25,6 +27,7 @@ from baselith.core.incidents.dora import (
     DoraIncidentStatus,
 )
 from baselith.core.incidents.types import IncidentSeverity, ReportingMilestone, _utcnow
+from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -120,6 +123,17 @@ class DoraIncidentService:
             incident.id,
             incident.severity.value,
         )
+        await get_audit_logger().log(
+            AuditEventType.INCIDENT_OPEN,
+            resource=incident.id,
+            action="open",
+            details={
+                "regime": "dora",
+                "severity": incident.severity.value,
+                "affected_systems": list(incident.affected_systems),
+                "affected_clients": incident.affected_clients,
+            },
+        )
         return incident
 
     async def classify(
@@ -155,6 +169,22 @@ class DoraIncidentService:
             classification.is_major,
             classification.classified_at.isoformat(),
         )
+        # The classification is the act that starts the 4h clock: who decided
+        # the incident was (or was not) major, on which criteria, and when, is
+        # the first thing a supervisor asks for.
+        await get_audit_logger().log(
+            AuditEventType.INCIDENT_MILESTONE,
+            resource=incident.id,
+            action="classified",
+            details={
+                "regime": "dora",
+                "milestone": "classified",
+                "is_major": classification.is_major,
+                "major_override": major_override,
+                "assessment": assessment.to_dict(),
+                "at": classification.classified_at.isoformat(),
+            },
+        )
         return incident
 
     async def _advance(
@@ -179,6 +209,19 @@ class DoraIncidentService:
             milestone,
             incident.id,
             stamp.isoformat(),
+        )
+        await get_audit_logger().log(
+            AuditEventType.INCIDENT_CLOSE
+            if status is DoraIncidentStatus.CLOSED
+            else AuditEventType.INCIDENT_MILESTONE,
+            resource=incident.id,
+            action=milestone,
+            details={
+                "regime": "dora",
+                "milestone": milestone,
+                "status": incident.status.value,
+                "submitted_at": stamp.isoformat(),
+            },
         )
         return incident
 

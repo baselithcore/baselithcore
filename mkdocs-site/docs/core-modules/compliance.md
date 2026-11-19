@@ -74,7 +74,11 @@ auditor sees the category actually asserted and when it last changed.
    that profiles natural persons is *always* high-risk, whatever ground is
    claimed. This is the trap the module exists to close.
 5. **GPAI is a separate axis**, not a rung on the ladder — Art. 53 duties, plus
-   Art. 55 on systemic risk.
+   Art. 55 on systemic risk. It never displaces rules 2–4: a record that is
+   both a general-purpose model and in an Annex I/III use is `HIGH_RISK`, with
+   the Chapter V articles added to its rationale and citations. Only an
+   Annex III use under a valid derogation is classified `GPAI`, and it keeps
+   `derogation_claimed` and `requires_registration`.
 6. Otherwise `LIMITED_RISK` when Art. 50 is triggered, else `MINIMAL_RISK`.
 
 Claiming the derogation does **not** remove the Art. 49 registration duty

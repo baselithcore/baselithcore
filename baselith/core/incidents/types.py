@@ -21,6 +21,7 @@ timezone-aware UTC throughout.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -38,6 +39,36 @@ def _parse_dt(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def one_month_after(moment: datetime) -> datetime:
+    """The same date and time one calendar month later.
+
+    A statutory "one month" is a calendar month, not thirty days: it ends on
+    the date that matches the starting one, or on the last day of the month
+    when that date does not exist (Regulation (EEC, Euratom) No 1182/71,
+    Art. 3(2)(c)). So one month after 31 January is 28 February (29 in a leap
+    year) — whereas thirty days later is 2 March, two days past the limit.
+
+    The time of day is kept rather than extended to the end of the day, which
+    errs on the early side and needs no assumption about the authority's
+    timezone.
+    """
+    year, month = (
+        (moment.year + 1, 1) if moment.month == 12 else (moment.year, moment.month + 1)
+    )
+    day = min(moment.day, calendar.monthrange(year, month)[1])
+    return moment.replace(year=year, month=month, day=day)
+
+
+def final_report_due(anchor: datetime, days: int) -> datetime:
+    """A "within one month" deadline counted from ``anchor``.
+
+    ``days`` is the configured window. It may make the deadline *stricter* than
+    the regulation, never looser: the calendar month is the outer limit, so the
+    earlier of the two governs.
+    """
+    return min(anchor + timedelta(days=days), one_month_after(anchor))
 
 
 class IncidentSeverity(str, Enum):
@@ -186,14 +217,16 @@ class SecurityIncident:
         Early-warning and notification deadlines are anchored to ``detected_at``;
         the final-report deadline is one month after the *notification* (using
         its actual submission time when available, else the notification due
-        date as a planning anchor).
+        date as a planning anchor). "One month" is a calendar month:
+        ``final_report_days`` can only bring the deadline forward (see
+        :func:`final_report_due`).
         """
         if not self.significant:
             return []
         early_due = self.detected_at + timedelta(hours=early_warning_hours)
         notif_due = self.detected_at + timedelta(hours=notification_hours)
         final_anchor = self.notification_at or notif_due
-        final_due = final_anchor + timedelta(days=final_report_days)
+        final_due = final_report_due(final_anchor, final_report_days)
         return [
             ReportingMilestone(
                 MilestoneKind.EARLY_WARNING, early_due, self.early_warning_at
@@ -265,4 +298,6 @@ __all__ = [
     "MilestoneKind",
     "ReportingMilestone",
     "SecurityIncident",
+    "final_report_due",
+    "one_month_after",
 ]

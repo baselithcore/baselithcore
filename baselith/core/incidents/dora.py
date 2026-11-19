@@ -37,6 +37,7 @@ from baselith.core.incidents.types import (
     ReportingMilestone,
     _parse_dt,
     _utcnow,
+    final_report_due,
 )
 
 
@@ -199,7 +200,8 @@ class DoraIncident:
         ``detected_at + awareness_cap_hours`` cap — both must be satisfied. The
         intermediate deadline is anchored to the actual initial notification
         (else its due date); the final deadline to the actual intermediate
-        report (else its due date).
+        report (else its due date). "One month" is a calendar month:
+        ``final_days`` can only bring the deadline forward.
         """
         if self.classification is None or not self.classification.is_major:
             return []
@@ -211,7 +213,7 @@ class DoraIncident:
         intermediate_anchor = self.initial_notification_at or initial_due
         intermediate_due = intermediate_anchor + timedelta(hours=intermediate_hours)
         final_anchor = self.intermediate_report_at or intermediate_due
-        final_due = final_anchor + timedelta(days=final_days)
+        final_due = final_report_due(final_anchor, final_days)
         return [
             ReportingMilestone(
                 DoraMilestoneKind.INITIAL_NOTIFICATION,

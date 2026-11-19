@@ -316,7 +316,7 @@ Declared in `baselith.core.config.incidents`.
 | `GDPR_SUBJECT_COMMUNICATION_HOURS` | `int` | `72` |  |
 | `INCIDENT_DB_PATH` | `str \| None` | *empty* | Opt-in durable persistence. When a filesystem path is set, the singleton incident service swaps its non-durable in-memory store for a SQLite store at that path (records survive restarts). Unset (the default) keeps the in-memory store, so behaviour is byte-for-byte unchanged unless a path is provided. NIS2 (INCIDENT_DB_PATH) and DORA (DORA_DB_PATH) persist to independent files. |
 | `INCIDENT_EARLY_WARNING_HOURS` | `int` | `24` | NIS2 Art. 23 deadlines, expressed relative to the moment the entity became aware of a significant incident ("detected_at"). Configurable for stricter internal SLAs, but never relax past the regulatory maxima. |
-| `INCIDENT_FINAL_REPORT_DAYS` | `int` | `30` | Final report is due within one month of the incident notification. |
+| `INCIDENT_FINAL_REPORT_DAYS` | `int` | `30` | Final report is due within one month of the incident notification. The calendar month is the outer limit whatever this says: the value can only bring the deadline forward (30 days overshoots it after a notification late in January). |
 | `INCIDENT_NOTIFICATION_HOURS` | `int` | `72` |  |
 | `INCIDENT_REPORTING_ENABLED` | `bool` | `False` |  |
 

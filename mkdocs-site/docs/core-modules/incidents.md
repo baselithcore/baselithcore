@@ -28,6 +28,14 @@ explicit, so an overdue obligation is detectable rather than silently missed.
 | **Incident notification** | within **72h**               |
 | **Final report**        | within **one month** of the notification |
 
+"One month" is a calendar month, not thirty days: it ends on the matching date
+of the following month, or on that month's last day when the date does not
+exist. A notification filed on 31 January makes the final report due on 28
+February, where thirty days would have said 2 March. `final_report_days` and
+`dora_final_report_days` are therefore windows that can bring the deadline
+forward and never push it past the month (`final_report_due()` in
+`baselith.core.incidents.types`).
+
 ## Design
 
 - **Opt-in & additive.** Gated by `INCIDENT_REPORTING_ENABLED` (default off);
@@ -49,12 +57,12 @@ explicit, so an overdue obligation is detectable rather than silently missed.
 | `enabled`                         | `INCIDENT_REPORTING_ENABLED`       | `false` | NIS2 master switch.                               |
 | `early_warning_hours`             | `INCIDENT_EARLY_WARNING_HOURS`     | `24`    | NIS2 early-warning deadline.                      |
 | `notification_hours`              | `INCIDENT_NOTIFICATION_HOURS`      | `72`    | NIS2 incident-notification deadline.              |
-| `final_report_days`               | `INCIDENT_FINAL_REPORT_DAYS`       | `30`    | NIS2 final-report window after notification.      |
+| `final_report_days`               | `INCIDENT_FINAL_REPORT_DAYS`       | `30`    | NIS2 final-report window after notification, capped at one calendar month. |
 | `dora_enabled`                    | `DORA_INCIDENT_REPORTING_ENABLED`  | `false` | DORA master switch.                               |
 | `dora_initial_notification_hours` | `DORA_INITIAL_NOTIFICATION_HOURS`  | `4`     | DORA initial notification, from classification.   |
 | `dora_awareness_cap_hours`        | `DORA_AWARENESS_CAP_HOURS`         | `24`    | DORA hard cap on the initial notification, from awareness. |
 | `dora_intermediate_report_hours`  | `DORA_INTERMEDIATE_REPORT_HOURS`   | `72`    | DORA intermediate report, from initial notification. |
-| `dora_final_report_days`          | `DORA_FINAL_REPORT_DAYS`           | `30`    | DORA final report, from intermediate report.      |
+| `dora_final_report_days`          | `DORA_FINAL_REPORT_DAYS`           | `30`    | DORA final report, from intermediate report, capped at one calendar month. |
 | `ai_act_enabled`                  | `AI_ACT_INCIDENT_REPORTING_ENABLED` | `false` | AI Act Art. 73 master switch.                    |
 | `ai_act_complete_report_days`     | `AI_ACT_COMPLETE_REPORT_DAYS`      | `30`    | Internal SLA for the Art. 73(5) complete report.  |
 | `gdpr_enabled`                    | `GDPR_BREACH_REPORTING_ENABLED`    | `false` | GDPR Art. 33/34 master switch.                    |
@@ -359,7 +367,11 @@ await get_ai_act_incident_service().open_incident(
 ```
 
 Every transition across all four regimes is also written to the
-[audit trail](audit-trail.md) as a structured `incident.*` event.
+[audit trail](audit-trail.md) as a structured `incident.*` event carrying its
+`regime` (`nis2`, `dora`, `ai_act`, `gdpr`). For DORA that includes the
+**classification** itself — the criteria assessed, whether an override was
+used, and the moment it was reached — since that is the act that starts the
+4-hour clock.
 
 ## Operational notes
 
