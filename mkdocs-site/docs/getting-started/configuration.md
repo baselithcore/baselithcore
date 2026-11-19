@@ -229,6 +229,7 @@ Declared in `baselith.core.config.compliance`.
 | `COMPLIANCE_REGISTRY_DB_PATH` | `str \| None` | *empty* | : Durable stores. Unset keeps the non-durable in-memory reference stores, : so behaviour is unchanged unless a path is provided. |
 | `COMPLIANCE_RISK_DB_PATH` | `str \| None` | *empty* |  |
 | `COMPLIANCE_ROPA_DB_PATH` | `str \| None` | *empty* |  |
+| `COMPLIANCE_SOC2_DB_PATH` | `str \| None` | *empty* | : SOC 2 readiness: scopes, controls and evidence, in one file. Evidence : recorded over a Type II period must outlive the process by the length of : the audit, so set it before the first engagement. |
 
 ## Evaluation configuration (`EVAL_`)
 
@@ -1118,4 +1119,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-756 settings documented.
+757 settings documented.

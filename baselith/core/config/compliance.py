@@ -55,6 +55,10 @@ class ComplianceConfig(AliasedSettings):
         default=None, alias="COMPLIANCE_INSTRUCTIONS_DB_PATH"
     )
     dpia_db_path: str | None = Field(default=None, alias="COMPLIANCE_DPIA_DB_PATH")
+    #: SOC 2 readiness: scopes, controls and evidence, in one file. Evidence
+    #: recorded over a Type II period must outlive the process by the length of
+    #: the audit, so set it before the first engagement.
+    soc2_db_path: str | None = Field(default=None, alias="COMPLIANCE_SOC2_DB_PATH")
 
     #: Run the daily Art. 72 review sweep, which surfaces plans past their
     #: review cadence. Off by default like every other background loop.

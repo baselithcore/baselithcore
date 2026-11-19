@@ -73,6 +73,7 @@ nav = [
       { "Privacy & DSR"        = "core-modules/privacy.md" },
       { "Incident Reporting (NIS2/DORA)" = "core-modules/incidents.md" },
       { "ICT Third-Party Register (DORA)" = "core-modules/thirdparty.md" },
+      { "SOC 2 Readiness"      = "core-modules/soc2.md" },
       { "AI Transparency"      = "core-modules/transparency.md" },
       { "AI Governance & Compliance" = "core-modules/compliance.md" },
       { "Feature Flags"        = "core-modules/feature-flags.md" },

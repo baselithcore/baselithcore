@@ -503,6 +503,13 @@ for gap in report.gaps:
     print(gap.setting, "→", gap.why)
 ```
 
+## SOC 2 readiness
+
+The same package carries a sub-package for a different kind of obligation: not a
+statute with a clock but an attestation an auditor issues. See
+[SOC 2 Readiness](soc2.md) for controls, hash-anchored evidence, readiness and
+the auditor's package.
+
 ## What this module does not do
 
 - **It does not assess conformity.** Art. 43 is a procedure with a notified body
@@ -522,7 +529,8 @@ where these records must outlive the process by years. Set
 `COMPLIANCE_REGISTRY_DB_PATH`, `COMPLIANCE_DOCUMENTS_DB_PATH`,
 `COMPLIANCE_FRIA_DB_PATH`, `COMPLIANCE_ROPA_DB_PATH`,
 `COMPLIANCE_POST_MARKET_DB_PATH`, `COMPLIANCE_RISK_DB_PATH`,
-`COMPLIANCE_INSTRUCTIONS_DB_PATH` and `COMPLIANCE_DPIA_DB_PATH`. Every registration,
+`COMPLIANCE_INSTRUCTIONS_DB_PATH`, `COMPLIANCE_DPIA_DB_PATH` and, for the
+[SOC 2 readiness](soc2.md) engagement, `COMPLIANCE_SOC2_DB_PATH`. Every registration,
 reclassification and document write also lands in the
 [audit trail](audit-trail.md) as a `compliance.*` event.
 
