@@ -34,6 +34,13 @@ class PrivacyConfig(AliasedSettings):
     automated_decisions_db_path: str | None = Field(
         default=None, alias="PRIVACY_AUTOMATED_DECISIONS_DB_PATH"
     )
+    # Durable store for the data-subject request register (Art. 12(3)). The
+    # register is what shows the month was kept, so it must outlive the
+    # process: an in-memory one forgets every open request on restart, and with
+    # it the clock.
+    dsr_requests_db_path: str | None = Field(
+        default=None, alias="PRIVACY_DSR_REQUESTS_DB_PATH"
+    )
 
 
 _privacy_config: PrivacyConfig | None = None

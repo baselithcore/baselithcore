@@ -636,6 +636,7 @@ Declared in `baselith.core.config.privacy`.
 | --- | --- | --- | --- |
 | `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `str \| None` | *empty* | Durable store for the Art. 22 register. Same reasoning as the consent log: the record is the evidence that the Art. 22(3) safeguards exist, and that question is usually asked months later. |
 | `PRIVACY_CONSENT_DB_PATH` | `str \| None` | *empty* | Durable store for the Art. 7 consent log. Unset keeps the in-memory reference store — fine for tests, useless as Art. 7(1) proof in production, where the record chain must outlive the process. |
+| `PRIVACY_DSR_REQUESTS_DB_PATH` | `str \| None` | *empty* | Durable store for the data-subject request register (Art. 12(3)). The register is what shows the month was kept, so it must outlive the process: an in-memory one forgets every open request on restart, and with it the clock. |
 | `PRIVACY_ENABLED` | `bool` | `False` |  |
 | `PRIVACY_RETENTION_DAYS` | `int` | `0` | Default retention horizon for sweeps, in days. 0 disables automatic purge. |
 
@@ -1119,4 +1120,4 @@ baselith config env        # unknown or misspelled variables in the environment
 baselith doctor            # connectivity and configuration diagnostics
 ```
 
-757 settings documented.
+758 settings documented.

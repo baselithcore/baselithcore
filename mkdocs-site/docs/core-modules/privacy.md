@@ -251,6 +251,54 @@ The legal-authorisation ground is treated differently on purpose: its safeguards
 come from the authorising law, which this module cannot verify, so it records
 the ground rather than demanding its own three channels.
 
+## Request register (Art. 12(3))
+
+`DataSubjectService` *carries out* a right. The register
+(`baselith.core.privacy.requests`, `DsrRequestService`) answers what an authority
+opens with: **was each request answered within a month?**
+
+Art. 12(3) requires an answer "without undue delay and in any event within one
+month of receipt", extendable by two further months where necessary given the
+complexity and number of requests, **the person being told of the extension
+within the first month, with the reasons**. Art. 12(4): when the controller does
+not act, it tells the person within the same month the reasons and that they may
+complain to an authority and seek a judicial remedy.
+
+```python
+from baselith.core.privacy import DsrRequestType, get_dsr_request_service
+
+register = get_dsr_request_service()
+request = await register.receive(
+    DsrRequestType.ACCESS, "user-17", received_at=arrived_on_friday, channel="email"
+)
+await register.extend(request.id, "a very large mailbox")   # counts only if told in time
+await register.fulfil(request.id)                            # or refuse(request.id, reasons)
+```
+
+The register is **conservative on purpose**:
+
+- The month is a **calendar month** (31 January → 28 February), and a valid
+  extension is three calendar months from receipt, counted in one step (31
+  January → 30 April), not three repeated single months.
+- The clock runs **from receipt**: pass the day the request reached the
+  organisation, not the day somebody typed it in.
+- Asking for proof of identity (Art. 12(6)) is **recorded but does not stop the
+  clock**: the register shows the strictest deadline. Someone relying on
+  suspension can read the recorded dates.
+- An extension counts only if the person was told **within the first month**
+  (`extension_valid`); one noted later is recorded and moves nothing.
+- Extending and refusing both require **reasons**; an answered request is
+  closed.
+
+It holds an opaque `subject_ref` and metadata, never the request's content. The
+`title` it exposes (to dashboards, logs and the event bus) names the kind of
+request and a short id, never the person. Every step is a `privacy.request`
+audit record naming the request id. It exposes `milestones` and
+`overdue_milestones` shaped like the incident services', with a
+`DsrMilestoneKind.RESPONSE` milestone, so a deadline timeline treats it like any
+other running clock. Durable with `PRIVACY_DSR_REQUESTS_DB_PATH`; in memory
+otherwise, which forgets every open request, and its clock, on restart.
+
 ## Admin API
 
 When `PRIVACY_ENABLED` is set, the `api-routers` plugin mounts an admin DSR API
@@ -278,6 +326,7 @@ Every request is audit-logged with the subject id and affected record counts.
 | ------------------------ | ------- | ---------------------------------------- |
 | `PRIVACY_ENABLED`        | `false` | Enable the DSR subsystem and admin API   |
 | `PRIVACY_RETENTION_DAYS` | `0`     | Retention horizon in days; `>0` starts the background sweep (0 = no auto-purge) |
+| `PRIVACY_DSR_REQUESTS_DB_PATH` | `None` | Path of the durable request register (`SQLiteDsrRequestStore`, Art. 12(3)); unset keeps the in-memory store, which forgets open requests on restart |
 | `PRIVACY_CONSENT_DB_PATH` | `None` | Path of the durable Art. 7 consent log (`SQLiteConsentStore`); unset keeps the in-memory store |
 | `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `None` | Path of the durable Art. 22 register (`SQLiteAutomatedDecisionStore`); unset keeps the in-memory store |
 

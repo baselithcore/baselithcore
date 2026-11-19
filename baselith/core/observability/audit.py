@@ -83,6 +83,7 @@ class AuditEventType(str, Enum):
     PRIVACY_OBJECT = "privacy.object"
     PRIVACY_CONSENT = "privacy.consent"
     PRIVACY_RETENTION = "privacy.retention"
+    PRIVACY_REQUEST = "privacy.request"
 
     # AI transparency (EU AI Act Art. 50)
     TRANSPARENCY_DISCLOSURE = "transparency.disclosure"

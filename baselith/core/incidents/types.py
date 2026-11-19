@@ -41,6 +41,20 @@ def _parse_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
+def add_calendar_months(moment: datetime, months: int) -> datetime:
+    """The same date and time ``months`` calendar months later.
+
+    Counted from ``moment`` in one step, not by repeating "one month": 31
+    January plus three months is 30 April, where three successive single months
+    would drift to 28 April.
+    """
+    index = moment.year * 12 + (moment.month - 1) + months
+    year, month = divmod(index, 12)
+    month += 1
+    day = min(moment.day, calendar.monthrange(year, month)[1])
+    return moment.replace(year=year, month=month, day=day)
+
+
 def one_month_after(moment: datetime) -> datetime:
     """The same date and time one calendar month later.
 
@@ -54,11 +68,7 @@ def one_month_after(moment: datetime) -> datetime:
     errs on the early side and needs no assumption about the authority's
     timezone.
     """
-    year, month = (
-        (moment.year + 1, 1) if moment.month == 12 else (moment.year, moment.month + 1)
-    )
-    day = min(moment.day, calendar.monthrange(year, month)[1])
-    return moment.replace(year=year, month=month, day=day)
+    return add_calendar_months(moment, 1)
 
 
 def final_report_due(anchor: datetime, days: int) -> datetime:
@@ -131,9 +141,23 @@ class GdprMilestoneKind(str, Enum):
     SUBJECT_COMMUNICATION = "subject_communication"
 
 
+class DsrMilestoneKind(str, Enum):
+    """The GDPR Art. 12(3) obligation to answer a data-subject request.
+
+    One month from receipt, extendable by two further months where necessary
+    (the data subject being told of the extension within the first month).
+    """
+
+    RESPONSE = "response"
+
+
 #: Every milestone taxonomy a :class:`ReportingMilestone` can carry.
 AnyMilestoneKind = (
-    MilestoneKind | DoraMilestoneKind | AiActMilestoneKind | GdprMilestoneKind
+    MilestoneKind
+    | DoraMilestoneKind
+    | AiActMilestoneKind
+    | GdprMilestoneKind
+    | DsrMilestoneKind
 )
 
 
@@ -292,12 +316,14 @@ __all__ = [
     "AiActMilestoneKind",
     "AnyMilestoneKind",
     "DoraMilestoneKind",
+    "DsrMilestoneKind",
     "GdprMilestoneKind",
     "IncidentSeverity",
     "IncidentStatus",
     "MilestoneKind",
     "ReportingMilestone",
     "SecurityIncident",
+    "add_calendar_months",
     "final_report_due",
     "one_month_after",
 ]
