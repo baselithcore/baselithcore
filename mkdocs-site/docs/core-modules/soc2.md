@@ -61,11 +61,14 @@ that lists a collector.
 | `incident_register` | State and overdue obligations of the four incident registers | CC7.3-CC7.5 |
 | `declared_posture` | The declared compliance profile against the running configuration | CC4.1, CC5.2 |
 | `vendor_register` | The ICT third-party register and its concentration view | CC9.2 |
+| `plugin_integrity` | Each deployed plugin's hash against the signature its manifest declares | CC8.1, CC6.8 |
 
 The registry is a seam, not a closed list. Core ships collectors only for what
 `baselith/core/` owns; a plugin that owns other evidence (an access review, a
 change log) calls `register_evidence_collector(name, run, description=...,
-criteria=(...))` at start-up. Core never imports a plugin.
+criteria=(...))` at start-up. Core never imports a plugin. Access to the platform
+(CC6) is the obvious case: the identity store belongs to a plugin, so its
+evidence is collected there.
 
 **A collector reports what it found, not what would look good.** A broken audit
 chain, an overdue incident obligation, an unmet posture requirement or a missing
@@ -74,7 +77,7 @@ run at all is recorded as an exception on the controls that rely on it, never
 skipped: evidence that silently stopped arriving would otherwise read as merely
 old.
 
-`starter_controls(owner)` returns four draft controls, one per built-in
+`starter_controls(owner)` returns five draft controls, one per built-in
 collector. They are drafts of the organisation's own statements, not a
 prescribed set.
 

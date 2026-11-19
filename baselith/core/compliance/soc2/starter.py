@@ -44,6 +44,14 @@ _STARTERS: tuple[tuple[str, str, list[str], ControlFrequency, list[str]], ...] =
         ControlFrequency.QUARTERLY,
         ["vendor_register"],
     ),
+    (
+        "Deployed plugins match what was signed",
+        "Every deployed plugin is checked against the signature its manifest "
+        "declares, so a change reaches production only through a signed release.",
+        ["CC8.1"],
+        ControlFrequency.DAILY,
+        ["plugin_integrity"],
+    ),
 )
 
 

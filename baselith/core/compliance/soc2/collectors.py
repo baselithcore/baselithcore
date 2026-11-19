@@ -190,6 +190,86 @@ async def _vendor_register() -> EvidenceDraft:
     )
 
 
+def _check_plugins(entries: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Compare each plugin directory's hash with what its manifest declares."""
+    import yaml
+
+    from baselith.core.plugins.integrity import (
+        compute_legacy_plugin_hash,
+        compute_plugin_hash,
+        find_manifest_file,
+    )
+
+    verified: list[str] = []
+    unsigned: list[str] = []
+    drifted: list[str] = []
+    for name, directory in entries:
+        manifest = find_manifest_file(directory) if directory else None
+        if manifest is None:
+            continue
+        declared = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get(
+            "integrity_sha256"
+        )
+        if not declared:
+            unsigned.append(name)
+        elif declared in (
+            compute_plugin_hash(directory),
+            compute_legacy_plugin_hash(directory),
+        ):
+            verified.append(name)
+        else:
+            drifted.append(name)
+    return {
+        "checked": len(verified) + len(unsigned) + len(drifted),
+        "verified": len(verified),
+        "unsigned": sorted(unsigned),
+        "drifted": sorted(drifted),
+    }
+
+
+async def _plugin_integrity() -> EvidenceDraft:
+    from baselith.core.di.container import ServiceRegistry
+    from baselith.core.plugins import PluginRegistry
+    from baselith.core.plugins.integrity_policy import is_strict_mode_enabled
+
+    registry = ServiceRegistry.get(PluginRegistry)
+    entries = [
+        (p.metadata.name, registry.get_plugin_directory(p.metadata.name))
+        for p in registry.get_all()
+    ]
+    found = await asyncio.to_thread(_check_plugins, entries)
+    strict = is_strict_mode_enabled()
+    bad = bool(found["drifted"]) or (strict and bool(found["unsigned"]))
+    if found["drifted"]:
+        summary = (
+            f"{len(found['drifted'])} deployed plugin(s) differ from what was signed: "
+            f"{', '.join(found['drifted'])}."
+        )
+    elif found["unsigned"]:
+        summary = f"{len(found['unsigned'])} deployed plugin(s) carry no signature."
+    else:
+        summary = f"All {found['verified']} deployed plugin(s) match their signature."
+    outcome = (
+        EvidenceOutcome.EXCEPTION
+        if bad
+        else EvidenceOutcome.INFORMATIONAL
+        if found["unsigned"]
+        else EvidenceOutcome.OPERATED
+    )
+    return EvidenceDraft(
+        "Deployed plugins against their signatures",
+        summary,
+        outcome,
+        {**found, "strict_signing": strict},
+    )
+
+
+register_evidence_collector(
+    "plugin_integrity",
+    _plugin_integrity,
+    description="Each deployed plugin's hash against the signature its manifest declares.",
+    criteria=("CC8.1", "CC6.8"),
+)
 register_evidence_collector(
     "audit_chain",
     _audit_chain,

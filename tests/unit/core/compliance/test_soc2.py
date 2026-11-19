@@ -365,6 +365,7 @@ async def test_the_builtin_collectors_report_what_they_find(monkeypatch):
         "incident_register",
         "declared_posture",
         "vendor_register",
+        "plugin_integrity",
     } <= set(registry())
 
 
