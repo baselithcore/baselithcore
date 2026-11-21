@@ -37,6 +37,7 @@ from baselith.core.incidents.types import (
     ReportingMilestone,
     _parse_dt,
     _utcnow,
+    final_report_due,
 )
 
 
@@ -58,7 +59,9 @@ class DoraImpactAssessment:
     Each flag is the operator's assessment of whether that criterion's
     materiality threshold has been met. ``critical_services_affected`` is the
     pivotal criterion; the remaining six are the "other" criteria weighed
-    against it in :meth:`DoraClassification.is_major`.
+    against it in :meth:`DoraClassification.is_major`. ``data_losses`` is also
+    met by a successful, malicious, unauthorised access to the entity's network
+    and information systems (Art. 9(5)(b)), and on its own it is enough.
     """
 
     critical_services_affected: bool = False
@@ -112,9 +115,15 @@ class DoraClassification:
     """A major-incident determination and the moment it was reached.
 
     ``classified_at`` anchors the 4h initial-notification clock. ``is_major``
-    follows the RTS-aligned default rule — *critical services affected* plus at
-    least two other criteria — unless ``major_override`` pins it explicitly
-    (use the override when the operator's RTS threshold analysis differs).
+    follows Art. 8(1) of the Delegated Regulation: *critical services affected*
+    **and** either the *data losses* threshold (Art. 9(5)(b), which a malicious
+    unauthorised access meets) **or** the thresholds of two or more of the
+    other criteria — unless ``major_override`` pins it explicitly (use the
+    override when the operator's threshold analysis differs).
+
+    Art. 8(2) — recurring incidents that are individually not major but are
+    together (at least twice in six months, same apparent root cause) — is not
+    derived here; an operator who finds one classifies it with the override.
     """
 
     assessment: DoraImpactAssessment
@@ -126,9 +135,9 @@ class DoraClassification:
         """Whether the incident qualifies as *major* under DORA Art. 18."""
         if self.major_override is not None:
             return self.major_override
-        return (
-            self.assessment.critical_services_affected
-            and self.assessment.other_criteria_met() >= 2
+        a = self.assessment
+        return a.critical_services_affected and (
+            a.data_losses or a.other_criteria_met() >= 2
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -199,7 +208,8 @@ class DoraIncident:
         ``detected_at + awareness_cap_hours`` cap — both must be satisfied. The
         intermediate deadline is anchored to the actual initial notification
         (else its due date); the final deadline to the actual intermediate
-        report (else its due date).
+        report (else its due date). "One month" is a calendar month:
+        ``final_days`` can only bring the deadline forward.
         """
         if self.classification is None or not self.classification.is_major:
             return []
@@ -211,7 +221,7 @@ class DoraIncident:
         intermediate_anchor = self.initial_notification_at or initial_due
         intermediate_due = intermediate_anchor + timedelta(hours=intermediate_hours)
         final_anchor = self.intermediate_report_at or intermediate_due
-        final_due = final_anchor + timedelta(days=final_days)
+        final_due = final_report_due(final_anchor, final_days)
         return [
             ReportingMilestone(
                 DoraMilestoneKind.INITIAL_NOTIFICATION,

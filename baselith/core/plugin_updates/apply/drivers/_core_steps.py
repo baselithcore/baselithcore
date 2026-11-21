@@ -41,8 +41,16 @@ logger = logging.getLogger(__name__)
 
 _MIGRATE_TIMEOUT = 1800.0
 _SCHEMA_INIT_TIMEOUT = 600.0
-#: The run message of a migration that failed after the checkout.
-MIGRATION_UNTOUCHED = "nothing changed on the running API; the schema may have advanced"
+#: Added to the run message of a failure after the checkout was switched. The
+#: files are back on the previous commit, but the API was not restarted: a
+#: worker that imported a module while the new files were in place keeps that
+#: version, so "nothing changed" would not be true.
+NOT_RESTARTED = (
+    "the checkout is back on the previous commit but the running API was not "
+    "restarted: restart it so every worker serves one version"
+)
+#: What a failed migration adds: the database may be ahead of the code.
+SCHEMA_MAY_HAVE_ADVANCED = "the schema may have advanced"
 
 
 def DB_MIGRATE_ARGV() -> list[str]:
@@ -57,10 +65,16 @@ def SCHEMA_INIT_ALL_ARGV() -> list[str]:
 
 @dataclass(frozen=True)
 class StepFailure:
-    """Why a step failed: the run's failure code and a path-free detail."""
+    """Why a step failed: the run's failure code and a path-free detail.
+
+    ``touched`` says the checkout's files were changed before the step failed,
+    so the running API may have imported some of them (see
+    :data:`NOT_RESTARTED`).
+    """
 
     code: str
     detail: str = ""
+    touched: bool = False
 
 
 async def verified_manifest(
@@ -134,8 +148,29 @@ def run_backup(runner: CommandRunner, config: UpdateApplyConfig) -> StepFailure 
     return None
 
 
+def tree_matches_head(
+    git: GitRunner, repo_root: Path, ignored: Sequence[str] = ()
+) -> bool:
+    """Every tracked file is the one HEAD names (unreadable status: False).
+
+    HEAD on the right commit is not the tree on the right commit. A checkout
+    that cannot replace one file (no permission, a full disk, a read-only
+    mount) says so on stderr, exits 0 and still moves HEAD; one killed half
+    way leaves new files under the old HEAD. Either way the files on disk are
+    a mix, which only the status shows.
+    """
+    try:
+        return not tree_is_dirty(porcelain(git, repo_root), ignored)
+    except GitError:
+        return False
+
+
 def switch_to(
-    git: GitRunner, repo_root: Path, remote_url: str | None, sha: str
+    git: GitRunner,
+    repo_root: Path,
+    remote_url: str | None,
+    sha: str,
+    ignored: Sequence[str] = (),
 ) -> StepFailure | None:
     """Make ``sha`` present and check it out detached (``checkout_failed`` otherwise)."""
     if not fetch_commit(git, repo_root, remote_url, sha):
@@ -144,16 +179,30 @@ def switch_to(
         return StepFailure(
             "checkout_failed", "the pinned commit could not be checked out"
         )
+    if not tree_matches_head(git, repo_root, ignored):
+        return StepFailure(
+            "checkout_failed",
+            "the checkout left files that differ from the pinned commit",
+            touched=True,
+        )
     return None
 
 
-def restore(git: GitRunner, repo_root: Path, sha: str | None) -> bool:
-    """Put HEAD back on ``sha`` (a no-op when it is there); False when it cannot."""
+def restore(
+    git: GitRunner, repo_root: Path, sha: str | None, ignored: Sequence[str] = ()
+) -> bool:
+    """Put HEAD *and the files* back on ``sha``; False when either is not there.
+
+    Never forced, so a tree that still differs after the checkout is reported
+    (the run ends ``rollback_failed``) instead of being called restored.
+    """
     if sha is None:
         return False
-    if current_head(git, repo_root) == sha:
-        return True
-    return checkout_detached(git, repo_root, sha)
+    if current_head(git, repo_root) != sha and not checkout_detached(
+        git, repo_root, sha
+    ):
+        return False
+    return tree_matches_head(git, repo_root, ignored)
 
 
 def lock_matches(repo_root: Path, expected: str) -> bool:
@@ -179,20 +228,25 @@ def migrate(
     rc = runner((argv or DB_MIGRATE_ARGV)(), env=env, timeout=_MIGRATE_TIMEOUT)
     if rc != 0:
         return StepFailure(
-            "migration_failed", f"db migrate exited {rc}; {MIGRATION_UNTOUCHED}"
+            "migration_failed",
+            f"db migrate exited {rc}; {SCHEMA_MAY_HAVE_ADVANCED}",
+            touched=True,
         )
     if schema_init:
         rc = runner(SCHEMA_INIT_ALL_ARGV(), env=env, timeout=_SCHEMA_INIT_TIMEOUT)
         if rc != 0:
             return StepFailure(
-                "migration_failed", f"schema-init exited {rc}; {MIGRATION_UNTOUCHED}"
+                "migration_failed",
+                f"schema-init exited {rc}; {SCHEMA_MAY_HAVE_ADVANCED}",
+                touched=True,
             )
     return None
 
 
 __all__ = [
     "DB_MIGRATE_ARGV",
-    "MIGRATION_UNTOUCHED",
+    "NOT_RESTARTED",
+    "SCHEMA_MAY_HAVE_ADVANCED",
     "SCHEMA_INIT_ALL_ARGV",
     "StepFailure",
     "current_head",
@@ -202,5 +256,6 @@ __all__ = [
     "restore",
     "run_backup",
     "switch_to",
+    "tree_matches_head",
     "verified_manifest",
 ]

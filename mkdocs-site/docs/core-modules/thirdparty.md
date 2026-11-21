@@ -42,7 +42,13 @@ remains responsible for completeness and for the regulatory submission.
   providers, functions, or subcontractors, and rejects an arrangement that
   claims to support a critical function without referencing one with
   critical/important criticality.
-- **Auditable.** Every mutation emits an `AUDIT | DORA-REGISTER | …` log line.
+- **Auditable.** Every mutation emits an `AUDIT | DORA-REGISTER | …` log line and a
+  `compliance.register` record on the [audit trail](audit-trail.md)
+  (`register: dora`; action `provider`, `function` or `arrangement`). A
+  change made inside a request is recorded with the acting user and tenant
+  bound to that request's context (see
+  [Recording an event](audit-trail.md#recording-an-event)); outside one both
+  stay empty. A change the register refuses leaves no record.
 
 ## Usage
 
@@ -115,7 +121,8 @@ All symbols are re-exported from `baselith.core.thirdparty`.
   register collections in one file and runs every statement on a worker thread —
   one `asyncio.to_thread` hop per public operation, covering lock, statement,
   fetch, JSON decode and record rehydration — so register writes never block the
-  event loop.
+  event loop. The file is set to `0600` (owner-only) when the store opens it,
+  whatever the process umask says.
 - **Keep it current.** Art. 28 requires the register to be kept up to date and
   made available to the competent authority on request — drive registrations
   from your procurement/contract lifecycle, not a one-off backfill.

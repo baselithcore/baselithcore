@@ -20,7 +20,9 @@ registered alongside every other store.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -193,6 +195,9 @@ class SQLiteConsentStore:
         self._conn = sqlite3.connect(
             str(self._path), check_same_thread=False, isolation_level=None
         )
+        # Regulatory records, some naming people: owner-only whatever the umask
+        # says. Before WAL is switched on, so its side files inherit the mode.
+        os.chmod(self._path, 0o600)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.executescript(self._SCHEMA)
@@ -289,10 +294,18 @@ class ConsentService:
             AuditEventType.PRIVACY_CONSENT,
             resource=subject_id,
             action="grant",
+            # The proof itself stays in the consent store, where an erasure
+            # reaches it. The trail keeps a digest: it shows which evidence a
+            # grant rested on without carrying free text that may name the
+            # person for as long as the trail is retained.
             details={
                 "purpose": purpose,
                 "notice_version": notice_version,
-                "evidence": evidence,
+                "evidence_sha256": (
+                    hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+                    if evidence
+                    else ""
+                ),
             },
         )
         return record

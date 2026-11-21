@@ -614,6 +614,13 @@ await audit.log(
 Convenience helpers `log_auth`, `log_api_request`, and `log_chat` wrap the
 common event types.
 
+`user_id` and `tenant_id` are optional, in `log` and in `audit_emit()` alike.
+Left out, each defaults to the identity bound to the request context
+(`baselith.core.context`), so a call site several layers below the route still
+records who acted and for which tenant. Outside a request both stay `None`: an
+unbound tenant is never written as `default`. A value passed explicitly always
+wins.
+
 From synchronous code `audit_emit()` schedules the write as a task on the
 running loop. Those tasks are flushed at shutdown:
 `await flush_pending_audit_events(timeout=3.0)` waits for the ones still in
@@ -626,7 +633,24 @@ every uvicorn or task-queue worker opens its own sink on the same file, and each
 append reads the chain head and inserts the new row inside one
 `BEGIN IMMEDIATE` transaction, so concurrent workers never link two rows to the
 same predecessor. Chain layout, keyed hashing and verification are covered in
-[Audit Trail](audit-trail.md).
+[Audit Trail](audit-trail.md). To export the trail (a SIEM collector), read it with the
+sequence cursor, `AuditQuery(after_seq=..., ascending=True)`, described there under
+[Shipping the trail out](audit-trail.md#shipping-the-trail-out-a-cursor-for-exporters).
+
+Three properties of that sink matter to a caller:
+
+- **The stored record is the hashed one.** A record is brought to the shape a
+  read gives back before it is hashed (`audit_digest.storable_payload`): a
+  non-string id becomes text, `success` a bool, `details` plain JSON types. A
+  value the JSON and SQLite round trip changes (an integer key in `details`,
+  for instance) therefore verifies, instead of reading as tampering.
+- **`verify_chain()` does not hold up writers.** It reads through a read-only
+  connection of its own and streams the rows, so appends continue while it runs
+  and the trail is never loaded into memory. It still re-hashes every record:
+  from async code call it with `await asyncio.to_thread(sink.verify_chain)`.
+- **A query is one page.** `AuditQuery.limit` is held to `0..10000`
+  (`MAX_QUERY_LIMIT`) and `offset` to zero or more; a negative limit does not
+  mean "no limit". Read further with the `after_seq` cursor.
 
 ---
 

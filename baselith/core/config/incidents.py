@@ -28,14 +28,18 @@ class IncidentReportingConfig(AliasedSettings):
     enabled: bool = Field(default=False, alias="INCIDENT_REPORTING_ENABLED")
     # NIS2 Art. 23 deadlines, expressed relative to the moment the entity
     # became aware of a significant incident ("detected_at"). Configurable for
-    # stricter internal SLAs, but never relax past the regulatory maxima.
+    # stricter internal SLAs only: the upper bound of each is the regulatory
+    # maximum, so a setting can bring a deadline forward and never push it out.
     early_warning_hours: int = Field(
-        default=24, alias="INCIDENT_EARLY_WARNING_HOURS", ge=1
+        default=24, alias="INCIDENT_EARLY_WARNING_HOURS", ge=1, le=24
     )
     notification_hours: int = Field(
-        default=72, alias="INCIDENT_NOTIFICATION_HOURS", ge=1
+        default=72, alias="INCIDENT_NOTIFICATION_HOURS", ge=1, le=72
     )
-    # Final report is due within one month of the incident notification.
+    # Final report is due within one month of the incident notification. The
+    # calendar month is the outer limit whatever this says: the value can only
+    # bring the deadline forward (30 days overshoots it after a notification
+    # late in January).
     final_report_days: int = Field(default=30, alias="INCIDENT_FINAL_REPORT_DAYS", ge=1)
 
     # DORA (EU 2022/2554) Art. 19 major-incident reporting clock. The initial
@@ -45,13 +49,13 @@ class IncidentReportingConfig(AliasedSettings):
     # intermediate report. Configurable for stricter internal SLAs only.
     dora_enabled: bool = Field(default=False, alias="DORA_INCIDENT_REPORTING_ENABLED")
     dora_initial_notification_hours: int = Field(
-        default=4, alias="DORA_INITIAL_NOTIFICATION_HOURS", ge=1
+        default=4, alias="DORA_INITIAL_NOTIFICATION_HOURS", ge=1, le=4
     )
     dora_awareness_cap_hours: int = Field(
-        default=24, alias="DORA_AWARENESS_CAP_HOURS", ge=1
+        default=24, alias="DORA_AWARENESS_CAP_HOURS", ge=1, le=24
     )
     dora_intermediate_report_hours: int = Field(
-        default=72, alias="DORA_INTERMEDIATE_REPORT_HOURS", ge=1
+        default=72, alias="DORA_INTERMEDIATE_REPORT_HOURS", ge=1, le=72
     )
     dora_final_report_days: int = Field(
         default=30, alias="DORA_FINAL_REPORT_DAYS", ge=1

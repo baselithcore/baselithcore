@@ -74,7 +74,11 @@ auditor sees the category actually asserted and when it last changed.
    that profiles natural persons is *always* high-risk, whatever ground is
    claimed. This is the trap the module exists to close.
 5. **GPAI is a separate axis**, not a rung on the ladder — Art. 53 duties, plus
-   Art. 55 on systemic risk.
+   Art. 55 on systemic risk. It never displaces rules 2–4: a record that is
+   both a general-purpose model and in an Annex I/III use is `HIGH_RISK`, with
+   the Chapter V articles added to its rationale and citations. Only an
+   Annex III use under a valid derogation is classified `GPAI`, and it keeps
+   `derogation_claimed` and `requires_registration`.
 6. Otherwise `LIMITED_RISK` when Art. 50 is triggered, else `MINIMAL_RISK`.
 
 Claiming the derogation does **not** remove the Art. 49 registration duty
@@ -101,6 +105,26 @@ refusing, so an operator can inventory a system *before* deciding to retire it.
 Narrow Art. 5 exemptions (medical/safety emotion inference, the law-enforcement
 biometric derogations) are recorded via `exemption_rationale` — recording one
 does not make it valid, it makes it reviewable.
+
+The declaration is **stored on the record** (`AiSystem.prohibited_practices`,
+the practice values), so it outlives the call that made it:
+
+```python
+system, _ = await registry.register(
+    AiSystem(name="scorer", intended_purpose="Rank citizens by behaviour"),
+    prohibited_practices=[ProhibitedPractice.SOCIAL_SCORING],
+)
+
+await registry.reclassify(system.id)                           # still PROHIBITED
+await registry.reclassify(system.id, prohibited_practices=[])  # declaration withdrawn
+```
+
+`reclassify()` with no `prohibited_practices` screens the stored declaration
+again: re-deriving the category never takes a system out of `PROHIBITED` by
+itself. Passing a list **replaces** the declaration, and an empty list
+withdraws it. Either way the `compliance.assessment` audit record carries the
+declaration before and after (`prohibited_practices_before`,
+`prohibited_practices`) next to the previous and current category.
 
 ## What do we owe?
 
@@ -368,6 +392,15 @@ evidence that monitoring was actually active — survives a restart with it.
 Breaches are audited as *failed* events so they stand out in the trail instead
 of blending into routine telemetry.
 
+`observe()` and `review()` change the stored plan **atomically**: read, change
+and write are one step, so observations that overlap are all kept — also across
+workers sharing one SQLite file, where the step is a single write transaction.
+A custom `PostMarketStore` gets the same guarantee by offering
+`update(plan_id, change)` (apply `change` to the stored plan and return
+`(plan, result)`, or `None` for an unknown id), as both bundled stores do. A
+store without it still works: the service then serialises its own
+read-change-write, which protects one process and not several.
+
 ## The review sweep
 
 Three obligations here are **recurring**, and each fails the same way — the
@@ -410,12 +443,19 @@ the `compliance:manage` [capability scope](auth.md#capability-scopes-fine-graine
 These records exist to be *shown* — to a DPO, an internal auditor, a market
 surveillance authority — and a Python REPL is not a surface those readers have.
 
+The registers have no tenant column: there is one set of records per
+deployment. Every `/compliance/*` route is therefore limited to credentials of
+the platform tenant (`default`), on top of the scope. A credential bound to
+another tenant gets `403` whatever it holds, `compliance:manage` and the
+`admin` role included — the same rule as the privacy
+[retention sweep](privacy.md#admin-api).
+
 | Method & path | Purpose |
 | ------------- | ------- |
 | `GET /compliance/systems` | List registered systems (filter by `risk_category`) |
 | `POST /compliance/systems` | Register a system: screens Art. 5, derives Art. 6 |
 | `GET /compliance/systems/{id}` | One system plus the obligations its category carries |
-| `POST /compliance/systems/{id}/reclassify` | Re-derive the category after the facts changed |
+| `POST /compliance/systems/{id}/reclassify` | Re-derive the category after the facts changed. The stored Art. 5 declaration is screened again, so this cannot take a system out of `prohibited` |
 | `POST /compliance/systems/{id}/lifecycle` | Advance the lifecycle stage |
 | `GET /compliance/summary` | Inventory roll-up by category |
 | `GET /compliance/pending-registration` | Open Art. 49 EU-database duties |
@@ -439,7 +479,7 @@ surveillance authority — and a Python REPL is not a surface those readers have
 | `POST /compliance/post-market/{id}/observe` | Record a production measurement |
 | `POST /compliance/post-market/{id}/review` | Record a plan review |
 | `GET /compliance/profile` | Report the deployment posture against the profile |
-| `GET /compliance/audit/verify` | Verify the audit trail's hash chain |
+| `GET /compliance/audit/verify` | Verify the audit trail's hash chain (re-hashed on a worker thread, so other requests keep being served) |
 
 Every `GET` that lists records is [cursor-paginated](../api/rest.md#pagination)
 (`limit` 1–200, default 50, plus `cursor`; the answer adds `next_cursor` and
@@ -499,6 +539,13 @@ for gap in report.gaps:
     print(gap.setting, "→", gap.why)
 ```
 
+## SOC 2 readiness
+
+The same package carries a sub-package for a different kind of obligation: not a
+statute with a clock but an attestation an auditor issues. See
+[SOC 2 Readiness](soc2.md) for controls, hash-anchored evidence, readiness and
+the auditor's package.
+
 ## What this module does not do
 
 - **It does not assess conformity.** Art. 43 is a procedure with a notified body
@@ -518,7 +565,8 @@ where these records must outlive the process by years. Set
 `COMPLIANCE_REGISTRY_DB_PATH`, `COMPLIANCE_DOCUMENTS_DB_PATH`,
 `COMPLIANCE_FRIA_DB_PATH`, `COMPLIANCE_ROPA_DB_PATH`,
 `COMPLIANCE_POST_MARKET_DB_PATH`, `COMPLIANCE_RISK_DB_PATH`,
-`COMPLIANCE_INSTRUCTIONS_DB_PATH` and `COMPLIANCE_DPIA_DB_PATH`. Every registration,
+`COMPLIANCE_INSTRUCTIONS_DB_PATH`, `COMPLIANCE_DPIA_DB_PATH` and, for the
+[SOC 2 readiness](soc2.md) engagement, `COMPLIANCE_SOC2_DB_PATH`. Every registration,
 reclassification and document write also lands in the
 [audit trail](audit-trail.md) as a `compliance.*` event.
 
@@ -529,3 +577,7 @@ model rehydration — so a compliance write cannot stall in-flight requests.
 Connections stay persistent and shared (`check_same_thread=False` plus an
 internal `RLock`, `PRAGMA journal_mode=WAL`); return values, exception types and
 transactional behaviour are unchanged.
+
+Each file is **owner-only**: the store sets it to `0600` when it opens it,
+whatever the process umask says, because these are regulatory records and some
+name people. That covers every path above, the SOC 2 file included.

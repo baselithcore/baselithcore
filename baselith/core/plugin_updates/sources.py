@@ -29,7 +29,9 @@ from .models import Advisory, ReleaseInfo
 logger = logging.getLogger(__name__)
 
 _API_VERSION = "2022-11-28"
-_TIMEOUT = httpx.Timeout(30.0)
+# A host that does not answer the handshake is given up on sooner than one
+# that is slow to send a body: a check waits for each lookup in turn.
+_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 #: Download cap when the caller sets none (``PLUGIN_UPDATE_MAX_ARTIFACT_MB``).
 DEFAULT_MAX_ARTIFACT_BYTES = 200 * 1024 * 1024
 

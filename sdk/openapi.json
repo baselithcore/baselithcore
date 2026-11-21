@@ -2172,9 +2172,10 @@
         "type": "object"
       },
       "PreflightLevel": {
-        "description": "How much an item stands in the way.",
+        "description": "How much an item stands in the way.\n\n``info`` is a fact, not a fault: the release does not install with one\nclick here by design (a plugin that ships inside this tree arrives with\nthe tree's next release), so there is nothing to fix, and the pre-flight\nis not ``ready`` either.",
         "enum": [
           "ok",
+          "info",
           "warn",
           "block"
         ],
@@ -4444,7 +4445,7 @@
   },
   "info": {
     "title": "Baselith-Core",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "openapi": "3.1.0",
   "paths": {

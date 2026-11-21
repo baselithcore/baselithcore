@@ -57,6 +57,8 @@ class FakeGit:
     locks: dict[str, bytes] = field(default_factory=lambda: {OLD: LOCK, NEW: LOCK})
     status: str = ""
     checkout_fails: set[str] = field(default_factory=set)
+    #: commit -> the status a checkout of it leaves (files it could not replace).
+    leaves: dict[str, str] = field(default_factory=dict)
     calls: list[list[str]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -90,6 +92,7 @@ class FakeGit:
                 return GitResult(1, "")
             self.head = target
             (self.root / "uv.lock").write_bytes(self.locks[target])
+            self.status = self.leaves.get(target, self.status)
             return GitResult(0, "")
         return GitResult(1, "")
 

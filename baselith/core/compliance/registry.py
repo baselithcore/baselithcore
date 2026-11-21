@@ -113,7 +113,14 @@ class AiSystemRegistry:
         decision; use :func:`baselith.core.compliance.prohibited.enforce_practices` at the
         call site when the deployment should refuse outright.
         """
+        if prohibited_practices is None and system.prohibited_practices:
+            # A record that already carries a declaration keeps being screened.
+            prohibited_practices = [
+                ProhibitedPractice(value) for value in system.prohibited_practices
+            ]
         screening = screen_practices(system.name, prohibited_practices)
+        if prohibited_practices is not None:
+            system.prohibited_practices = [p.value for p in screening.practices]
         result: ClassificationResult | None = None
         if classify:
             result = classify_system(
@@ -161,9 +168,22 @@ class AiSystemRegistry:
         Art. 6 classification is not a one-off: adding an Annex III use case or
         starting to profile natural persons changes the answer, and the change
         must be visible in the record.
+
+        The Art. 5 declaration is part of those facts. Left unstated
+        (``None``), the practices recorded on the system are screened again, so
+        re-deriving the category never takes a system out of ``PROHIBITED`` by
+        itself. Passing a list **replaces** the declaration, an empty one
+        withdraws it, and the audit record carries both the old and the new.
         """
         system = await self.require(system_id)
         previous = system.risk_category
+        declared_before = list(system.prohibited_practices)
+        if prohibited_practices is None:
+            prohibited_practices = [
+                ProhibitedPractice(value) for value in declared_before
+            ]
+        else:
+            system.prohibited_practices = [p.value for p in prohibited_practices]
         screening = screen_practices(system.name, prohibited_practices)
         result = classify_system(
             system,
@@ -189,6 +209,8 @@ class AiSystemRegistry:
             details={
                 "previous": previous.value,
                 "current": result.category.value,
+                "prohibited_practices_before": declared_before,
+                "prohibited_practices": list(system.prohibited_practices),
                 "rationale": result.rationale,
                 "citations": result.citations,
             },

@@ -25,6 +25,9 @@ from baselith.core.observability.logging import get_logger
 from baselith.core.privacy.consent import get_consent_service
 from baselith.core.privacy.service import get_data_subject_service
 from baselith.core.privacy.types import SubjectExport
+from baselith.plugins.api_routers.routes._platform import (
+    require_platform_credential,
+)
 from baselith.plugins.api_routers.schemas import (
     ErasureResult,
     PrivacyProviders,
@@ -39,10 +42,6 @@ router = APIRouter(
 )
 
 _SCOPE = "privacy:manage"
-
-#: The tenant platform-level credentials are bound to (the unauthenticated and
-#: single-tenant default). Deployment-wide operations are limited to it.
-PLATFORM_TENANT = "default"
 
 #: A subject id is an opaque identifier: no control characters (the consent
 #: log separates tenant and subject with one).
@@ -156,12 +155,7 @@ async def retention_sweep(
     its scopes, is refused, and a zero horizon (everything) is not accepted.
     """
     user = _enforce(request)
-    if user.tenant_id != PLATFORM_TENANT:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="the retention sweep spans every tenant; "
-            "it is limited to platform-level credentials",
-        )
+    require_platform_credential(user, "the retention sweep")
     if payload.older_than_days < 1:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

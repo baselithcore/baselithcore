@@ -350,3 +350,58 @@ async def test_request_check_is_throttled_per_process(
     clock[0] += svc_mod.CHECK_COOLDOWN_SECONDS
     await svc.request_check()
     assert calls == 3
+
+
+async def test_requests_that_arrive_during_a_check_share_its_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    calls = 0
+    release = asyncio.Event()
+
+    async def slow(*a: object, **k: object) -> CheckReport:
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return _report()
+
+    monkeypatch.setattr(svc_mod, "run_check", slow)
+    svc = svc_mod.PluginUpdateService(_cfg(tmp_path), bundled_root=tmp_path)
+    waiting = [asyncio.create_task(svc.request_check()) for _ in range(5)]
+    await asyncio.sleep(0.05)  # all five are in: one checking, four queued
+    release.set()
+    reports = await asyncio.gather(*waiting)
+
+    # Each of the four used to run a full check of its own once the first ended.
+    assert calls == 1
+    assert len({r.checked_at for r in reports}) == 1
+
+
+async def test_the_three_parts_of_a_check_run_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    import time
+
+    async def slow_plugins(*a: object, **k: object) -> CheckReport:
+        await asyncio.sleep(0.3)
+        return _report()
+
+    async def slow_system(*a: object, **k: object) -> SystemUpdate:
+        await asyncio.sleep(0.3)
+        return _sys_update()
+
+    async def slow_distribution(*a: object, **k: object) -> None:
+        await asyncio.sleep(0.3)
+
+    monkeypatch.setattr(svc_mod, "run_check", slow_plugins)
+    monkeypatch.setattr(svc_mod, "check_system", slow_system)
+    monkeypatch.setattr(svc_mod, "distribution_part", slow_distribution)
+    svc = svc_mod.PluginUpdateService(_sys_cfg(tmp_path, with_plugins=True))
+    started = time.monotonic()
+
+    report = await svc.check_now()
+
+    assert time.monotonic() - started < 0.6  # in sequence: 0.9
+    assert report.candidates and report.system is not None

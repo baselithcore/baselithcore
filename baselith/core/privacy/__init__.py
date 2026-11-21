@@ -41,6 +41,20 @@ from baselith.core.privacy.provider import (
     RestrictionProvider,
     RetentionProvider,
 )
+from baselith.core.privacy.request_service import (
+    DsrRequestService,
+    get_dsr_request_service,
+    reset_dsr_request_service,
+)
+from baselith.core.privacy.requests import (
+    DsrRequest,
+    DsrRequestError,
+    DsrRequestNotFoundError,
+    DsrRequestStatus,
+    DsrRequestType,
+    InMemoryDsrRequestStore,
+    SQLiteDsrRequestStore,
+)
 from baselith.core.privacy.scheduler import RetentionScheduler
 from baselith.core.privacy.service import (
     DataSubjectService,
@@ -89,6 +103,16 @@ __all__ = [
     "SubjectExport",
     "get_automated_decision_registry",
     "get_consent_service",
+    "DsrRequest",
+    "DsrRequestError",
+    "DsrRequestNotFoundError",
+    "DsrRequestService",
+    "DsrRequestStatus",
+    "DsrRequestType",
+    "InMemoryDsrRequestStore",
+    "SQLiteDsrRequestStore",
+    "get_dsr_request_service",
+    "reset_dsr_request_service",
     "get_data_subject_service",
     "register_data_provider",
     "reset_automated_decision_registry",

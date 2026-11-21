@@ -34,6 +34,11 @@ class ChainVerification:
         }
 
 
+#: Most rows one :meth:`SQLiteAuditSink.query` call returns. An exporter pages
+#: with ``after_seq``; nothing needs the whole trail in one list.
+MAX_QUERY_LIMIT = 10_000
+
+
 @dataclass(slots=True)
 class AuditQuery:
     """Filter for :meth:`SQLiteAuditSink.query`. Unset fields are ignored."""
@@ -45,6 +50,22 @@ class AuditQuery:
     until: datetime | None = None
     limit: int = 100
     offset: int = 0
+    #: Only records whose chain sequence number is greater than this (``0`` is
+    #: everything). The cursor an exporter keeps between polls: ``seq`` is monotonic,
+    #: unique and survives a retention purge, which removes a prefix, never a middle link.
+    after_seq: int | None = None
+    #: Oldest first (``seq`` ascending), the order an exporter reads. The default is
+    #: newest first, which suits a screen.
+    ascending: bool = False
+
+    def page(self) -> tuple[int, int]:
+        """``(limit, offset)`` as SQLite may run them.
+
+        SQLite reads a negative ``LIMIT`` as *no limit*, so an unchecked
+        ``limit=-1`` returned the whole trail into memory. The limit is held to
+        ``0..MAX_QUERY_LIMIT`` and the offset to zero or more.
+        """
+        return max(0, min(int(self.limit), MAX_QUERY_LIMIT)), max(0, int(self.offset))
 
     def where(self) -> tuple[str, list[Any]]:
         """Render the filter as a SQL ``WHERE`` fragment plus its parameters."""
@@ -64,6 +85,9 @@ class AuditQuery:
         if self.until is not None:
             clauses.append("timestamp <= ?")
             params.append(self.until.astimezone(UTC).isoformat())
+        if self.after_seq is not None:
+            clauses.append("seq > ?")
+            params.append(int(self.after_seq))
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -78,4 +102,4 @@ class _ChainedRow:
     columns: dict[str, Any] = field(default_factory=dict)
 
 
-__all__ = ["AuditQuery", "ChainVerification", "_ChainedRow"]
+__all__ = ["MAX_QUERY_LIMIT", "AuditQuery", "ChainVerification", "_ChainedRow"]

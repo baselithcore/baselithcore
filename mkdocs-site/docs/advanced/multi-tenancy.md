@@ -733,7 +733,7 @@ are long-lived or touch no database (`baselith/core/cli/handlers.py`):
 | Exemption | Members | Why |
 | --- | --- | --- |
 | `UNSCOPED_COMMANDS` | `init`, `run`, `test`, `lint`, `shell` | `init`/`test`/`lint` open no connection. `run` and `shell` are **long-lived processes**: binding `system` for their lifetime would turn the pool's fail-closed check into a no-op for every unbound query underneath. |
-| `UNSCOPED_SUBCOMMANDS` | `("queue", "worker")` | Same argument as `run` — it blocks for the life of the process, and the worker already binds an identity per *unit of work*. Keyed on the pair because `baselith queue status` is an ordinary short command and stays scoped. |
+| `UNSCOPED_SUBCOMMANDS` | `("queue", "worker")`, `("plugin-updater", "serve")` | Same argument as `run` — each blocks for the life of the process, and the worker already binds an identity per *unit of work*. Keyed on the pair because `baselith queue status` is an ordinary short command and stays scoped. |
 
 !!! warning "`baselith shell` and `baselith queue worker` run unbound under RLS"
     That is the intended design — but it means a query you type into the REPL has

@@ -24,7 +24,11 @@ from baselith.core.incidents.gdpr import (
     BreachStatus,
     PersonalDataBreach,
 )
-from baselith.core.incidents.types import ReportingMilestone, _utcnow
+from baselith.core.incidents.types import (
+    ReportingMilestone,
+    _utcnow,
+    require_aware,
+)
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
@@ -130,7 +134,7 @@ class BreachService:
             details=dict(details or {}),
         )
         if became_aware_at is not None:
-            breach.became_aware_at = became_aware_at
+            breach.became_aware_at = require_aware(became_aware_at, "became_aware_at")
         await self._store.save(breach)
         logger.info(
             "AUDIT | GDPR-BREACH | registered | id=%s risk=%s notify=%s subjects=%d",
@@ -169,7 +173,7 @@ class BreachService:
     ) -> PersonalDataBreach:
         """Stamp a milestone and advance status (never backwards)."""
         breach = await self._require(breach_id)
-        stamp = at or _utcnow()
+        stamp = require_aware(at, field_name) if at is not None else _utcnow()
         setattr(breach, field_name, stamp)
         if status is not None and _rank(status) > _rank(breach.status):
             breach.status = status

@@ -17,6 +17,8 @@ incident question, freezing a rollout — remains the operator's decision.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -32,7 +34,14 @@ logger = get_logger(__name__)
 
 
 class PostMarketStore(Protocol):
-    """Persistence boundary for monitoring plans."""
+    """Persistence boundary for monitoring plans.
+
+    A store may also offer ``update(plan_id, change)``: read the plan, apply
+    ``change`` and write it back as one atomic step, returning ``(plan,
+    result)`` or ``None`` for an unknown id. Both bundled stores do. It stays
+    off the protocol so a store written before it existed still satisfies it;
+    the service then serialises its own read-change-write instead.
+    """
 
     async def save(self, plan: PostMarketMonitoringPlan) -> None:
         """Insert or update a plan (observations travel with it)."""
@@ -66,6 +75,13 @@ class InMemoryPostMarketStore:
     async def list_all(self) -> list[PostMarketMonitoringPlan]:
         return list(self._plans.values())
 
+    async def update[R](
+        self, plan_id: str, change: Callable[[PostMarketMonitoringPlan], R]
+    ) -> tuple[PostMarketMonitoringPlan, R] | None:
+        """Apply ``change`` in place; no await, so nothing interleaves."""
+        plan = self._plans.get(plan_id)
+        return None if plan is None else (plan, change(plan))
+
     async def delete(self, plan_id: str) -> bool:
         return self._plans.pop(plan_id, None) is not None
 
@@ -75,11 +91,41 @@ class PostMarketService:
 
     def __init__(self, store: PostMarketStore | None = None) -> None:
         self._store = store or InMemoryPostMarketStore()
+        self._change_lock = asyncio.Lock()
+
+    async def _change[R](
+        self, plan_id: str, change: Callable[[PostMarketMonitoringPlan], R]
+    ) -> tuple[PostMarketMonitoringPlan, R]:
+        """Read a plan, apply ``change`` and store it without losing a writer.
+
+        Observations travel inside the plan, so a read here and a write there
+        let two overlapping observations each put back a copy missing the
+        other: forty concurrent breaches left one on record. The store's atomic
+        ``update`` closes that across every worker sharing the file; a store
+        without one is at least serialised within this process.
+        """
+        update = getattr(self._store, "update", None)
+        if update is not None:
+            found = await update(plan_id, change)
+            if found is None:
+                raise LookupError(f"Post-market monitoring plan not found: {plan_id}")
+            plan, result = found
+            return plan, result
+        async with self._change_lock:
+            plan = await self.require(plan_id)
+            result = change(plan)
+            await self._store.save(plan)
+            return plan, result
 
     async def save(self, plan: PostMarketMonitoringPlan) -> PostMarketMonitoringPlan:
         """Store a plan and audit its completeness."""
         plan.updated_at = _utcnow()
         await self._store.save(plan)
+        return await self._audit_plan(plan)
+
+    async def _audit_plan(
+        self, plan: PostMarketMonitoringPlan
+    ) -> PostMarketMonitoringPlan:
         await get_audit_logger().log(
             AuditEventType.COMPLIANCE_ASSESSMENT,
             resource=plan.system_id,
@@ -107,9 +153,9 @@ class PostMarketService:
         A breach is audited as a **failed** event, so it stands out in the trail
         rather than blending into routine telemetry.
         """
-        plan = await self.require(plan_id)
-        observation = plan.observe(metric, value, at=at, context=context)
-        await self._store.save(plan)
+        plan, observation = await self._change(
+            plan_id, lambda p: p.observe(metric, value, at=at, context=context)
+        )
         if observation.is_breach:
             logger.warning(
                 "AUDIT | COMPLIANCE | post-market threshold breach | system=%s "
@@ -136,9 +182,14 @@ class PostMarketService:
         self, plan_id: str, *, at: datetime | None = None
     ) -> PostMarketMonitoringPlan:
         """Record a plan review, resetting the Art. 72(1) cadence."""
-        plan = await self.require(plan_id)
-        plan.last_reviewed_at = at or _utcnow()
-        return await self.save(plan)
+        stamp = at or _utcnow()
+
+        def _mark(plan: PostMarketMonitoringPlan) -> None:
+            plan.last_reviewed_at = stamp
+            plan.updated_at = _utcnow()
+
+        plan, _ = await self._change(plan_id, _mark)
+        return await self._audit_plan(plan)
 
     async def get(self, plan_id: str) -> PostMarketMonitoringPlan | None:
         return await self._store.get(plan_id)

@@ -57,6 +57,7 @@ import hmac
 import json
 import os
 import sqlite3
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
@@ -77,6 +78,7 @@ from baselith.core.observability.audit_digest import (
     coerce_chain_key,
     compute_entry_hash,
     require_chain_key_from_env,
+    storable_payload,
 )
 from baselith.core.observability.logging import get_logger
 
@@ -224,7 +226,9 @@ class SQLiteAuditSink:
         sink on the same file, and two of them reading one head forked the
         chain, which ``verify_chain`` then reported as tampering.
         """
-        payload["details"] = self._bounded_details(payload.get("details") or {})
+        # Hash what a read gives back, not what the caller happened to pass.
+        payload = storable_payload(payload)
+        payload["details"] = self._bounded_details(payload["details"])
         with self._lock:
             # Write lock before the head read: other processes wait for COMMIT.
             self._conn.execute("BEGIN IMMEDIATE")
@@ -299,15 +303,16 @@ class SQLiteAuditSink:
             return int(cur.fetchone()["n"])
 
     def query(self, spec: AuditQuery | None = None) -> list[dict[str, Any]]:
-        """Return matching records, newest first."""
+        """Return matching records, newest first (oldest first with ``ascending``)."""
         spec = spec or AuditQuery()
         where, params = spec.where()
+        direction = "ASC" if spec.ascending else "DESC"
         sql = (
-            f"SELECT {_COLUMNS} FROM audit_log{where} "  # noqa: S608  # nosec B608 - fixed columns
-            "ORDER BY seq DESC LIMIT ? OFFSET ?"
+            f"SELECT {_COLUMNS} FROM audit_log{where} "  # noqa: S608  # nosec B608 - fixed columns, fixed direction
+            f"ORDER BY seq {direction} LIMIT ? OFFSET ?"
         )
         with self._lock:
-            cur = self._conn.execute(sql, [*params, spec.limit, spec.offset])
+            cur = self._conn.execute(sql, [*params, *spec.page()])
             rows = cur.fetchall()
         return [self._row_to_dict(row) for row in rows]
 
@@ -335,20 +340,32 @@ class SQLiteAuditSink:
                 anchor_hash="",
                 head_hash="",
             )
-        with self._lock:
-            cur = self._conn.execute(
-                f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"  # noqa: S608  # nosec B608 - fixed columns
+        # A connection of its own, read-only: in WAL mode it reads one
+        # consistent snapshot without holding the appenders' lock, and the
+        # rows stream instead of the whole trail being loaded at once.
+        reader = sqlite3.connect(
+            f"{self._path.resolve().as_uri()}?mode=ro",
+            uri=True,
+            timeout=_BUSY_TIMEOUT_MS / 1000,
+        )
+        reader.row_factory = sqlite3.Row
+        try:
+            return self._verify_rows(
+                reader.execute(
+                    f"SELECT {_COLUMNS} FROM audit_log ORDER BY seq ASC"  # noqa: S608  # nosec B608 - fixed columns
+                )
             )
-            rows = cur.fetchall()
+        finally:
+            reader.close()
 
-        if not rows:
-            return ChainVerification(ok=True, checked=0)
-
-        anchor = str(rows[0]["prev_hash"])
-        expected_prev = anchor
+    def _verify_rows(self, rows: Iterable[sqlite3.Row]) -> ChainVerification:
+        """Walk ``rows`` oldest first and report the first broken link."""
+        anchor: str | None = None
+        expected_prev = head = ""
         checked = 0
-        head = anchor
         for row in rows:
+            if anchor is None:
+                anchor = expected_prev = head = str(row["prev_hash"])
             chained = self._chained_row(row)
             if chained.prev_hash != expected_prev:
                 return ChainVerification(
@@ -378,6 +395,8 @@ class SQLiteAuditSink:
             expected_prev = chained.entry_hash
             head = chained.entry_hash
             checked += 1
+        if anchor is None:
+            return ChainVerification(ok=True, checked=0)
         return ChainVerification(
             ok=True, checked=checked, anchor_hash=anchor, head_hash=head
         )

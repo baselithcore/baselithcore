@@ -19,6 +19,7 @@ document tool, not in a JSON POST.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 import orjson
@@ -30,6 +31,7 @@ from baselith.core.auth.manager import AuthManager
 from baselith.core.auth.types import AuthUser
 from baselith.core.middleware import require_user
 from baselith.core.observability.logging import get_logger
+from baselith.plugins.api_routers.routes._platform import require_platform_credential
 
 logger = get_logger(__name__)
 
@@ -44,6 +46,8 @@ def _enforce(request: Request) -> AuthUser:
     user: AuthUser | None = getattr(request.state, "user", None)
     AuthManager.enforce_scopes(user, _SCOPE)
     assert user is not None
+    # No register here has a tenant column: one set of records per deployment.
+    require_platform_credential(user, "the compliance registers")
     return user
 
 
@@ -399,12 +403,11 @@ async def list_post_market(
     plans = (
         await service.for_system(system_id) if system_id else await service.list_plans()
     )
-    overdue = {p.id for p in await service.overdue_reviews()}
     return paginated(
         plans,
         page,
         key="plans",
-        serialize=lambda p: {**p.to_dict(), "review_overdue": p.id in overdue},
+        serialize=lambda p: {**p.to_dict(), "review_overdue": p.is_review_overdue()},
     )
 
 
@@ -485,4 +488,5 @@ async def verify_audit_chain(request: Request) -> dict[str, Any]:
             "ok": None,
             "reason": "no durable audit sink configured (set AUDIT_DB_PATH)",
         }
-    return sink.verify_chain().to_dict()
+    # The whole trail is re-hashed: a worker thread, never the event loop.
+    return (await asyncio.to_thread(sink.verify_chain)).to_dict()

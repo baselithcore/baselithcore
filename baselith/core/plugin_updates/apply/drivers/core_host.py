@@ -60,9 +60,10 @@ from .._io import CommandRunner, SchemaEnvError, schema_env
 from ..boot_report import latest_active_plugins
 from ..models import CORE_CLAIM, ApplyRun, RunKind, RunState, UpdaterHeartbeat
 from ..store import RunStateConflict, RunStore
-from ._core_guards import CoreRelease, core_blockers
+from ._core_guards import CoreRelease, core_blockers, release_is_newer
 from ._core_health import CoreExpectation, wait_core_healthy
 from ._core_steps import (
+    NOT_RESTARTED,
     StepFailure,
     current_head,
     host_state,
@@ -154,11 +155,13 @@ class CoreHostDriver:
 
     def _switch_locked(self, sha: str) -> StepFailure | None:
         with self._store.plugin_lock(CORE_CLAIM):
-            return switch_to(self._git, self._root, self._remote, sha)
+            return switch_to(
+                self._git, self._root, self._remote, sha, self._config.ignored_paths
+            )
 
     def _restore_locked(self, sha: str | None) -> bool:
         with self._store.plugin_lock(CORE_CLAIM):
-            return restore(self._git, self._root, sha)
+            return restore(self._git, self._root, sha, self._config.ignored_paths)
 
     async def _blocked(
         self, run: ApplyRun, release: CoreRelease | None, target: str
@@ -222,6 +225,12 @@ class CoreHostDriver:
             if isinstance(found, StepFailure):
                 return await self._fail(run, found.code, found.detail)
             release = CoreRelease.of(found)
+            # Every writer of a run is trusted to pick a newer release; the
+            # driver that installs it checks anyway, as the plugin path does.
+            if not release_is_newer(self._framework, release.version):
+                return await self._fail(
+                    run, "not_newer", "the release is not newer than what runs here"
+                )
         release, blocked = await self._blocked(run, release, target)
         if blocked is not None:
             return await self._fail(run, blocked.code, blocked.detail)
@@ -259,7 +268,7 @@ class CoreHostDriver:
             return await self._undo(run, switched)
         if not await asyncio.to_thread(lock_matches, self._root, release.lock_sha256):
             failure = StepFailure(
-                "lock_mismatch", "uv.lock differs from the signed hash"
+                "lock_mismatch", "uv.lock differs from the signed hash", touched=True
             )
             return await self._undo(run, failure)
         if env is not None:
@@ -271,9 +280,17 @@ class CoreHostDriver:
         return await self._activate(run, release.version)
 
     async def _undo(self, run: ApplyRun, failure: StepFailure) -> ApplyRun:
-        """Put HEAD back on ``previous_target`` without a restart (nothing stopped)."""
+        """Put HEAD back on ``previous_target`` without a restart (nothing stopped).
+
+        When the files were switched first, the message says the API was not
+        restarted (:data:`NOT_RESTARTED`): the run is ``failed``, the tree is
+        back, and the operator is told what the API may still be running.
+        """
         if await asyncio.to_thread(self._restore_locked, run.previous_target):
-            return await self._fail(run, failure.code, failure.detail)
+            detail = failure.detail
+            if failure.touched:
+                detail = f"{detail}; {NOT_RESTARTED}" if detail else NOT_RESTARTED
+            return await self._fail(run, failure.code, detail)
         return await self._rollback_failed(
             run, failure.code, failure.detail, _NO_RESTORE
         )

@@ -35,8 +35,8 @@ which is precisely the input ``_current_tenant_for_session`` reads.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
-import types
 from contextlib import contextmanager
 
 import pytest
@@ -311,8 +311,7 @@ class TestCoverage:
 class TestABrokenConfigDoesNotBreakTheCli:
     """The commands you run *because* the configuration is broken must run.
 
-    ``_rls_enabled`` imports ``baselith.core.db.connection``, which evaluates
-    ``get_storage_config()`` at module scope. A malformed ``DB_*`` variable
+    ``_rls_enabled`` reads ``get_storage_config()``. A malformed ``DB_*`` variable
     therefore raised a pydantic ``ValidationError`` out of the dispatcher — from
     ``baselith doctor``, ``info`` and ``config validate`` among others, which is
     exactly backwards. It degrades to "RLS off" instead: a storage config that
@@ -334,15 +333,13 @@ class TestABrokenConfigDoesNotBreakTheCli:
 
     @pytest.fixture
     def unloadable_db_module(self, monkeypatch):
-        """Stand in for ``baselith.core.db.connection`` failing to evaluate its config."""
+        """Stand in for a storage configuration that does not validate."""
         error = self._config_error()
-        module = types.ModuleType("baselith.core.db.connection")
 
-        def _raise(_name: str):
+        def _raise():
             raise error
 
-        module.__getattr__ = _raise  # type: ignore[method-assign]
-        monkeypatch.setitem(sys.modules, "baselith.core.db.connection", module)
+        monkeypatch.setattr("baselith.core.config.get_storage_config", _raise)
         return error
 
     def test_the_probe_degrades_instead_of_raising(self, unloadable_db_module):
@@ -374,11 +371,43 @@ class TestABrokenConfigDoesNotBreakTheCli:
     def test_a_missing_module_still_degrades(self, monkeypatch):
         """The original ``ImportError`` path is unchanged."""
 
-        def _raise(_name: str):
-            raise ImportError("no baselith.core.db.connection")
+        def _raise():
+            raise ImportError("no baselith.core.config")
 
-        module = types.ModuleType("baselith.core.db.connection")
-        module.__getattr__ = _raise  # type: ignore[method-assign]
-        monkeypatch.setitem(sys.modules, "baselith.core.db.connection", module)
+        monkeypatch.setattr("baselith.core.config.get_storage_config", _raise)
 
         assert handlers._rls_enabled() is False
+
+    def test_the_probe_reads_the_setting_the_pool_module_copies(self, monkeypatch):
+        from types import SimpleNamespace
+
+        for value in (True, False):
+            monkeypatch.setattr(
+                "baselith.core.config.get_storage_config",
+                lambda value=value: SimpleNamespace(db_rls_enabled=value),
+            )
+            assert handlers._rls_enabled() is value
+
+    def test_answering_no_does_not_load_the_pool_module(self):
+        """One boolean used to cost psycopg, its pool and the middleware package:
+        a third of the start-up of every scoped command."""
+        import subprocess
+
+        code = (
+            "import sys\n"
+            "from baselith.core.cli import handlers\n"
+            "assert handlers._rls_enabled() is False\n"
+            "loaded = [m for m in ('psycopg_pool', 'baselith.core.db.connection',"
+            " 'baselith.core.middleware') if m in sys.modules]\n"
+            "print(loaded)\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "DB_RLS_ENABLED": "false"},
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
+        assert done.stdout.strip() == "[]"

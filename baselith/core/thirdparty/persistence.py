@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -60,6 +61,9 @@ class SQLiteRegisterStore:
         self._conn = sqlite3.connect(
             str(self._path), check_same_thread=False, isolation_level=None
         )
+        # Regulatory records, some naming people: owner-only whatever the umask
+        # says. Before WAL is switched on, so its side files inherit the mode.
+        os.chmod(self._path, 0o600)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         for table in (_PROVIDERS, _FUNCTIONS, _ARRANGEMENTS):

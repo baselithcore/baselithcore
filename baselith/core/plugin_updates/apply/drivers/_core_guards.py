@@ -101,6 +101,14 @@ def tree_is_dirty(porcelain: str, ignored: Sequence[str]) -> bool:
     return False
 
 
+def release_is_newer(installed: str, target: str) -> bool:
+    """``target`` is a later version than ``installed`` (unreadable: False)."""
+    try:
+        return SemanticVersion(target) > SemanticVersion(installed)
+    except ValueError:  # an unreadable version is never a silent "newer"
+        return False
+
+
 def _major_differs(installed: str, target: str) -> bool:
     try:
         return SemanticVersion(installed).major != SemanticVersion(target).major

@@ -21,6 +21,7 @@ timezone-aware UTC throughout.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -38,6 +39,46 @@ def _parse_dt(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def add_calendar_months(moment: datetime, months: int) -> datetime:
+    """The same date and time ``months`` calendar months later.
+
+    Counted from ``moment`` in one step, not by repeating "one month": 31
+    January plus three months is 30 April, where three successive single months
+    would drift to 28 April.
+    """
+    index = moment.year * 12 + (moment.month - 1) + months
+    year, month = divmod(index, 12)
+    month += 1
+    day = min(moment.day, calendar.monthrange(year, month)[1])
+    return moment.replace(year=year, month=month, day=day)
+
+
+def one_month_after(moment: datetime) -> datetime:
+    """The same date and time one calendar month later.
+
+    A statutory "one month" is a calendar month, not thirty days: it ends on
+    the date that matches the starting one, or on the last day of the month
+    when that date does not exist (Regulation (EEC, Euratom) No 1182/71,
+    Art. 3(2)(c)). So one month after 31 January is 28 February (29 in a leap
+    year) — whereas thirty days later is 2 March, two days past the limit.
+
+    The time of day is kept rather than extended to the end of the day, which
+    errs on the early side and needs no assumption about the authority's
+    timezone.
+    """
+    return add_calendar_months(moment, 1)
+
+
+def final_report_due(anchor: datetime, days: int) -> datetime:
+    """A "within one month" deadline counted from ``anchor``.
+
+    ``days`` is the configured window. It may make the deadline *stricter* than
+    the regulation, never looser: the calendar month is the outer limit, so the
+    earlier of the two governs.
+    """
+    return min(anchor + timedelta(days=days), one_month_after(anchor))
 
 
 class IncidentSeverity(str, Enum):
@@ -100,10 +141,40 @@ class GdprMilestoneKind(str, Enum):
     SUBJECT_COMMUNICATION = "subject_communication"
 
 
+class DsrMilestoneKind(str, Enum):
+    """The GDPR Art. 12(3) obligation to answer a data-subject request.
+
+    One month from receipt, extendable by two further months where necessary
+    (the data subject being told of the extension within the first month).
+    """
+
+    RESPONSE = "response"
+
+
 #: Every milestone taxonomy a :class:`ReportingMilestone` can carry.
 AnyMilestoneKind = (
-    MilestoneKind | DoraMilestoneKind | AiActMilestoneKind | GdprMilestoneKind
+    MilestoneKind
+    | DoraMilestoneKind
+    | AiActMilestoneKind
+    | GdprMilestoneKind
+    | DsrMilestoneKind
 )
+
+
+def require_aware(moment: datetime, name: str) -> datetime:
+    """Return ``moment``, refusing one that carries no timezone.
+
+    A register compares every instant it holds with an aware "now". One naive
+    value, once stored, made each listing and each deadline sweep of that
+    register raise ``TypeError`` — for every record, and with no delete path
+    to take it out again. Refused at the door instead.
+
+    Raises:
+        ValueError: ``moment`` is naive.
+    """
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError(f"{name} must carry a timezone, got a naive datetime")
+    return moment
 
 
 @dataclass
@@ -186,14 +257,16 @@ class SecurityIncident:
         Early-warning and notification deadlines are anchored to ``detected_at``;
         the final-report deadline is one month after the *notification* (using
         its actual submission time when available, else the notification due
-        date as a planning anchor).
+        date as a planning anchor). "One month" is a calendar month:
+        ``final_report_days`` can only bring the deadline forward (see
+        :func:`final_report_due`).
         """
         if not self.significant:
             return []
         early_due = self.detected_at + timedelta(hours=early_warning_hours)
         notif_due = self.detected_at + timedelta(hours=notification_hours)
         final_anchor = self.notification_at or notif_due
-        final_due = final_anchor + timedelta(days=final_report_days)
+        final_due = final_report_due(final_anchor, final_report_days)
         return [
             ReportingMilestone(
                 MilestoneKind.EARLY_WARNING, early_due, self.early_warning_at
@@ -259,10 +332,15 @@ __all__ = [
     "AiActMilestoneKind",
     "AnyMilestoneKind",
     "DoraMilestoneKind",
+    "DsrMilestoneKind",
     "GdprMilestoneKind",
     "IncidentSeverity",
     "IncidentStatus",
     "MilestoneKind",
     "ReportingMilestone",
     "SecurityIncident",
+    "add_calendar_months",
+    "final_report_due",
+    "one_month_after",
+    "require_aware",
 ]
