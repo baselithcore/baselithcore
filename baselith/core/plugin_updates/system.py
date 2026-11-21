@@ -9,6 +9,7 @@ Notice only: nothing here installs or downloads anything.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -138,25 +139,37 @@ async def check_system(
         current = SemanticVersion(installed)
     except ValueError:
         return result.model_copy(update={"error": "invalid installed version"})
-    try:
-        releases = await source.list_releases(_COMPONENT_NAME, slug)
-    except SourceError as exc:
+    # The two lookups are independent requests to the same host: one round
+    # trip of waiting, not two. Each outcome is judged on its own below, and an
+    # error this function does not handle propagates exactly as before.
+    fetched_releases, fetched_advisories = await asyncio.gather(
+        source.list_releases(_COMPONENT_NAME, slug),
+        source.security_advisories(slug),
+        return_exceptions=True,
+    )
+    if isinstance(fetched_releases, SourceError):
         releases_failed = True
-        errors.append(safe_error(exc))
+        errors.append(safe_error(fetched_releases))
+    elif isinstance(fetched_releases, BaseException):
+        raise fetched_releases
+    else:
+        releases = fetched_releases
     newer = [r for r in releases if SemanticVersion(r.version) > current]
     latest = releases[0] if releases else None
     matching: list[Advisory] = []
-    try:
+    if isinstance(fetched_advisories, AdvisoriesNotPublished):
+        advisories_failed = True
+    elif isinstance(fetched_advisories, SourceError):
+        advisories_failed = True
+        errors.append(f"advisories unavailable ({safe_error(fetched_advisories)})")
+    elif isinstance(fetched_advisories, BaseException):
+        raise fetched_advisories
+    else:
         seen: set[str] = set()
-        for adv in await source.security_advisories(slug):
+        for adv in fetched_advisories:
             if affects(adv, installed) and adv.ghsa_id not in seen:
                 seen.add(adv.ghsa_id)
                 matching.append(adv)
-    except AdvisoriesNotPublished:
-        advisories_failed = True
-    except SourceError as exc:
-        advisories_failed = True
-        errors.append(f"advisories unavailable ({safe_error(exc)})")
     severity = max(
         (a.severity for a in matching), key=lambda s: SEVERITY_ORDER[s], default=None
     )

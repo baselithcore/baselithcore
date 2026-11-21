@@ -142,3 +142,46 @@ class TestEventLoopIsNotBlocked:
 
         assert len(probe.threads) == 3
         assert loop_thread not in probe.threads
+
+
+class TestAuditDoesNotCarryTheProof:
+    async def test_a_grant_is_audited_with_a_digest_of_its_evidence(self, monkeypatch):
+        import hashlib
+
+        records: list[dict] = []
+
+        class _Logger:
+            async def log(self, event_type, **kwargs):
+                records.append(kwargs)
+
+        monkeypatch.setattr(
+            "baselith.core.privacy.consent.get_audit_logger", lambda: _Logger()
+        )
+        evidence = "ticket 4411: Mario Rossi ticked the box on 2027-03-01"
+
+        service = ConsentService()
+        record = await service.grant("s1", "marketing", evidence=evidence)
+
+        (audit,) = records
+        assert "evidence" not in audit["details"]
+        assert (
+            audit["details"]["evidence_sha256"]
+            == hashlib.sha256(evidence.encode()).hexdigest()
+        )
+        assert evidence not in str(audit)
+        assert record.evidence == evidence  # the proof stays where erasure reaches it
+
+    async def test_no_evidence_leaves_the_digest_empty(self, monkeypatch):
+        records: list[dict] = []
+
+        class _Logger:
+            async def log(self, event_type, **kwargs):
+                records.append(kwargs)
+
+        monkeypatch.setattr(
+            "baselith.core.privacy.consent.get_audit_logger", lambda: _Logger()
+        )
+
+        await ConsentService().grant("s1", "marketing")
+
+        assert records[0]["details"]["evidence_sha256"] == ""

@@ -242,3 +242,58 @@ def test_advisory_without_a_range_is_kept_not_dropped() -> None:
     entry["vulnerabilities"][0]["vulnerable_version_range"] = None
     advs = parse_advisory(entry)
     assert [a.ghsa_id for a in advs] == ["GHSA-9"] and advs[0].vulnerable_range == ""
+
+
+async def test_the_release_and_advisory_lookups_run_together() -> None:
+    import asyncio
+    import time
+
+    class _Slow(GitHubReleaseSource):
+        async def list_releases(self, plugin: str, slug: str):  # type: ignore[override]
+            await asyncio.sleep(0.3)
+            return []
+
+        async def security_advisories(self, slug: str):  # type: ignore[override]
+            await asyncio.sleep(0.3)
+            return []
+
+    source = _Slow("https://api.github.com", SecretStr("t"))
+    started = time.monotonic()
+
+    result = await check_system("1.0.0", "o/r", source=source)
+
+    assert result.error is None
+    assert time.monotonic() - started < 0.55  # two in sequence would be 0.6
+
+
+async def test_each_lookup_still_fails_on_its_own() -> None:
+    from baselith.core.plugin_updates.sources import AdvisoriesNotPublished, SourceError
+
+    class _Mixed(GitHubReleaseSource):
+        async def list_releases(self, plugin: str, slug: str):  # type: ignore[override]
+            raise SourceError("releases down")
+
+        async def security_advisories(self, slug: str):  # type: ignore[override]
+            raise AdvisoriesNotPublished
+
+    result = await check_system(
+        "1.0.0", "o/r", source=_Mixed("https://api.github.com", SecretStr("t"))
+    )
+
+    assert result.error is not None and "releases down" in result.error
+
+
+async def test_an_unexpected_error_is_not_swallowed_by_the_gather() -> None:
+    import pytest
+
+    class _Broken(GitHubReleaseSource):
+        async def list_releases(self, plugin: str, slug: str):  # type: ignore[override]
+            return []
+
+        async def security_advisories(self, slug: str):  # type: ignore[override]
+            raise ZeroDivisionError
+
+    with pytest.raises(ZeroDivisionError):
+        await check_system(
+            "1.0.0", "o/r", source=_Broken("https://api.github.com", SecretStr("t"))
+        )

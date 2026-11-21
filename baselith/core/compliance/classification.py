@@ -15,7 +15,9 @@ have a specific shape that is easy to get subtly wrong:
    whatever derogation ground is claimed.
 5. **GPAI is a separate axis** (Chapter V), not a rung on the risk ladder — a
    general-purpose model carries Art. 53 duties, and Art. 55 on top when it
-   presents systemic risk.
+   presents systemic risk. It never displaces a high-risk determination: a
+   record that is both a GPAI model and in an Annex I/III use is high-risk
+   *and* carries the Chapter V duties.
 6. Everything else falls to ``LIMITED_RISK`` when it interacts with people or
    emits synthetic content (Art. 50 transparency duties), else ``MINIMAL_RISK``.
 
@@ -79,21 +81,85 @@ def classify_system(
             citations=["Art. 5(1)"],
         )
 
+    listed = _annex_classification(system)
     if system.is_gpai_model:
-        systemic = system.gpai_systemic_risk
+        return _with_gpai_axis(system, listed)
+    if listed is not None:
+        return listed
+
+    if system.interacts_with_humans or system.generates_synthetic_content:
         return ClassificationResult(
-            category=(
-                RiskCategory.GPAI_SYSTEMIC_RISK if systemic else RiskCategory.GPAI
-            ),
+            category=RiskCategory.LIMITED_RISK,
             rationale=(
-                "General-purpose AI model with systemic risk — Art. 53 duties "
-                "plus the Art. 55 obligations."
-                if systemic
-                else "General-purpose AI model — Chapter V Art. 53 duties."
+                "Interacts with natural persons and/or emits synthetic content: "
+                "the Art. 50 transparency duties apply."
             ),
-            citations=["Art. 55" if systemic else "Art. 53"],
+            citations=["Art. 50"],
         )
 
+    return ClassificationResult(
+        category=RiskCategory.MINIMAL_RISK,
+        rationale=(
+            "Outside Annex I and Annex III, no Art. 50 trigger: no specific "
+            "obligation beyond the voluntary codes of conduct of Art. 95."
+        ),
+        citations=["Art. 95"],
+    )
+
+
+def _gpai_classification(system: AiSystem) -> ClassificationResult:
+    """The Chapter V classification of a general-purpose AI model."""
+    systemic = system.gpai_systemic_risk
+    return ClassificationResult(
+        category=(RiskCategory.GPAI_SYSTEMIC_RISK if systemic else RiskCategory.GPAI),
+        rationale=(
+            "General-purpose AI model with systemic risk — Art. 53 duties "
+            "plus the Art. 55 obligations."
+            if systemic
+            else "General-purpose AI model — Chapter V Art. 53 duties."
+        ),
+        citations=["Art. 55" if systemic else "Art. 53"],
+    )
+
+
+def _with_gpai_axis(
+    system: AiSystem, listed: ClassificationResult | None
+) -> ClassificationResult:
+    """Combine the Chapter V axis with the Annex I/III determination.
+
+    A general-purpose model is a separate axis, not a way out of Chapter III:
+    a record that is *both* a GPAI model and in an Annex I/III use stays
+    high-risk and carries the Chapter V duties on top. Letting the GPAI flag
+    win would drop Art. 9-15, the conformity assessment and Art. 49 — the whole
+    obligation set — for exactly the systems built on the most capable models.
+    """
+    gpai = _gpai_classification(system)
+    if listed is None:
+        return gpai
+    if listed.category is RiskCategory.HIGH_RISK:
+        return ClassificationResult(
+            category=RiskCategory.HIGH_RISK,
+            rationale=(
+                f"{listed.rationale} It is also a general-purpose AI model: the "
+                f"Chapter V duties ({', '.join(gpai.citations)}) apply in addition."
+            ),
+            citations=[*listed.citations, *gpai.citations],
+            derogation_claimed=listed.derogation_claimed,
+            requires_registration=listed.requires_registration,
+        )
+    # An Annex III use under a valid Art. 6(3) derogation: Chapter V is what is
+    # live, but the derogation must still be documented and the system registered.
+    return ClassificationResult(
+        category=gpai.category,
+        rationale=f"{gpai.rationale} {listed.rationale}",
+        citations=[*gpai.citations, *listed.citations],
+        derogation_claimed=listed.derogation_claimed,
+        requires_registration=listed.requires_registration,
+    )
+
+
+def _annex_classification(system: AiSystem) -> ClassificationResult | None:
+    """The Art. 6 determination from Annex I / Annex III, or ``None`` if neither applies."""
     if system.annex_i_product:
         return ClassificationResult(
             category=RiskCategory.HIGH_RISK,
@@ -140,25 +206,7 @@ def classify_system(
             citations=["Art. 6(2)", "Annex III"],
             requires_registration=True,
         )
-
-    if system.interacts_with_humans or system.generates_synthetic_content:
-        return ClassificationResult(
-            category=RiskCategory.LIMITED_RISK,
-            rationale=(
-                "Interacts with natural persons and/or emits synthetic content: "
-                "the Art. 50 transparency duties apply."
-            ),
-            citations=["Art. 50"],
-        )
-
-    return ClassificationResult(
-        category=RiskCategory.MINIMAL_RISK,
-        rationale=(
-            "Outside Annex I and Annex III, no Art. 50 trigger: no specific "
-            "obligation beyond the voluntary codes of conduct of Art. 95."
-        ),
-        citations=["Art. 95"],
-    )
+    return None
 
 
 def obligations_for(category: RiskCategory) -> list[str]:

@@ -13,11 +13,18 @@ configured).
 What it contacts: `api.github.com` (or `PLUGIN_UPDATE_GITHUB_API_URL`), for the
 releases and published security advisories of `CORE_UPDATE_REPO`, 60 to 90
 seconds after boot and then every `PLUGIN_UPDATE_CHECK_INTERVAL_SECONDS`. Each
+wait after the first is the interval moved by up to ±10% (`TICK_SPREAD`), drawn
+again on every tick, so instances restarted together drift apart instead of
+checking in the same half minute against one API rate limit. Each
 API worker process runs the loop, but the workers share one check per
 interval: a worker whose turn comes within half an interval of a sibling's
 check reuses the saved report instead of contacting GitHub (a *Check now* is
-never deferred this way). The requests are plain reads of release
-data: nothing about the deployment (its version, plugins, hosts or users) is
+never deferred this way). A request gives up on a host that does not complete
+the connection within 10 s; every other phase of it has 30 s. The plugin,
+core and distribution lookups of one check run together, as do the releases
+and the advisories of the core, so a check lasts as long as its slowest host
+rather than the sum of them, and each part still fails on its own. The requests are
+plain reads of release data: nothing about the deployment (its version, plugins, hosts or users) is
 sent beyond what any HTTPS request carries (the source address, the HTTP
 client's user agent and, when configured, the token). Set `CORE_UPDATE_REPO=""`
 to switch the system check off; with no sources file either, the module never
@@ -80,7 +87,7 @@ metric and events still go out.
 | `_system_notice.py` | Pure helpers both notices share: what is served (`scope_notice`) and what is announced (`notice_announcement`) |
 | `_announcing.py` | Announces new releases on the event bus once per key across processes (the service's mixin) |
 | `preflight.py` | The [pre-flight](#pre-flight): `build_preflight`, `PreflightItem`, `PreflightLevel` (pure) |
-| `_preflight_live.py` | The pre-flight's live inputs on this host: run store, task queue, free disk |
+| `_preflight_live.py` | The pre-flight's live inputs on this host: run store, task queue, free disk, and whether a plugin ships inside this tree (`ships_with_tree`) |
 | `apply/drivers/` | The [apply drivers](#apply-drivers): the `ApplyDriver` protocol, the registry and the `DriverRouter` the updater runs |
 | `distribution_manifest.py` | The signed [distribution manifest](#distribution-manifest) (`distribution-release.json`): `DistributionManifest`, `build_manifest_meta`, `load_distribution_manifest` |
 | `policy.py` | The [update policy document](#update-policy-document): `UpdatePolicy`, `MaintenanceWindow`, `PolicyProposal`, `POLICY_OFF` (pure) |
@@ -767,7 +774,7 @@ Every route requires an administrator.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/plugins/updates` | `{"enabled": bool, "report": ...}`: the last saved report, without network access |
-| POST | `/api/plugins/updates/check` | Run a check now and return the fresh report; `503` when updates are not configured. Within 60 s of the last completed check in that worker process, the last report is returned and GitHub is not contacted |
+| POST | `/api/plugins/updates/check` | Run a check now and return the fresh report; `503` when updates are not configured. Within 60 s of the last completed check in that worker process, the last report is returned and GitHub is not contacted. Requests that arrive while a check is running wait for it and share its report instead of each starting their own |
 | GET | `/api/plugins/updates/preflight?subject=<s>&version=<v>` | The [pre-flight](#pre-flight) of `subject` (`core` or `plugin:<name>`; `version` defaults to the latest known release) as a list of `{code, level, message}`; `503` when updates are not configured, `422` without a subject. Read-only |
 
 The report carries `checked_at`, one candidate per plugin (installed version,
@@ -1332,8 +1339,10 @@ at start leaves auto-apply off.
 
 Before a run is requested, `baselith.core.plugin_updates.build_preflight` answers
 whether an update can be installed here and now, as a list rather than a yes
-or no: each `PreflightItem` has a `code`, a `level` (`ok`, `warn` or `block`)
-and one sentence a person can act on. It is pure — the report, the settings,
+or no: each `PreflightItem` has a `code`, a `level` (`ok`, `info`, `warn` or
+`block`) and one sentence a person can act on. `info` is a fact, not a fault:
+the release does not install with one click here by design, so there is
+nothing to fix, and the list is not `ready` either. It is pure — the report, the settings,
 the heartbeat, the active run, the installed plugins' core bounds and every
 probe are passed in — and computed on request; the updater checks again
 before it touches anything. A probe that fails becomes a `warn` item, never an
@@ -1351,6 +1360,7 @@ distribution `core` means the distribution's own release (the report's
 | `candidate_unknown` | block | No release of the subject is known, it was refused, or `version` is not the latest known release. The list ends here |
 | `already_installed` | block | The target is already installed. The list ends here |
 | `blocker_<blocker>` | block | One item per [installability](#installability-verdict) blocker (`blocker_updater_offline`, `blocker_unsigned_release`, …): for a plugin from the same `apply_status` the console shows, for the core subject from `core_blockers` (see below) |
+| `in_tree_release` | info | Plugin subject that ships inside this tree (the checkout's own `baselith/plugins/<name>`, or the installed distribution's, read by the loader and not overlaid): its release has no signed assets, which is expected, since it arrives with the tree's next distribution (or core) release. It replaces `blocker_unsigned_release`; every other blocker stays a `block`, and an overlay or `baselith plugin add` install keeps the block |
 | `plugin_incompatible` | warn | Core subject: installed plugins whose `min_core_version`/`max_core_version` exclude the target, named in the message |
 | `plugin_compatibility_unknown` | warn | Core subject: the bounds cannot be read, or the target is a distribution release that does not yet say which public core it contains |
 | `major_jump` | block (core), warn (plugin) | The target crosses a major version |
@@ -1360,13 +1370,19 @@ distribution `core` means the distribution's own release (the report's
 | `disk_low` | warn | Less free space than `UPDATE_APPLY_MIN_FREE_MB` |
 | `queue_probe_unavailable`, `disk_probe_unavailable` | warn | The queue (for example Redis down) or the disk could not be read |
 | `no_boot_report`, `boot_report_unavailable` | warn | The API never booted with one-click updates on (the updater would refuse the run), or the boot report could not be read |
-| `ready` | ok | Last, and only when nothing blocks |
+| `ready` | ok | Last, and only when nothing blocks and no `info` item stands |
+
+For `in_tree_release` a plugin is overlaid when the overlay directory holds an
+entry under its name, not only when this process registered one. The CLI and
+the updater never import the plugins package, so they judge an overlay install
+exactly as the API does (`ships_with_tree`).
 
 A missing updater heartbeat is not a probe failure: it is the
 `blocker_updater_offline` item, because no run can execute without the
 updater. `GET /api/plugins/updates/preflight` serves the list (see [API](#api))
 and `baselith update preflight <subject> [--version V]` prints it, one
-`[level] code: message` line per item, exiting `1` when any item blocks.
+`[level] code: message` line per item, exiting `1` when any item blocks or is
+`info` (the update cannot be installed from here).
 
 ### Installability verdict
 
@@ -1558,7 +1574,15 @@ terminal state; only the updater process calls it, and it never imports the
    on what it is about to install;
 4. stages the release (see above) in a worker thread **while holding the
    per-plugin run lock** (`RunStore.plugin_lock`), which also covers every
-   link switch, the verification of a rollback target and the pruning;
+   link switch, the verification of a rollback target and the pruning. The
+   floor of the "not newer" check (`installed_version`) is the version that is
+   live at that moment, read from the tree under the lock: the manifest of the
+   store entry the link points to, or the bundled plugin's without a link. The
+   run's `from_version`, which is what a report said when the run was
+   requested, is used only when the tree gives no version. A signed release
+   older than what runs is therefore refused (`verification_failed`, detail
+   `not_newer: …`) even when the report that proposed it could not see the
+   overlay;
 5. records on the run, once, the plugins the newest boot report shows active
    (`must_stay_active`, the API as it ran before the run, read in step 1), journals
    `migrating` with the previous and new link targets, and runs
@@ -1708,7 +1732,9 @@ install. Every transition is journaled first:
    the pinned one. A refused manifest fails with its refusal code
    (`signature_invalid`, `name_mismatch`, …), an unreachable release or a
    malformed file with `verification_failed`, another commit with
-   `commit_mismatch`.
+   `commit_mismatch`. A verified release whose version is not newer than the
+   one running here (or does not parse) fails `not_newer`, before anything is
+   touched: the driver checks it itself, whoever created the run.
 3. `core_blockers` runs again with what the host says now (the `uv.lock` hash,
    `git status`); any blocker fails the run with its code (`tree_dirty`,
    `needs_environment_update`, `breaking_migration`, …) before anything runs.
@@ -1721,13 +1747,28 @@ install. Every transition is journaled first:
    as `must_stay_active`.
 6. The commit is fetched by SHA and checked out detached, never forced. A
    commit that cannot be fetched or checked out fails `checkout_failed` with
-   HEAD where it was. The checked-out `uv.lock` must hash as signed, or HEAD
-   goes back and the run fails `lock_mismatch`.
+   HEAD where it was. HEAD on the commit is not enough: the working tree must
+   match it too (`git status` clean outside `UPDATE_APPLY_IGNORED_PATHS`,
+   `tree_matches_head`). A checkout that could not replace a file (no
+   permission, a full disk, a read-only mount) still moves HEAD and exits 0,
+   so a tree that differs, or a status that cannot be read, fails
+   `checkout_failed` ("the checkout left files that differ from the pinned
+   commit") and HEAD goes back. The checked-out `uv.lock` must hash as signed,
+   or HEAD goes back and the run fails `lock_mismatch`. Putting HEAD back is
+   held to the same rule: a restore that leaves the tree different from
+   `previous_target` ends the run `rollback_failed` instead of reporting it
+   restored.
 7. `baselith db migrate`, then `baselith plugin schema-init` for every enabled
    plugin (skipped when `UPDATE_APPLY_SCHEMA_INIT` is off), with the owner's
    credentials. A failure puts HEAD back without a restart and fails
-   `migration_failed`: "nothing changed on the running API; the schema may have
-   advanced".
+   `migration_failed` (or `lock_mismatch`, when the checked-out `uv.lock` is not
+   the signed one) — and says so: "the schema may have advanced; the checkout
+   is back on the previous commit but the running API was not restarted:
+   restart it so every worker serves one version". The files were switched
+   while the API kept running, so a worker may have imported a module from the
+   new commit; only a restart makes every worker serve one version again.
+   Unlike a plugin run, which switches its link last, a core run cannot claim
+   "nothing changed on the running API". Restart the API after such a run.
 8. `activating`: `UPDATE_APPLY_RESTART_COMMAND` restarts the API, then
    `health_checking` waits for the [core health verdict](#core-install-seams).
    A failed restart (`restart_failed`) or verdict (`health_failed`) moves to
@@ -1752,7 +1793,8 @@ point needs `pip install -e .` by hand.
 
 Reconciliation uses the same entry points as for a plugin: `undo_swap` puts
 HEAD back on `previous_target` for a run that died while `migrating` (a HEAD
-that cannot be put back ends `rollback_failed`), `resume_activation` checks out
+that cannot be put back, or a tree that then differs from it, ends
+`rollback_failed`), `resume_activation` checks out
 `target` again, restarts and judges, and `redo_rollback` checks out
 `previous_target` again and restarts. All git steps hold the core's run lock
 (`RunStore.plugin_lock("baselith_core")`).
@@ -1767,8 +1809,12 @@ The core host driver reaches the host through three seams under
   run or timed out). Its environment is this process's minus the signing key
   (`BASELITH_PLUGIN_SIGNING_KEY`), `PLUGIN_UPDATE_GITHUB_TOKEN`, the operator
   passwords and every `UPDATE_APPLY_*` setting, with `GIT_TERMINAL_PROMPT=0` so
-  a fetch never waits for a password; stdout is spooled to a temporary file
-  and capped at 1 MiB. The helpers built on it: `head_sha`, `porcelain`
+  a fetch never waits for a password and `GIT_OPTIONAL_LOCKS=0` so a read-only
+  command stays read-only: a `git status` issued by the API's pre-flight cannot
+  take `index.lock` while the updater is checking out. Stdout is spooled to a
+  temporary file and capped at 1 MiB; output beyond the cap is a failure
+  (`-1`, empty stdout), never a truncated answer, so the state reads as
+  unknown and blocks. The helpers built on it: `head_sha`, `porcelain`
   (`git status --porcelain --untracked-files=no`), `fetch_commit(git, cwd,
   remote_url, sha)` (a commit already present is not fetched; otherwise it is
   fetched by SHA, then by tags when the server refuses that, and only the SHA

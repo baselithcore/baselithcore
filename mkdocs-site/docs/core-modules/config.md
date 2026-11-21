@@ -1317,6 +1317,15 @@ pydantic_core.ValidationError: 1 validation error for SecurityConfig
   Value error, SECRET_KEY is required when AUTH_REQUIRED=true
 ```
 
+Field bounds (`ge=`, `le=`) are enforced the same way, when the settings class
+that declares them is built. Some encode a legal ceiling rather than a sanity
+range: the NIS2 and DORA reporting deadlines accept nothing above their
+statutory maximum (`INCIDENT_EARLY_WARNING_HOURS` ≤ 24,
+`INCIDENT_NOTIFICATION_HOURS` ≤ 72, `DORA_INITIAL_NOTIFICATION_HOURS` ≤ 4,
+`DORA_AWARENESS_CAP_HOURS` ≤ 24, `DORA_INTERMEDIATE_REPORT_HOURS` ≤ 72), so a
+setting can bring a deadline forward and never push it out. See
+[Security Incident Reporting](incidents.md#configuration).
+
 ---
 
 ## Secrets

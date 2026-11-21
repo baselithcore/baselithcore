@@ -31,6 +31,7 @@ description: Core modules of the BaselithCore Framework
 | **ICT Third-Party Register** | DORA Art. 28 Register of Information with Art. 29 concentration view | [`baselith/core/thirdparty/`](thirdparty.md)       |
 | **AI Transparency**       | Art 50 AI-interaction disclosure and content provenance marking  | [`baselith/core/transparency/`](transparency.md)          |
 | **AI Governance**         | AI system registry, Art. 5/6 classification, Annex IV, FRIA, ROPA | [`baselith/core/compliance/`](compliance.md)            |
+| **SOC 2 Readiness**       | Scopes, controls, hash-anchored evidence and an auditor's package against the Trust Services Criteria | [`baselith/core/compliance/soc2/`](soc2.md) |
 | **Observability**         | Telemetry, tracing, and metric collection                        | [`baselith/core/observability/`](observability-module.md) |
 | **NLP Utilities**         | Natural Language Processing tools and extractors                 | [`baselith/core/nlp/`](nlp.md)                            |
 | **Caching System**        | Distributed cache management (Redis/memory)                      | [`baselith/core/cache/`](cache.md)                        |

@@ -321,6 +321,12 @@ class Executor(ActivationMixin):
                 if current_dir
                 else set()
             )
+            # The floor is what is live now, read from the tree under the lock.
+            # ``run.from_version`` is what a report said at approval time, and a
+            # report built in a process that cannot see the overlay names the
+            # bundled version: judged against that, an older signed release
+            # passed as "newer" and replaced a later one that was running.
+            floor = self._version_of(run.plugin, previous) or run.from_version
             staged = stage_release(
                 plugin=run.plugin,
                 version=run.to_version,
@@ -330,7 +336,7 @@ class Executor(ActivationMixin):
                 overlay_root=self._overlay,
                 current_dir=current_dir,
                 known_files=known,
-                installed_version=run.from_version,
+                installed_version=floor,
                 bundled_root=self._bundled,
                 core_version=self._core,
                 trusted_keys=keys,

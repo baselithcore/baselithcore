@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -41,6 +42,10 @@ from baselith.core.compliance.ropa import ProcessingActivity
 from baselith.core.compliance.types import AiSystem
 
 
+class RecordExistsError(ValueError):
+    """An insert-only record already exists under that id."""
+
+
 class _SQLiteJsonStore:
     """Single-table ``(id TEXT PRIMARY KEY, data TEXT)`` JSON store over SQLite."""
 
@@ -52,6 +57,9 @@ class _SQLiteJsonStore:
         self._conn = sqlite3.connect(
             str(self._path), check_same_thread=False, isolation_level=None
         )
+        # Regulatory records, some naming people: owner-only whatever the umask
+        # says. Before WAL is switched on, so its side files inherit the mode.
+        os.chmod(self._path, 0o600)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._conn.execute(
@@ -71,6 +79,18 @@ class _SQLiteJsonStore:
                 (key, blob),
             )
 
+    def _insert(self, key: str, payload: dict[str, Any]) -> None:
+        """Store a record that may be written once and never replaced."""
+        blob = json.dumps(payload, sort_keys=True, default=str)
+        try:
+            with self._lock:
+                self._conn.execute(
+                    f"INSERT INTO {self._TABLE} (id, data) VALUES (?, ?)",  # noqa: S608  # nosec B608
+                    (key, blob),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise RecordExistsError(f"record already exists: {key}") from exc
+
     def _fetch[T](self, key: str, factory: Callable[[dict[str, Any]], T]) -> T | None:
         with self._lock:
             cur = self._conn.execute(
@@ -88,6 +108,44 @@ class _SQLiteJsonStore:
             rows = cur.fetchall()
         return [factory(json.loads(r[0])) for r in rows]
 
+    def _mutate[T, R](
+        self,
+        key: str,
+        factory: Callable[[dict[str, Any]], T],
+        dump: Callable[[T], dict[str, Any]],
+        change: Callable[[T], R],
+    ) -> tuple[T, R] | None:
+        """Read one record, change it and write it back as one write transaction.
+
+        A read in one statement and a write in another loses whatever a second
+        writer stored in between: the later write puts back its own stale copy.
+        ``BEGIN IMMEDIATE`` takes the write lock *before* the read, so the
+        writers queue, in this process and across the workers sharing the file.
+        Returns ``None`` when no record has ``key``; an exception from
+        ``change`` rolls back and propagates.
+        """
+        out: tuple[T, R] | None = None
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    f"SELECT data FROM {self._TABLE} WHERE id = ?",  # noqa: S608  # nosec B608
+                    (key,),
+                ).fetchone()
+                if row is not None:
+                    record = factory(json.loads(row[0]))
+                    result = change(record)
+                    self._conn.execute(
+                        f"UPDATE {self._TABLE} SET data = ? WHERE id = ?",  # noqa: S608  # nosec B608
+                        (json.dumps(dump(record), sort_keys=True, default=str), key),
+                    )
+                    out = (record, result)
+            except BaseException:
+                self._conn.execute("ROLLBACK")
+                raise
+            self._conn.execute("COMMIT")
+        return out
+
     def _delete(self, key: str) -> bool:
         with self._lock:
             cur = self._conn.execute(
@@ -100,6 +158,9 @@ class _SQLiteJsonStore:
 
     async def _save(self, key: str, payload: dict[str, Any]) -> None:
         await asyncio.to_thread(self._upsert, key, payload)
+
+    async def _add(self, key: str, payload: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._insert, key, payload)
 
     async def _load[T](
         self, key: str, factory: Callable[[dict[str, Any]], T]
@@ -213,6 +274,18 @@ class SQLitePostMarketStore(_SQLiteJsonStore):
     async def list_all(self) -> list[PostMarketMonitoringPlan]:
         return await self._load_all(PostMarketMonitoringPlan.from_dict)
 
+    async def update[R](
+        self, plan_id: str, change: Callable[[PostMarketMonitoringPlan], R]
+    ) -> tuple[PostMarketMonitoringPlan, R] | None:
+        """Apply ``change`` to the stored plan atomically (see ``_mutate``)."""
+        return await asyncio.to_thread(
+            self._mutate,
+            plan_id,
+            PostMarketMonitoringPlan.from_dict,
+            PostMarketMonitoringPlan.to_dict,
+            change,
+        )
+
     async def delete(self, plan_id: str) -> bool:
         return await self._remove(plan_id)
 
@@ -272,6 +345,7 @@ class SQLiteDpiaStore(_SQLiteJsonStore):
 
 
 __all__ = [
+    "RecordExistsError",
     "SQLiteAiSystemStore",
     "SQLiteDpiaStore",
     "SQLiteInstructionsStore",

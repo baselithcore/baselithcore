@@ -66,6 +66,45 @@ def coerce_chain_key(key: SecretStr | str | bytes | None) -> bytes | None:
     return raw or None
 
 
+#: The record columns SQLite stores as TEXT. A non-string value survives the
+#: write as its text form, so it has to be hashed in that form too.
+_TEXT_COLUMNS = (
+    "event_id",
+    "timestamp",
+    "event_type",
+    "user_id",
+    "tenant_id",
+    "session_id",
+    "resource",
+    "action",
+    "ip_address",
+)
+
+
+def storable_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return ``payload`` in the exact shape a read gives back.
+
+    The digest is taken at write time and recomputed from the stored row, so
+    the two must see the same value. They did not for anything the round trip
+    changes: an integer key in ``details`` comes back a string, a truthy
+    non-bool ``success`` comes back ``True``, a non-string id comes back text.
+    Such a record verified as tampered for the life of the trail. Taking the
+    round trip *before* hashing makes the stored record the hashed one. A
+    payload already made of JSON types passes through unchanged, so chains
+    written before this normalisation keep verifying.
+    """
+    out = dict(payload)
+    for column in _TEXT_COLUMNS:
+        value = out.get(column)
+        if value is not None and not isinstance(value, str):
+            out[column] = str(value)
+    out["success"] = bool(out.get("success", True))
+    # No ``sort_keys`` here: keys of mixed types cannot be ordered, and the
+    # digest sorts the (by then all-string) keys itself.
+    out["details"] = json.loads(json.dumps(out.get("details") or {}, default=str))
+    return out
+
+
 def compute_entry_hash(
     prev_hash: str,
     payload: dict[str, Any],
@@ -100,4 +139,5 @@ __all__ = [
     "coerce_chain_key",
     "compute_entry_hash",
     "require_chain_key_from_env",
+    "storable_payload",
 ]

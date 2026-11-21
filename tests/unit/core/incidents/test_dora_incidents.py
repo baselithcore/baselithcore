@@ -47,6 +47,23 @@ class TestClassification:
         )
         assert DoraClassification(a, classified_at=T0).is_major is False
 
+    def test_critical_services_plus_the_data_loss_threshold_is_major_on_its_own(self):
+        """Art. 8(1): the data-loss limb needs no second criterion."""
+        a = DoraImpactAssessment(critical_services_affected=True, data_losses=True)
+        assert DoraClassification(a, classified_at=T0).is_major is True
+
+    def test_data_loss_without_critical_services_is_not_major(self):
+        a = DoraImpactAssessment(data_losses=True)
+        assert DoraClassification(a, classified_at=T0).is_major is False
+
+    def test_two_other_criteria_make_it_major_without_data_loss(self):
+        a = DoraImpactAssessment(
+            critical_services_affected=True,
+            clients_affected=True,
+            service_downtime=True,
+        )
+        assert DoraClassification(a, classified_at=T0).is_major is True
+
     def test_not_major_with_critical_but_one_other(self):
         a = DoraImpactAssessment(critical_services_affected=True, clients_affected=True)
         assert DoraClassification(a, classified_at=T0).is_major is False
