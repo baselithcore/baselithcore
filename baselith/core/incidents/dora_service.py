@@ -26,7 +26,12 @@ from baselith.core.incidents.dora import (
     DoraIncident,
     DoraIncidentStatus,
 )
-from baselith.core.incidents.types import IncidentSeverity, ReportingMilestone, _utcnow
+from baselith.core.incidents.types import (
+    IncidentSeverity,
+    ReportingMilestone,
+    _utcnow,
+    require_aware,
+)
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
@@ -116,7 +121,7 @@ class DoraIncidentService:
             details=dict(details or {}),
         )
         if detected_at is not None:
-            incident.detected_at = detected_at
+            incident.detected_at = require_aware(detected_at, "detected_at")
         await self._store.save(incident)
         logger.info(
             "AUDIT | DORA-INCIDENT | opened | id=%s severity=%s",
@@ -149,13 +154,27 @@ class DoraIncidentService:
         ``classified_at`` anchors the 4h initial-notification deadline and
         defaults to now. The status advances to ``CLASSIFIED`` only when the
         incident qualifies as major.
+
+        The clock starts once. Classifying an incident that is already major
+        again (a refined assessment, a corrected criterion) keeps the earlier
+        instant: taking the new one moved the 4h deadline every time, and an
+        overdue notification stopped being overdue.
         """
         incident = await self._require(incident_id)
         classification = DoraClassification(
             assessment=assessment,
-            classified_at=classified_at or _utcnow(),
+            classified_at=(
+                require_aware(classified_at, "classified_at")
+                if classified_at is not None
+                else _utcnow()
+            ),
             major_override=major_override,
         )
+        previous = incident.classification
+        if previous is not None and previous.is_major and classification.is_major:
+            classification.classified_at = min(
+                previous.classified_at, classification.classified_at
+            )
         incident.classification = classification
         incident.updated_at = classification.classified_at
         if classification.is_major and _rank(DoraIncidentStatus.CLASSIFIED) > _rank(
@@ -198,8 +217,19 @@ class DoraIncidentService:
     ) -> DoraIncident:
         """Stamp a milestone submission and advance status (no regression)."""
         incident = await self._require(incident_id)
-        stamp = submitted_at or _utcnow()
+        stamp = (
+            require_aware(submitted_at, field_name)
+            if submitted_at is not None
+            else _utcnow()
+        )
         setattr(incident, field_name, stamp)
+        # What a close leaves unfiled: a major incident's obligations do not
+        # end with its status, so the record of the close has to name them.
+        unmet = (
+            [m.kind.value for m in self.milestones(incident) if not m.is_submitted]
+            if status is DoraIncidentStatus.CLOSED
+            else []
+        )
         if _rank(status) > _rank(incident.status):
             incident.status = status
         incident.updated_at = stamp
@@ -216,11 +246,13 @@ class DoraIncidentService:
             else AuditEventType.INCIDENT_MILESTONE,
             resource=incident.id,
             action=milestone,
+            success=not unmet,
             details={
                 "regime": "dora",
                 "milestone": milestone,
                 "status": incident.status.value,
                 "submitted_at": stamp.isoformat(),
+                **({"unmet_milestones": unmet} if unmet else {}),
             },
         )
         return incident
@@ -264,7 +296,12 @@ class DoraIncidentService:
     async def close_incident(
         self, incident_id: str, *, closed_at: datetime | None = None
     ) -> DoraIncident:
-        """Close an incident (reporting obligations fulfilled or not applicable)."""
+        """Close an incident (reporting obligations fulfilled or not applicable).
+
+        Closing a major incident with a report still unfiled is allowed, but
+        it is audited as a failure naming what is missing: the close takes the
+        incident off the overdue sweep, so the trail is where the gap stays.
+        """
         return await self._advance(
             incident_id,
             field_name="closed_at",
@@ -308,8 +345,9 @@ class DoraIncidentService:
     ) -> list[tuple[DoraIncident, ReportingMilestone]]:
         """Return ``(incident, milestone)`` pairs with a missed, unmet deadline.
 
-        Closed incidents are skipped. Use to drive escalation/alerting so a
-        regulatory deadline cannot pass unnoticed.
+        Closed incidents are skipped (a close that left a report unfiled is on
+        the audit trail as a failed ``closed`` event naming it). Use to drive
+        escalation/alerting so a regulatory deadline cannot pass unnoticed.
         """
         overdue: list[tuple[DoraIncident, ReportingMilestone]] = []
         for incident in await self._store.list_all():

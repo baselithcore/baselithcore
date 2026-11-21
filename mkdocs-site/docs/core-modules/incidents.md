@@ -55,13 +55,13 @@ forward and never push it past the month (`final_report_due()` in
 | Setting                           | Env var                            | Default | Description                                       |
 | --------------------------------- | ---------------------------------- | ------- | ------------------------------------------------- |
 | `enabled`                         | `INCIDENT_REPORTING_ENABLED`       | `false` | NIS2 master switch.                               |
-| `early_warning_hours`             | `INCIDENT_EARLY_WARNING_HOURS`     | `24`    | NIS2 early-warning deadline.                      |
-| `notification_hours`              | `INCIDENT_NOTIFICATION_HOURS`      | `72`    | NIS2 incident-notification deadline.              |
+| `early_warning_hours`             | `INCIDENT_EARLY_WARNING_HOURS`     | `24`    | NIS2 early-warning deadline (1–24).               |
+| `notification_hours`              | `INCIDENT_NOTIFICATION_HOURS`      | `72`    | NIS2 incident-notification deadline (1–72).       |
 | `final_report_days`               | `INCIDENT_FINAL_REPORT_DAYS`       | `30`    | NIS2 final-report window after notification, capped at one calendar month. |
 | `dora_enabled`                    | `DORA_INCIDENT_REPORTING_ENABLED`  | `false` | DORA master switch.                               |
-| `dora_initial_notification_hours` | `DORA_INITIAL_NOTIFICATION_HOURS`  | `4`     | DORA initial notification, from classification.   |
-| `dora_awareness_cap_hours`        | `DORA_AWARENESS_CAP_HOURS`         | `24`    | DORA hard cap on the initial notification, from awareness. |
-| `dora_intermediate_report_hours`  | `DORA_INTERMEDIATE_REPORT_HOURS`   | `72`    | DORA intermediate report, from initial notification. |
+| `dora_initial_notification_hours` | `DORA_INITIAL_NOTIFICATION_HOURS`  | `4`     | DORA initial notification, from classification (1–4). |
+| `dora_awareness_cap_hours`        | `DORA_AWARENESS_CAP_HOURS`         | `24`    | DORA hard cap on the initial notification, from awareness (1–24). |
+| `dora_intermediate_report_hours`  | `DORA_INTERMEDIATE_REPORT_HOURS`   | `72`    | DORA intermediate report, from initial notification (1–72). |
 | `dora_final_report_days`          | `DORA_FINAL_REPORT_DAYS`           | `30`    | DORA final report, from intermediate report, capped at one calendar month. |
 | `ai_act_enabled`                  | `AI_ACT_INCIDENT_REPORTING_ENABLED` | `false` | AI Act Art. 73 master switch.                    |
 | `ai_act_complete_report_days`     | `AI_ACT_COMPLETE_REPORT_DAYS`      | `30`    | Internal SLA for the Art. 73(5) complete report.  |
@@ -70,8 +70,13 @@ forward and never push it past the month (`final_report_due()` in
 | `gdpr_subject_communication_hours` | `GDPR_SUBJECT_COMMUNICATION_HOURS` | `72`   | Internal SLA for the Art. 34(1) communication.    |
 | `incident_db_path` / `dora_db_path` / `ai_act_db_path` / `gdpr_db_path` | `INCIDENT_DB_PATH` / `DORA_DB_PATH` / `AI_ACT_INCIDENT_DB_PATH` / `GDPR_BREACH_DB_PATH` | `None` | Durable SQLite store per regime; unset keeps in-memory. |
 
-Deadlines are configurable for stricter internal SLAs — never relax them past
-the regulatory maxima. Two horizons are **not** settings at all: the AI Act
+Deadlines are configurable for stricter internal SLAs only. The five hour
+settings of NIS2 and DORA are upper-bounded at their statutory maximum
+(`INCIDENT_EARLY_WARNING_HOURS` ≤ 24, `INCIDENT_NOTIFICATION_HOURS` ≤ 72,
+`DORA_INITIAL_NOTIFICATION_HOURS` ≤ 4, `DORA_AWARENESS_CAP_HOURS` ≤ 24,
+`DORA_INTERMEDIATE_REPORT_HOURS` ≤ 72): a larger value fails validation when
+the incident settings load, so a setting can bring a deadline forward and never
+push it out. Two horizons are **not** settings at all: the AI Act
 2/10/15-day report deadlines are statutory *and* category-dependent, so they are
 derived in code (`report_deadline_days()`), and the GDPR 72-hour field is
 schema-capped so it can only ever be tightened.
@@ -167,6 +172,17 @@ for inc, milestone in await svc.overdue_milestones():
 The initial-notification deadline is the **earlier** of the 4h-from-classification
 and 24h-from-awareness moments — both obligations must be satisfied. Status
 advances monotonically, exactly as for the NIS2 workflow.
+
+**The 4h clock starts once.** Classifying again an incident that is already
+major (a refined assessment, a corrected criterion) records the new assessment
+and keeps the earlier `classified_at`, so a re-classification cannot move the
+deadline and make an overdue notification current again.
+
+**Closing does not discharge the reports.** `close_incident()` on a major
+incident with a report still unfiled is allowed, but its `incident.close` audit
+event is a **failure** (`success=False`) and lists what is missing in
+`details.unmet_milestones`. `overdue_milestones()` skips closed incidents, so
+the trail is where that gap stays visible.
 
 ## AI Act serious incidents (Art. 73)
 
@@ -383,6 +399,12 @@ used, and the moment it was reached — since that is the act that starts the
   when backfilling pass an explicit `detected_at=` (NIS2 and DORA
   `open_incident`) or `became_aware_at=` (AI Act `open_incident`, GDPR
   `record_breach`).
+- **Every instant you pass must carry a timezone.** The four services refuse a
+  naive `datetime` with `ValueError`, for the awareness timestamp and for each
+  milestone, classification or closing instant (`require_aware` in
+  `baselith.core.incidents.types`). A register compares what it holds with an
+  aware "now", so one naive value would break every listing and deadline sweep
+  after it. Omit the argument to take the current UTC time.
 - **Poll `overdue_milestones()`** from a scheduled job and route hits to your
   alerting channel so a deadline cannot pass unnoticed.
 - **Register a durable store** before relying on this in production; the default
@@ -390,4 +412,5 @@ used, and the moment it was reached — since that is the act that starts the
   (`baselith/core/incidents/persistence.py`, selected by the `*_DB_PATH` settings above)
   run every statement on a worker thread — one `asyncio.to_thread` hop per
   public operation, covering lock, statement, fetch, JSON decode and record
-  rehydration — so incident writes never block the event loop.
+  rehydration — so incident writes never block the event loop. Each file is
+  set to `0600` (owner-only) when its store opens it, whatever the umask.

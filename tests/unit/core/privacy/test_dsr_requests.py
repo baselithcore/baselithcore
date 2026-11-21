@@ -33,6 +33,11 @@ def _audit(monkeypatch) -> list[dict[str, Any]]:
     monkeypatch.setattr(
         "baselith.core.privacy.request_service.get_audit_logger", lambda: _Logger()
     )
+    # The cases state fixed instants in 2027-2028; the service refuses one that
+    # lies ahead of its clock, so the clock is pinned after all of them.
+    monkeypatch.setattr(
+        "baselith.core.privacy.request_service._utcnow", lambda: _utc(2030, 1, 1)
+    )
     return records
 
 
@@ -240,3 +245,56 @@ def test_the_default_service_is_durable_only_when_a_path_is_configured(
         )
     finally:
         reset_dsr_request_service()
+
+
+# -- stated instants -------------------------------------------------------
+
+
+async def test_a_stated_instant_must_be_aware_past_and_after_receipt():
+    service = DsrRequestService()
+    with pytest.raises(DsrRequestError, match="timezone"):
+        await service.receive(
+            DsrRequestType.ACCESS,
+            "ref",
+            received_at=datetime(2027, 3, 1, 9),  # noqa: DTZ001 - the case
+        )
+    with pytest.raises(DsrRequestError, match="future"):
+        await service.receive(
+            DsrRequestType.ACCESS, "ref", received_at=_utc(2031, 1, 1)
+        )
+    assert await service.list_requests() == []
+
+    request = await service.receive(
+        DsrRequestType.ACCESS, "ref", received_at=_utc(2027, 3, 1, 9)
+    )
+    before = _utc(2027, 2, 1)
+    for step in (
+        service.request_identity(request.id, at=before),
+        service.confirm_identity(request.id, at=before),
+        service.extend(request.id, "complex", notified_at=before),
+        service.fulfil(request.id, answered_at=before),
+        service.refuse(request.id, "unfounded", answered_at=before),
+    ):
+        with pytest.raises(DsrRequestError, match="precedes the receipt"):
+            await step
+
+    stored = await service.get(request.id)
+    assert stored is not None and stored.status is DsrRequestStatus.RECEIVED
+    assert not stored.extended and stored.answered_at is None
+
+
+async def test_the_audit_record_carries_the_instant_each_step_states(_audit):
+    service = DsrRequestService()
+    request = await service.receive(
+        DsrRequestType.ERASURE, "ref", received_at=_utc(2027, 3, 1, 9)
+    )
+    await service.extend(request.id, "complex", notified_at=_utc(2027, 3, 20))
+    await service.fulfil(request.id, answered_at=_utc(2027, 5, 2))
+
+    stated = {r["action"]: r["details"]["at"] for r in _audit}
+    assert stated == {
+        "received": "2027-03-01T09:00:00+00:00",
+        "extended": "2027-03-20T00:00:00+00:00",
+        "fulfilled": "2027-05-02T00:00:00+00:00",
+    }
+    assert all("ref" not in str(r) for r in _audit)

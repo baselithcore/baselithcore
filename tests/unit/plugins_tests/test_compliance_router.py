@@ -37,9 +37,10 @@ def _clean_state():
     reset_post_market_service()
 
 
-def _client(scopes: set[str] | None = None) -> TestClient:
+def _client(scopes: set[str] | None = None, tenant_id: str = "default") -> TestClient:
     user = AuthUser(
         user_id="dpo",
+        tenant_id=tenant_id,
         roles={AuthRole.USER},
         scopes=scopes if scopes is not None else {"compliance:manage"},
     )
@@ -72,7 +73,45 @@ class TestAuthorization:
         assert client.get("/compliance/systems").status_code == 200
 
 
+class TestPlatformOnly:
+    """The registers have no tenant column: one set of records per deployment."""
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/compliance/systems"),
+            ("POST", "/compliance/systems/x/reclassify"),
+            ("GET", "/compliance/post-market"),
+            ("GET", "/compliance/profile"),
+            ("GET", "/compliance/audit/verify"),
+            ("GET", "/compliance/risk-management"),
+            ("GET", "/compliance/automated-decisions"),
+        ],
+    )
+    def test_a_credential_of_another_tenant_is_refused(self, method, path):
+        resp = _client(tenant_id="acme").request(method, path)
+
+        assert resp.status_code == 403
+        assert "platform-level credentials" in resp.text
+
+    def test_the_platform_credential_still_reads(self):
+        assert _client().get("/compliance/systems").status_code == 200
+
+
 class TestRegistry:
+    def test_reclassifying_keeps_a_prohibited_system_prohibited(self, client):
+        created = client.post(
+            "/compliance/systems",
+            json={"name": "scorer", "prohibited_practices": ["social_scoring"]},
+        ).json()
+        system_id = created["system"]["id"]
+        assert created["system"]["risk_category"] == "prohibited"
+
+        body = client.post(f"/compliance/systems/{system_id}/reclassify").json()
+
+        assert body["system"]["risk_category"] == "prohibited"
+        assert body["system"]["prohibited_practices"] == ["social_scoring"]
+
     def test_register_derives_the_risk_category(self, client):
         resp = client.post(
             "/compliance/systems",
@@ -304,3 +343,36 @@ class TestPosture:
             assert "AUDIT_DB_PATH" in body["reason"]
         finally:
             reset_audit_logger()
+
+    def test_audit_verify_walks_the_chain_off_the_event_loop(
+        self, client, tmp_path, monkeypatch
+    ):
+        import threading
+
+        from baselith.core.observability import audit_setup
+        from baselith.core.observability.audit import AuditEvent, AuditEventType
+        from baselith.core.observability.audit_chain import SQLiteAuditSink
+
+        sink = SQLiteAuditSink(tmp_path / "audit.db")
+        anyio.run(sink.write, AuditEvent(AuditEventType.CUSTOM, action="a"))
+        threads: list[str] = []
+        verify = sink.verify_chain
+
+        def _recording():
+            threads.append(threading.current_thread().name)
+            return verify()
+
+        monkeypatch.setattr(sink, "verify_chain", _recording)
+        monkeypatch.setattr(audit_setup, "get_durable_audit_sink", lambda: sink)
+        loop_thread: list[str] = []
+
+        @client.app.middleware("http")
+        async def _note_loop(request, call_next):
+            loop_thread.append(threading.current_thread().name)
+            return await call_next(request)
+
+        body = client.get("/compliance/audit/verify").json()
+
+        assert body["ok"] is True and body["checked"] == 1
+        assert threads and threads[0] != loop_thread[0]
+        sink.close()

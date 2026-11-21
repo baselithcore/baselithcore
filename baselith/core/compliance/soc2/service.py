@@ -12,6 +12,7 @@ cannot produce the attestation: that is the auditor's opinion.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -42,6 +43,7 @@ from baselith.core.compliance.soc2.types import (
     Soc2Scope,
     TrustCategory,
 )
+from baselith.core.incidents.types import require_aware
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
@@ -276,6 +278,11 @@ class Soc2Service:
         which fixes what was *said*, not the document behind a link.
         """
         await self.require_control(control_id)
+        if collected_at is not None:
+            try:
+                require_aware(collected_at, "collected_at")
+            except ValueError as exc:
+                raise Soc2ValidationError(str(exc)) from exc
         if content_sha256 is not None:
             digest = content_sha256.strip().lower()
             if not _SHA256.match(digest):
@@ -353,7 +360,10 @@ class Soc2Service:
                     {"error": type(exc).__name__},
                 )
                 report.collectors[name] = "failed"
-            digest = canonical_sha256(draft.details)
+            # Hashed in the shape the store gives back (JSON types only), so
+            # the digest can be recomputed from the stored record later.
+            details = json.loads(json.dumps(draft.details, default=str))
+            digest = canonical_sha256(details)
             for control in (c for c in controls if name in c.collectors):
                 await self._store_evidence(
                     Soc2Evidence(
@@ -365,7 +375,7 @@ class Soc2Service:
                         outcome=draft.outcome,
                         summary=draft.summary,
                         recorded_by=recorded_by,
-                        details=draft.details,
+                        details=details,
                     )
                 )
                 report.collected += 1
@@ -379,13 +389,30 @@ class Soc2Service:
     ) -> tuple[Soc2Scope, list[CriterionReadiness], list[ControlReadiness], dict]:
         """Where ``scope_id`` stands at ``now``: criteria, controls, summary."""
         scope = await self.require_scope(scope_id)
-        criteria, controls = assess_scope(
+        return await self.assess(
             scope,
             await self._store.list_controls(),
             await self._store.list_evidence(),
             now or datetime.now(UTC),
         )
-        return scope, criteria, controls, summarise(criteria)
+
+    @staticmethod
+    async def assess(
+        scope: Soc2Scope,
+        controls: list[Soc2Control],
+        evidence: list[Soc2Evidence],
+        now: datetime,
+    ) -> tuple[Soc2Scope, list[CriterionReadiness], list[ControlReadiness], dict]:
+        """:meth:`readiness` over records the caller already holds.
+
+        The assessment is pure CPU over the whole evidence set, so it runs on a
+        worker thread: on the event loop a large engagement stalled every other
+        request for as long as it took.
+        """
+        criteria, assessed = await asyncio.to_thread(
+            assess_scope, scope, controls, evidence, now
+        )
+        return scope, criteria, assessed, summarise(criteria)
 
     # -- audit -----------------------------------------------------------
 

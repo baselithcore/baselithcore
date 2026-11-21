@@ -24,6 +24,7 @@ from baselith.core.compliance.soc2.package import (
 )
 from baselith.core.compliance.soc2.persistence import (
     InMemorySoc2Store,
+    RecordExistsError,
     Soc2Store,
     SQLiteSoc2Store,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "EvidenceKind",
     "EvidenceOutcome",
     "InMemorySoc2Store",
+    "RecordExistsError",
     "SQLiteSoc2Store",
     "Soc2Control",
     "Soc2Evidence",

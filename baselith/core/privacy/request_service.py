@@ -9,10 +9,10 @@ treat a data-subject request like any other running clock.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from baselith.core.incidents.types import ReportingMilestone
+from baselith.core.incidents.types import ReportingMilestone, require_aware
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 from baselith.core.privacy.requests import (
@@ -29,6 +29,50 @@ from baselith.core.privacy.requests import (
 )
 
 logger = get_logger(__name__)
+
+#: How far ahead of this host's clock a stated instant may sit (clock skew).
+_FUTURE_TOLERANCE = timedelta(minutes=5)
+
+#: The field holding the instant each step states, for its audit record.
+_STATED_FIELD = {
+    "received": "received_at",
+    "identity_requested": "identity_requested_at",
+    "identity_confirmed": "identity_confirmed_at",
+    "extended": "extension_notified_at",
+    "fulfilled": "answered_at",
+    "refused": "answered_at",
+}
+
+
+def _instant(
+    at: datetime | None, name: str, *, not_before: datetime | None = None
+) -> datetime:
+    """The instant a step happened at: now, or a checked statement of it.
+
+    The deadline, whether an extension counts and whether an answer was late
+    all follow from instants the caller states. Unchecked, a request registered
+    for next year never fell due and an answer could be dated before the
+    request it answers. A stated instant must carry a timezone, must not lie in
+    the future, and must not precede the receipt of its request. Stating a
+    *past* instant stays possible, because a letter answered on Friday may be
+    entered on Monday; it is written into the audit record next to the time
+    the entry was made, so a back-dated one is there to be seen.
+
+    Raises:
+        DsrRequestError: The stated instant fails one of the three checks.
+    """
+    now = _utcnow()
+    if at is None:
+        return now
+    try:
+        require_aware(at, name)
+    except ValueError as exc:
+        raise DsrRequestError(str(exc)) from exc
+    if at > now + _FUTURE_TOLERANCE:
+        raise DsrRequestError(f"{name} lies in the future")
+    if not_before is not None and at < not_before:
+        raise DsrRequestError(f"{name} precedes the receipt of the request")
+    return at
 
 
 class DsrRequestService:
@@ -55,9 +99,8 @@ class DsrRequestService:
             request_type=request_type,
             subject_ref=subject_ref,
             channel=channel,
+            received_at=_instant(received_at, "received_at"),
         )
-        if received_at is not None:
-            request.received_at = received_at
         await self._store.save(request)
         await self._audit(request, "received")
         return request
@@ -67,7 +110,9 @@ class DsrRequestService:
     ) -> DsrRequest:
         """Record that proof of identity was asked for (Art. 12(6)). The clock keeps running."""
         request = await self._open(request_id)
-        request.identity_requested_at = at or _utcnow()
+        request.identity_requested_at = _instant(
+            at, "identity_requested_at", not_before=request.received_at
+        )
         request.status = DsrRequestStatus.IDENTITY_PENDING
         return await self._touch(request, "identity_requested")
 
@@ -75,7 +120,9 @@ class DsrRequestService:
         self, request_id: str, *, at: datetime | None = None
     ) -> DsrRequest:
         request = await self._open(request_id)
-        request.identity_confirmed_at = at or _utcnow()
+        request.identity_confirmed_at = _instant(
+            at, "identity_confirmed_at", not_before=request.received_at
+        )
         request.status = DsrRequestStatus.IN_PROGRESS
         return await self._touch(request, "identity_confirmed")
 
@@ -98,17 +145,20 @@ class DsrRequestService:
             raise DsrRequestError(
                 "the request was already extended; Art. 12(3) allows one extension"
             )
+        # Checked before anything is changed: a refused step leaves no trace.
+        told = _instant(notified_at, "notified_at", not_before=request.received_at)
         request.extended = True
         request.extension_reason = reason.strip()
-        request.extension_notified_at = notified_at or _utcnow()
+        request.extension_notified_at = told
         return await self._touch(request, "extended")
 
     async def fulfil(
         self, request_id: str, *, answered_at: datetime | None = None
     ) -> DsrRequest:
         request = await self._open(request_id)
+        answered = _instant(answered_at, "answered_at", not_before=request.received_at)
         request.status = DsrRequestStatus.FULFILLED
-        request.answered_at = answered_at or _utcnow()
+        request.answered_at = answered
         return await self._touch(request, "fulfilled")
 
     async def refuse(
@@ -121,9 +171,10 @@ class DsrRequestService:
                 "a refusal needs its reasons: the person is owed them"
             )
         request = await self._open(request_id)
+        answered = _instant(answered_at, "answered_at", not_before=request.received_at)
         request.status = DsrRequestStatus.REFUSED
         request.refusal_reason = reason.strip()
-        request.answered_at = answered_at or _utcnow()
+        request.answered_at = answered
         return await self._touch(request, "refused")
 
     # -- reads -----------------------------------------------------------
@@ -186,6 +237,11 @@ class DsrRequestService:
             "status": request.status.value,
             "due_at": request.due_at.isoformat(),
         }
+        stated = getattr(request, _STATED_FIELD.get(action, ""), None)
+        if stated is not None:
+            # The instant the step claims; the record's own timestamp is when
+            # it was entered. The gap between the two is the back-dating.
+            details["at"] = stated.isoformat()
         if action in {"fulfilled", "refused"}:
             details["late"] = request.is_late
         if action == "extended":

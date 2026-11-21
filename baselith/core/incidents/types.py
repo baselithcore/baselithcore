@@ -161,6 +161,22 @@ AnyMilestoneKind = (
 )
 
 
+def require_aware(moment: datetime, name: str) -> datetime:
+    """Return ``moment``, refusing one that carries no timezone.
+
+    A register compares every instant it holds with an aware "now". One naive
+    value, once stored, made each listing and each deadline sweep of that
+    register raise ``TypeError`` — for every record, and with no delete path
+    to take it out again. Refused at the door instead.
+
+    Raises:
+        ValueError: ``moment`` is naive.
+    """
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError(f"{name} must carry a timezone, got a naive datetime")
+    return moment
+
+
 @dataclass
 class ReportingMilestone:
     """A single regulatory reporting obligation with its deadline and status.
@@ -326,4 +342,5 @@ __all__ = [
     "add_calendar_months",
     "final_report_due",
     "one_month_after",
+    "require_aware",
 ]

@@ -196,6 +196,29 @@ class LoggerAuditSink:
         self.logger.info(event.to_json())
 
 
+def _attributed(
+    user_id: str | None, tenant_id: str | None
+) -> tuple[str | None, str | None]:
+    """Fill an unstated actor and tenant from the request's bound identity.
+
+    Most call sites sit several layers below the route and never see the
+    principal, so their records answered neither "who" nor "whose". The context
+    is read raw, with no ``"default"`` fallback: an event raised outside any
+    request stays unattributed rather than misattributed.
+    """
+    from baselith.core.context import (
+        get_current_user_id,
+        get_tenant_or_default,
+        tenant_is_bound,
+    )
+
+    if user_id is None:
+        user_id = get_current_user_id()
+    if tenant_id is None and tenant_is_bound():
+        tenant_id = get_tenant_or_default()
+    return user_id, tenant_id
+
+
 class AuditLogger:
     """
     Main audit logger that writes to multiple sinks.
@@ -253,6 +276,7 @@ class AuditLogger:
         if not self._enabled:
             return
 
+        user_id, tenant_id = _attributed(user_id, tenant_id)
         event = AuditEvent(
             event_type,
             user_id=user_id,
@@ -391,6 +415,7 @@ def audit_emit(
     if not audit_logger.enabled:
         return
 
+    user_id, tenant_id = _attributed(user_id, tenant_id)
     event = AuditEvent(
         event_type,
         user_id=user_id,

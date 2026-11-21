@@ -48,6 +48,13 @@ being visible.
 Every change to a scope or control, and every export of the package, is on the
 trail too.
 
+Evidence is **written once**. `Soc2Store.save_evidence` adds a record and
+raises `RecordExistsError` (a `ValueError`, exported by
+`baselith.core.compliance.soc2`) on a second save under the same
+id, in both bundled stores: nothing replaces what an auditor may already have
+been shown. A `collected_at` passed to `record_evidence` must carry a timezone;
+a naive datetime is refused with `Soc2ValidationError`.
+
 ## Collectors
 
 A collector reads something the platform already knows and returns an
@@ -84,15 +91,25 @@ prescribed set.
 ## Readiness
 
 `assess_scope` is pure: controls and evidence in, statuses out, no clock of its
-own. A control's status, worst first:
+own. `Soc2Service.readiness(scope_id)` loads the records and runs it;
+`Soc2Service.assess(scope, controls, evidence, now)` runs it over records the
+caller already holds. Both do the assessment on a worker thread, since it is
+CPU-bound over the whole evidence set. A control's status, worst first:
 
 | Status | Meaning |
 | ------ | ------- |
-| `exception` | The latest evidence reports a deviation, not yet followed by evidence that it operated again. |
+| `exception` | Some source's latest verdict reports a deviation, not yet followed by `operated` evidence from that same source. |
 | `untested` | No evidence in the examined window. |
 | `intermittent` | (Type II) evidence exists but covers fewer than 75% of the expected intervals of the period. |
 | `stale` | The latest evidence is older than 1.5 times the control's frequency. |
-| `covered` | Evidence in the window, recent enough, latest not a deviation. |
+| `covered` | Evidence in the window, recent enough, no source's latest verdict a deviation. |
+
+Exceptions are judged **per source** (a collector's name, or `manual`), on
+verdicts only. A control fed by two
+collectors stays `exception` while either one still reports a deviation: the
+other collector running later does not clear it, only `operated` evidence from
+the source that raised it does. `informational` evidence is context, never a
+verdict, so it cannot close an exception either.
 
 A **criterion** takes the worst status among the active controls mapped to it,
 and is `uncovered` when none is mapped. One control with a gap is a gap even if
@@ -113,6 +130,30 @@ the audit trail's current head hash, then hashes itself and records the export
 on the trail with that digest. `render_markdown(package)` renders it as a
 request list. Evidence *content* is not inlined: the package is a map to the
 evidence, not a second copy.
+
+The digests are **checked, not copied**. Each entry of the evidence index
+carries `integrity`, with two verdicts:
+
+| Field | Values |
+| ----- | ------ |
+| `digest` | `ok` or `mismatch`: the digest recomputed from the stored `details` of automatic evidence against the one on the record. `not_recomputable` for manual evidence, whose digest is of a document held elsewhere. |
+| `anchor` | `matched` or `mismatch`: the record's digest against the one the audit trail recorded when the evidence was written. `missing` when the trail holds no such record, `no_trail` without a durable trail. |
+
+The package totals them under `evidence_integrity`: `checked` (records
+examined), `digest_mismatch` and `anchor_mismatch` (the evidence ids),
+`anchor_missing` (a count), `trail` (`durable` or `none`) and `ok`, false as
+soon as either list is non-empty. A failed check makes the `soc2_package` audit
+event a **failure** (`details.evidence_integrity_ok` is false), so evidence
+edited in the store, or swapped for a record with a fresh digest, is visible
+both to whoever builds the package and on the trail. `render_markdown` prints
+the totals in the header.
+
+!!! warning "Keep the trail as long as the period"
+    An anchor reads `missing` once retention has purged the part of the trail
+    that recorded the evidence. Missing anchors do not fail the check, but they
+    cannot confirm anything either. Keep `AUDIT_RETENTION_DAYS` at least as long
+    as the period under examination (a twelve-month Type II needs more than the
+    180-day default).
 
 ## Durability and configuration
 

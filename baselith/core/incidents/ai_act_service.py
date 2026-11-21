@@ -25,7 +25,12 @@ from baselith.core.incidents.ai_act import (
     AiActSeriousIncident,
     SeriousIncidentCategory,
 )
-from baselith.core.incidents.types import IncidentSeverity, ReportingMilestone, _utcnow
+from baselith.core.incidents.types import (
+    IncidentSeverity,
+    ReportingMilestone,
+    _utcnow,
+    require_aware,
+)
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
 
@@ -130,7 +135,7 @@ class AiActIncidentService:
             details=dict(details or {}),
         )
         if became_aware_at is not None:
-            incident.became_aware_at = became_aware_at
+            incident.became_aware_at = require_aware(became_aware_at, "became_aware_at")
         await self._store.save(incident)
         logger.info(
             "AUDIT | AI-ACT-INCIDENT | opened | id=%s system=%s serious=%s deadline_days=%d",
@@ -164,7 +169,7 @@ class AiActIncidentService:
     ) -> AiActSeriousIncident:
         """Stamp a milestone and advance status (never backwards)."""
         incident = await self._require(incident_id)
-        stamp = at or _utcnow()
+        stamp = require_aware(at, field_name) if at is not None else _utcnow()
         setattr(incident, field_name, stamp)
         if status is not None and _rank(status) > _rank(incident.status):
             incident.status = status

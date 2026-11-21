@@ -187,6 +187,11 @@ class AiSystem:
     #: Chapter V — this record describes a general-purpose AI model.
     is_gpai_model: bool = False
     gpai_systemic_risk: bool = False
+    #: Art. 5 — the prohibited practices declared for this system, by value
+    #: (see :class:`baselith.core.compliance.prohibited.ProhibitedPractice`).
+    #: Kept on the record so a later reclassification screens the same
+    #: declaration instead of an empty one.
+    prohibited_practices: list[str] = field(default_factory=list)
     lifecycle_stage: LifecycleStage = LifecycleStage.DEVELOPMENT
     #: Art. 14 — the named humans assigned to oversight.
     human_oversight_contacts: list[str] = field(default_factory=list)
@@ -238,6 +243,7 @@ class AiSystem:
             "generates_synthetic_content": self.generates_synthetic_content,
             "is_gpai_model": self.is_gpai_model,
             "gpai_systemic_risk": self.gpai_systemic_risk,
+            "prohibited_practices": list(self.prohibited_practices),
             "lifecycle_stage": self.lifecycle_stage.value,
             "human_oversight_contacts": list(self.human_oversight_contacts),
             "provider_name": self.provider_name,
@@ -275,6 +281,7 @@ class AiSystem:
             generates_synthetic_content=data.get("generates_synthetic_content", False),
             is_gpai_model=data.get("is_gpai_model", False),
             gpai_systemic_risk=data.get("gpai_systemic_risk", False),
+            prohibited_practices=list(data.get("prohibited_practices", [])),
             lifecycle_stage=LifecycleStage(data["lifecycle_stage"]),
             human_oversight_contacts=list(data.get("human_oversight_contacts", [])),
             provider_name=data.get("provider_name"),

@@ -12,8 +12,11 @@ auditor's opinion.
 
 Statuses, worst first:
 
-* ``exception`` — the latest evidence reports a deviation, not yet followed by
-  evidence that it operated again;
+* ``exception`` — some source's latest verdict reports a deviation, not yet
+  followed by evidence *from that source* that the control operated again. A
+  control fed by two collectors is open while either one still reports a
+  deviation, and an ``informational`` note is context, never a verdict: it
+  cannot close an exception;
 * ``untested`` — no evidence in the examined window;
 * ``intermittent`` — (Type II only) evidence exists but covers too few of the
   expected intervals of the observation period;
@@ -142,7 +145,10 @@ def assess_control(
     scope: Soc2Scope,
     now: datetime,
 ) -> ControlReadiness:
-    """Where one control stands against ``scope`` at ``now``."""
+    """Where one control stands against ``scope`` at ``now``.
+
+    ``evidence`` may hold other controls' records too; they are ignored.
+    """
     start, end = _window(scope, now)
     inside = sorted(
         (
@@ -173,7 +179,14 @@ def assess_control(
         result.coverage = _coverage(inside, start, end, interval)
         if result.coverage < MIN_COVERAGE and status == "covered":
             status = "intermittent"
-    if latest.outcome is EvidenceOutcome.EXCEPTION:
+    # Judged per source, on verdicts only. Looking at the single latest record
+    # let whichever collector ran last (they run in name order) or a later
+    # informational note hide a deviation another source had just reported.
+    verdict: dict[str, EvidenceOutcome] = {}
+    for e in inside:
+        if e.outcome is not EvidenceOutcome.INFORMATIONAL:
+            verdict[e.source] = e.outcome
+    if EvidenceOutcome.EXCEPTION in verdict.values():
         status = "exception"
     result.status = status
     return result
@@ -187,7 +200,14 @@ def assess_scope(
 ) -> tuple[list[CriterionReadiness], list[ControlReadiness]]:
     """Every in-scope criterion and every active control, assessed."""
     active = [c for c in controls if c.active]
-    by_control = {c.id: assess_control(c, evidence, scope, now) for c in active}
+    # Split once. Handing every control the whole list made the pass
+    # controls x evidence: 260 ms of CPU at 80 controls and 60k records.
+    own: dict[str, list[Soc2Evidence]] = {}
+    for record in evidence:
+        own.setdefault(record.control_id, []).append(record)
+    by_control = {
+        c.id: assess_control(c, own.get(c.id, []), scope, now) for c in active
+    }
     criteria: list[CriterionReadiness] = []
     for criterion in criteria_for(scope.categories):
         mapped = [c for c in active if criterion.id in c.criteria]

@@ -123,6 +123,12 @@ await get_audit_logger().log(
 )
 ```
 
+`user_id` and `tenant_id` may be left out: each then defaults to the identity
+bound to the request context (`baselith.core.context`), which is how a service
+several layers below the route still answers "who" and "whose". Outside a
+request they stay `None` (an unbound tenant is not recorded as `default`), and
+an explicit value always wins. `audit_emit()` follows the same rule.
+
 From synchronous code, `audit_emit()` is fire-and-forget — audit recording must
 never change the control flow of the code it observes:
 
@@ -167,7 +173,12 @@ if not result.ok:
     alert(f"audit chain broken at seq={result.broken_at}: {result.reason}")
 ```
 
-Verification compares with `hmac.compare_digest`.
+Verification compares with `hmac.compare_digest`. It reads one consistent
+snapshot through a read-only connection of its own and streams the rows, so it
+neither waits on nor blocks the appenders and never holds the trail in memory.
+It is still CPU-bound over every record: from async code run it with
+`await asyncio.to_thread(sink.verify_chain)`, as `GET /compliance/audit/verify`
+does.
 
 !!! warning "An unkeyed chain detects accidents, not attackers"
     Without a key, anyone who can write to the audit database can recompute every
@@ -233,7 +244,10 @@ rows = sink.query(AuditQuery(event_type="privacy.erase", tenant_id="acme", limit
 ```
 
 Filters compose over event type, user, tenant, and a time window; results come
-back newest-first with `details` already decoded.
+back newest-first with `details` already decoded. One call returns one page:
+`limit` is held to `0..10000` (`MAX_QUERY_LIMIT` in `_audit_models.py`) and
+`offset` to zero or more, so a negative limit never means "everything". To read
+the whole trail, page with the cursor below.
 
 ### Shipping the trail out (a cursor for exporters)
 
@@ -278,3 +292,9 @@ check continuity (and, holding the HMAC key, the hashes themselves); keep
   and never stops the remaining sinks from recording the event.
 - **Details are bounded.** Oversized `details` are truncated *before* hashing,
   so the digest always covers exactly the bytes that were stored.
+- **What is hashed is what is stored.** Before hashing, a record is brought to
+  the shape a read gives back (`audit_digest.storable_payload`): a non-string
+  id becomes text, `success` a bool, `details` plain JSON types. A value the
+  JSON and SQLite round trip changes (an integer key in `details`, a truthy
+  non-bool `success`) verifies like any other. A record already made of JSON
+  types is unchanged, so an existing chain keeps verifying.

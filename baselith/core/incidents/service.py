@@ -23,6 +23,7 @@ from baselith.core.incidents.types import (
     IncidentStatus,
     ReportingMilestone,
     SecurityIncident,
+    require_aware,
 )
 from baselith.core.observability.audit import AuditEventType, get_audit_logger
 from baselith.core.observability.logging import get_logger
@@ -116,7 +117,7 @@ class IncidentService:
             details=dict(details or {}),
         )
         if detected_at is not None:
-            incident.detected_at = detected_at
+            incident.detected_at = require_aware(detected_at, "detected_at")
         await self._store.save(incident)
         logger.info(
             "AUDIT | INCIDENT | opened | id=%s severity=%s significant=%s",
@@ -151,7 +152,11 @@ class IncidentService:
         incident = await self._store.get(incident_id)
         if incident is None:
             raise IncidentNotFoundError(incident_id)
-        stamp = submitted_at or datetime_now()
+        stamp = (
+            require_aware(submitted_at, "submitted_at")
+            if submitted_at is not None
+            else datetime_now()
+        )
         setattr(incident, field_name, stamp)
         # Only move the status forward, never back.
         if _status_rank(status) > _status_rank(incident.status):

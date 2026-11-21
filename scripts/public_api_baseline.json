@@ -385,6 +385,7 @@
       "EvidenceOutcome",
       "FREQUENCY_DAYS",
       "InMemorySoc2Store",
+      "RecordExistsError",
       "SQLiteSoc2Store",
       "STATUS_RANK",
       "Soc2Control",

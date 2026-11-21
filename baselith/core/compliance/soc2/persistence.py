@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from baselith.core.compliance.persistence import _SQLiteJsonStore
+from baselith.core.compliance.persistence import RecordExistsError, _SQLiteJsonStore
 from baselith.core.compliance.soc2.types import Soc2Control, Soc2Evidence, Soc2Scope
 
 
@@ -28,7 +28,12 @@ class Soc2Store(Protocol):
     async def get_control(self, control_id: str) -> Soc2Control | None: ...
     async def list_controls(self) -> list[Soc2Control]: ...
 
-    async def save_evidence(self, evidence: Soc2Evidence) -> None: ...
+    async def save_evidence(self, evidence: Soc2Evidence) -> None:
+        """Add one piece of evidence. Evidence is written once: a second save
+        under the same id raises :class:`RecordExistsError` instead of
+        replacing what an auditor may already have been shown."""
+        ...
+
     async def get_evidence(self, evidence_id: str) -> Soc2Evidence | None: ...
     async def list_evidence(
         self, control_id: str | None = None
@@ -62,6 +67,8 @@ class InMemorySoc2Store:
         return sorted(self._controls.values(), key=lambda c: c.created_at)
 
     async def save_evidence(self, evidence: Soc2Evidence) -> None:
+        if evidence.id in self._evidence:
+            raise RecordExistsError(f"record already exists: {evidence.id}")
         self._evidence[evidence.id] = evidence
 
     async def get_evidence(self, evidence_id: str) -> Soc2Evidence | None:
@@ -121,7 +128,7 @@ class SQLiteSoc2Store:
         return sorted(rows, key=lambda c: c.created_at)
 
     async def save_evidence(self, evidence: Soc2Evidence) -> None:
-        await self._evidence._save(evidence.id, evidence.to_dict())
+        await self._evidence._add(evidence.id, evidence.to_dict())
 
     async def get_evidence(self, evidence_id: str) -> Soc2Evidence | None:
         return await self._evidence._load(evidence_id, Soc2Evidence.from_dict)
@@ -137,4 +144,4 @@ class SQLiteSoc2Store:
             table.close()
 
 
-__all__ = ["InMemorySoc2Store", "SQLiteSoc2Store", "Soc2Store"]
+__all__ = ["InMemorySoc2Store", "RecordExistsError", "SQLiteSoc2Store", "Soc2Store"]

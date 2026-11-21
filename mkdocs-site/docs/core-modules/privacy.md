@@ -282,6 +282,12 @@ The register is **conservative on purpose**:
   January → 30 April), not three repeated single months.
 - The clock runs **from receipt**: pass the day the request reached the
   organisation, not the day somebody typed it in.
+- A **stated instant is checked** (`received_at`, `at`, `notified_at`,
+  `answered_at`): it must carry a timezone, must not lie in the future (five
+  minutes of clock skew are tolerated) and, for every step after receipt, must
+  not precede the request's `received_at`. Otherwise the step raises
+  `DsrRequestError` and changes nothing. Stating a *past* instant stays
+  possible: a letter answered on Friday may be entered on Monday.
 - Asking for proof of identity (Art. 12(6)) is **recorded but does not stop the
   clock**: the register shows the strictest deadline. Someone relying on
   suspension can read the recorded dates.
@@ -293,7 +299,9 @@ The register is **conservative on purpose**:
 It holds an opaque `subject_ref` and metadata, never the request's content. The
 `title` it exposes (to dashboards, logs and the event bus) names the kind of
 request and a short id, never the person. Every step is a `privacy.request`
-audit record naming the request id. It exposes `milestones` and
+audit record naming the request id; `details.at` carries the instant the step
+is dated, next to the record's own timestamp of when it was entered, so a
+back-dated entry is there to be seen. It exposes `milestones` and
 `overdue_milestones` shaped like the incident services', with a
 `DsrMilestoneKind.RESPONSE` milestone, so a deadline timeline treats it like any
 other running clock. Durable with `PRIVACY_DSR_REQUESTS_DB_PATH`; in memory
@@ -329,6 +337,9 @@ Every request is audit-logged with the subject id and affected record counts.
 | `PRIVACY_DSR_REQUESTS_DB_PATH` | `None` | Path of the durable request register (`SQLiteDsrRequestStore`, Art. 12(3)); unset keeps the in-memory store, which forgets open requests on restart |
 | `PRIVACY_CONSENT_DB_PATH` | `None` | Path of the durable Art. 7 consent log (`SQLiteConsentStore`); unset keeps the in-memory store |
 | `PRIVACY_AUTOMATED_DECISIONS_DB_PATH` | `None` | Path of the durable Art. 22 register (`SQLiteAutomatedDecisionStore`); unset keeps the in-memory store |
+
+Each of the three SQLite files is set to `0600` (owner-only) when its store
+opens it, whatever the process umask says.
 
 !!! note "Wiring real stores"
     The relational store is wired by default via `PostgresDataProvider` (see
