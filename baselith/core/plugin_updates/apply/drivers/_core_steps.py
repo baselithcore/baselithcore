@@ -134,8 +134,29 @@ def run_backup(runner: CommandRunner, config: UpdateApplyConfig) -> StepFailure 
     return None
 
 
+def tree_matches_head(
+    git: GitRunner, repo_root: Path, ignored: Sequence[str] = ()
+) -> bool:
+    """Every tracked file is the one HEAD names (unreadable status: False).
+
+    HEAD on the right commit is not the tree on the right commit. A checkout
+    that cannot replace one file (no permission, a full disk, a read-only
+    mount) says so on stderr, exits 0 and still moves HEAD; one killed half
+    way leaves new files under the old HEAD. Either way the files on disk are
+    a mix, which only the status shows.
+    """
+    try:
+        return not tree_is_dirty(porcelain(git, repo_root), ignored)
+    except GitError:
+        return False
+
+
 def switch_to(
-    git: GitRunner, repo_root: Path, remote_url: str | None, sha: str
+    git: GitRunner,
+    repo_root: Path,
+    remote_url: str | None,
+    sha: str,
+    ignored: Sequence[str] = (),
 ) -> StepFailure | None:
     """Make ``sha`` present and check it out detached (``checkout_failed`` otherwise)."""
     if not fetch_commit(git, repo_root, remote_url, sha):
@@ -144,16 +165,29 @@ def switch_to(
         return StepFailure(
             "checkout_failed", "the pinned commit could not be checked out"
         )
+    if not tree_matches_head(git, repo_root, ignored):
+        return StepFailure(
+            "checkout_failed",
+            "the checkout left files that differ from the pinned commit",
+        )
     return None
 
 
-def restore(git: GitRunner, repo_root: Path, sha: str | None) -> bool:
-    """Put HEAD back on ``sha`` (a no-op when it is there); False when it cannot."""
+def restore(
+    git: GitRunner, repo_root: Path, sha: str | None, ignored: Sequence[str] = ()
+) -> bool:
+    """Put HEAD *and the files* back on ``sha``; False when either is not there.
+
+    Never forced, so a tree that still differs after the checkout is reported
+    (the run ends ``rollback_failed``) instead of being called restored.
+    """
     if sha is None:
         return False
-    if current_head(git, repo_root) == sha:
-        return True
-    return checkout_detached(git, repo_root, sha)
+    if current_head(git, repo_root) != sha and not checkout_detached(
+        git, repo_root, sha
+    ):
+        return False
+    return tree_matches_head(git, repo_root, ignored)
 
 
 def lock_matches(repo_root: Path, expected: str) -> bool:
@@ -202,5 +236,6 @@ __all__ = [
     "restore",
     "run_backup",
     "switch_to",
+    "tree_matches_head",
     "verified_manifest",
 ]

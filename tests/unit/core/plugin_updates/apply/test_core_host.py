@@ -327,3 +327,35 @@ async def test_rollback_run_skips_manifest_and_migrations(tmp_path: Path) -> Non
     assert done.state is RunState.FINALIZING, done.message
     assert env.fetcher.calls == []
     assert "db migrate" not in env.log and env.git.head == OLD
+
+
+async def test_a_checkout_that_left_files_behind_is_not_installed(
+    tmp_path: Path,
+) -> None:
+    # git moved HEAD and exited 0, but could not replace one tracked file.
+    env = build_core_env(tmp_path)
+    env.git.leaves = {NEW: " M baselith/core/app.py\n", OLD: ""}
+    done = await env.driver.execute(env.run)
+    assert (done.state, done.failure) == (RunState.FAILED, "checkout_failed")
+    assert "differ from the pinned commit" in done.message
+    assert env.git.head == OLD
+    assert "db migrate" not in env.log and env.runner.restarts == 0
+    assert env.store.active(CORE_CLAIM) is None
+
+
+async def test_a_tree_that_cannot_be_put_back_keeps_the_claim(tmp_path: Path) -> None:
+    env = build_core_env(tmp_path)
+    env.git.leaves = {NEW: " M baselith/core/app.py\n"}  # and it stays that way
+    done = await env.driver.execute(env.run)
+    assert done.state is RunState.ROLLBACK_FAILED
+    assert env.git.head == OLD  # HEAD is back; the files are not
+    assert env.store.active(CORE_CLAIM) is not None
+    assert env.runner.restarts == 0
+
+
+async def test_a_release_that_is_not_newer_is_never_installed(tmp_path: Path) -> None:
+    env = build_core_env(tmp_path)
+    env.driver._framework = "1.15.0"  # what runs here is already the release
+    done = await env.driver.execute(env.run)
+    assert (done.state, done.failure) == (RunState.FAILED, "not_newer")
+    assert env.log == [] and env.git.writes == []

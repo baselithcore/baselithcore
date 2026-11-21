@@ -33,6 +33,20 @@ def first_run_delay(base: float) -> float:
     return base * random.uniform(1.0, FIRST_RUN_SPREAD)  # nosec B311 - scheduling, not crypto
 
 
+#: Each later wait is stretched or shortened by up to this share of the interval.
+TICK_SPREAD = 0.1
+
+
+def next_wait(interval: float) -> float:
+    """``interval`` moved by a random share, different on every tick.
+
+    Spreading only the first run kept a fleet in step for good: instances
+    restarted together checked inside the same half minute every interval, all
+    against one API rate limit. A little drift per tick takes them apart.
+    """
+    return interval * random.uniform(1 - TICK_SPREAD, 1 + TICK_SPREAD)  # nosec B311 - scheduling, not crypto
+
+
 def fresh_enough(
     cache: UpdateCache, interval: float, now: datetime | None = None
 ) -> bool:
@@ -77,7 +91,14 @@ async def run_periodic(
             raise
         except Exception as exc:
             logger.warning("plugin_update_loop_error: %s", type(exc).__name__)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(next_wait(interval))
 
 
-__all__ = ["FIRST_RUN_SPREAD", "first_run_delay", "fresh_enough", "run_periodic"]
+__all__ = [
+    "FIRST_RUN_SPREAD",
+    "TICK_SPREAD",
+    "first_run_delay",
+    "fresh_enough",
+    "next_wait",
+    "run_periodic",
+]

@@ -8,6 +8,7 @@ that cannot answer becomes a missing input or a ``warn`` item, never an error.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
@@ -17,7 +18,7 @@ from typing import TypeVar
 from baselith.core.config.plugin_update_apply import UpdateApplyConfig
 from baselith.core.config.plugins import installed_plugins_dir
 from baselith.core.plugins.discovery import has_manifest
-from baselith.core.plugins.overlay import registered_overlay_dirs
+from baselith.core.plugins.overlay import overlay_root, registered_overlay_dirs
 
 from ._core_preflight import CoreState
 from ._core_state import local_core_state
@@ -70,6 +71,20 @@ def disk_free(path: Path) -> int:
     return shutil.disk_usage(probe).free
 
 
+def _in_overlay(name: str) -> bool:
+    """The overlay holds ``name``: registered in this process, or there on disk.
+
+    The registered names are this process's own. The CLI and the updater never
+    import the plugins package, so theirs are empty, and an overlay install
+    read there as a plugin that ships with the tree. Its entry in the overlay
+    directory is there whoever asks.
+    """
+    if any(p.name == name for p in registered_overlay_dirs()):
+        return True
+    root = overlay_root()
+    return root is not None and os.path.lexists(root / name)
+
+
 def ships_with_tree(
     name: str,
     *,
@@ -92,12 +107,10 @@ def ships_with_tree(
     """
     if not name or name.startswith((".", "_")) or "/" in name or "\\" in name:
         return False
-    names = (
-        {p.name for p in registered_overlay_dirs()}
-        if overlaid is None
-        else set(overlaid)
-    )
-    if name in names:
+    if overlaid is None:
+        if _in_overlay(name):
+            return False
+    elif name in set(overlaid):
         return False
     own = (tree if tree is not None else installed_plugins_dir()) / name
     if own.is_symlink() or not own.is_dir() or not has_manifest(own):

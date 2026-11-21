@@ -109,6 +109,25 @@ def test_ships_with_tree_is_false_for_an_overlay_install(tmp_path: Path) -> None
     assert not ships_with_tree("aura", tree=tree, loader_root=tree, overlaid={"aura"})
 
 
+def test_an_overlay_install_is_seen_by_a_process_that_never_loaded_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The CLI and the updater never import the plugins package, so nothing is
+    # registered there: the overlay directory itself has to answer.
+    tree = tmp_path / "plugins"
+    _plugin_dir(tree, "aura")
+    _plugin_dir(tree, "bundled_only")
+    overlay = tmp_path / "overlay"
+    entry = _plugin_dir(overlay / ".store", "aura-1.2.0")
+    (overlay / "aura").symlink_to(entry, target_is_directory=True)
+    monkeypatch.setenv("BASELITH_PLUGIN_OVERLAY_DIR", str(overlay))
+
+    assert not ships_with_tree("aura", tree=tree, loader_root=tree)
+    assert ships_with_tree("bundled_only", tree=tree, loader_root=tree)
+    monkeypatch.delenv("BASELITH_PLUGIN_OVERLAY_DIR")
+    assert ships_with_tree("aura", tree=tree, loader_root=tree)
+
+
 def test_ships_with_tree_is_false_outside_the_tree(tmp_path: Path) -> None:
     tree = tmp_path / "plugins"
     tree.mkdir()

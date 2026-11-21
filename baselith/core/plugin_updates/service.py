@@ -110,6 +110,7 @@ class PluginUpdateService(AnnouncingMixin):
         self._interval: float = config.check_interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
         self._last: tuple[float, CheckReport] | None = None
         self._deployment: Deployment | None = None
         self._bounds: list[PluginBoundsIssue] | None = None
@@ -305,10 +306,21 @@ class PluginUpdateService(AnnouncingMixin):
         repeatedly pressed "Check now" cannot burn the API rate limit. The
         periodic loop calls :meth:`check_now` directly and is not throttled.
         """
+        recent = self._recent_check()
+        if recent is not None:
+            return recent
+        # Callers that arrive while a check runs wait for it and take its
+        # report. Testing the cooldown only before the wait let each of them
+        # run a full check of its own, one after the other.
+        async with self._request_lock:
+            return self._recent_check() or await self.check_now()
+
+    def _recent_check(self) -> CheckReport | None:
+        """The report of a check this process finished inside the cooldown."""
         last = self._last
-        if last is not None and time.monotonic() - last[0] < CHECK_COOLDOWN_SECONDS:
-            return self._present(last[1]) or last[1]  # re-stamp: runs move fast
-        return await self.check_now()
+        if last is None or time.monotonic() - last[0] >= CHECK_COOLDOWN_SECONDS:
+            return None
+        return self._present(last[1]) or last[1]  # re-stamp: runs move fast
 
     async def check_now(self) -> CheckReport:
         """Run the plugin and system checks, save and announce new updates.
@@ -331,15 +343,21 @@ class PluginUpdateService(AnnouncingMixin):
                 self._config.github_token,
                 max_bytes=self._config.max_artifact_mb * 1024 * 1024,
             )
-            candidates, error = await self._plugin_part(source, previous)
-            system = await self._system_part(source, previous)
+            # Three independent lookups, each of which contains its own
+            # failures: run together, a check waits for the slowest host, not
+            # for the sum of all three (60 s each against one that never answers).
+            (candidates, error), system, distribution = await asyncio.gather(
+                self._plugin_part(source, previous),
+                self._system_part(source, previous),
+                distribution_part(self._config, source, previous),
+            )
             system = self._scope_system(system)
             report = CheckReport(
                 checked_at=datetime.now(UTC),
                 candidates=candidates,
                 error=error,
                 system=system,
-                distribution=await distribution_part(self._config, source, previous),
+                distribution=distribution,
             )
             try:
                 self._cache.save(report)

@@ -93,3 +93,34 @@ async def test_a_failing_check_does_not_stop_the_loop(tmp_path: Path) -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert calls >= 2
+
+
+def test_every_later_wait_drifts_a_little() -> None:
+    waits = {_schedule.next_wait(3600.0) for _ in range(200)}
+
+    assert len(waits) > 100  # not one fixed period
+    low, high = 3600 * (1 - _schedule.TICK_SPREAD), 3600 * (1 + _schedule.TICK_SPREAD)
+    assert all(low <= w <= high for w in waits)
+
+
+async def test_the_loop_sleeps_the_drifted_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) == 3:
+            raise asyncio.CancelledError
+
+    async def check() -> None:
+        return None
+
+    monkeypatch.setattr(_schedule.asyncio, "sleep", sleep)
+    monkeypatch.setattr(_schedule, "next_wait", lambda interval: interval * 1.05)
+    with pytest.raises(asyncio.CancelledError):
+        await _schedule.run_periodic(
+            check, UpdateCache(tmp_path), 100.0, first_delay=0, on_reuse=lambda: None
+        )
+
+    assert slept[1:] == [105.0, 105.0]

@@ -60,7 +60,7 @@ from .._io import CommandRunner, SchemaEnvError, schema_env
 from ..boot_report import latest_active_plugins
 from ..models import CORE_CLAIM, ApplyRun, RunKind, RunState, UpdaterHeartbeat
 from ..store import RunStateConflict, RunStore
-from ._core_guards import CoreRelease, core_blockers
+from ._core_guards import CoreRelease, core_blockers, release_is_newer
 from ._core_health import CoreExpectation, wait_core_healthy
 from ._core_steps import (
     StepFailure,
@@ -154,11 +154,13 @@ class CoreHostDriver:
 
     def _switch_locked(self, sha: str) -> StepFailure | None:
         with self._store.plugin_lock(CORE_CLAIM):
-            return switch_to(self._git, self._root, self._remote, sha)
+            return switch_to(
+                self._git, self._root, self._remote, sha, self._config.ignored_paths
+            )
 
     def _restore_locked(self, sha: str | None) -> bool:
         with self._store.plugin_lock(CORE_CLAIM):
-            return restore(self._git, self._root, sha)
+            return restore(self._git, self._root, sha, self._config.ignored_paths)
 
     async def _blocked(
         self, run: ApplyRun, release: CoreRelease | None, target: str
@@ -222,6 +224,12 @@ class CoreHostDriver:
             if isinstance(found, StepFailure):
                 return await self._fail(run, found.code, found.detail)
             release = CoreRelease.of(found)
+            # Every writer of a run is trusted to pick a newer release; the
+            # driver that installs it checks anyway, as the plugin path does.
+            if not release_is_newer(self._framework, release.version):
+                return await self._fail(
+                    run, "not_newer", "the release is not newer than what runs here"
+                )
         release, blocked = await self._blocked(run, release, target)
         if blocked is not None:
             return await self._fail(run, blocked.code, blocked.detail)

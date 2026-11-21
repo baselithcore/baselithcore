@@ -145,3 +145,31 @@ async def test_a_release_needing_a_host_build_is_refused_before_any_change(
     assert "host_build_required" in done.message
     assert env.runner.calls == [] and current_target(env.overlay, "demo") is None
     assert not (env.overlay / ".store" / "demo-1.2.0").exists()
+
+
+async def test_the_floor_is_what_is_live_not_what_the_run_says(env: Env) -> None:
+    first = await env.ex.execute(env.run)
+    assert first.state is RunState.SUCCEEDED
+    assert current_target(env.overlay, "demo") == "demo-1.2.0"
+
+    # A report built by a process that cannot see the overlay names the bundled
+    # version, so the run says "from 1.1.0" while 1.2.0 is live. Judged against
+    # the run, the release passed as newer than what was running.
+    stale = env.store.create(
+        kind=RunKind.UPDATE,
+        plugin="demo",
+        from_version="1.1.0",
+        to_version="1.2.0",
+        tarball_sha256=env.meta["tarball_sha256"],
+        requested_by="policy",
+        approval_required=False,
+        approval_ttl_seconds=60,
+    )
+    restarts = env.runner.restarts
+
+    done = await env.ex.execute(stale)
+
+    assert (done.state, done.failure) == (RunState.FAILED, "verification_failed")
+    assert "not_newer" in done.message
+    assert current_target(env.overlay, "demo") == "demo-1.2.0"
+    assert env.runner.restarts == restarts

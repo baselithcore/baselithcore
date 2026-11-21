@@ -63,13 +63,21 @@ def git_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
         if k not in SCRUBBED_ENV and not k.startswith(_WITHHELD_PREFIXES)
     }
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # ``git status`` refreshes the index when it can, taking ``index.lock`` to
+    # do it. A status issued by a pre-flight in the API while the updater is
+    # switching commits made that checkout fail on the lock, and on a rollback
+    # left the failed version checked out. Read-only commands stay read-only.
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     return env
 
 
 def subprocess_git(argv: Sequence[str], *, cwd: Path, timeout: float) -> GitResult:
     """Run ``git <argv>`` without a shell; stdout capped at :data:`STDOUT_CAP`.
 
-    Only ``git`` and its subcommand are logged on failure.
+    Output past the cap is a failure (``-1``), never a prefix handed back as
+    if it were the answer: a status cut at the cap read as a clean tree when
+    the change that mattered sorted after the cut. Only ``git`` and its
+    subcommand are logged on failure.
     """
     with tempfile.TemporaryFile() as out:
         try:
@@ -92,8 +100,14 @@ def subprocess_git(argv: Sequence[str], *, cwd: Path, timeout: float) -> GitResu
             )
             return GitResult(-1, "")
         out.seek(0)
-        text = out.read(STDOUT_CAP).decode("utf-8", "replace")
-    return GitResult(done.returncode, text)
+        raw = out.read(STDOUT_CAP + 1)
+    if len(raw) > STDOUT_CAP:
+        logger.error(
+            "core_update_git_failed command=%s error=output_over_cap",
+            argv[0] if argv else "",
+        )
+        return GitResult(-1, "")
+    return GitResult(done.returncode, raw.decode("utf-8", "replace"))
 
 
 def head_sha(git: GitRunner, cwd: Path) -> str:

@@ -10,11 +10,18 @@ from typing import Any
 import pytest
 
 from baselith.core.plugin_updates.apply.drivers import _git
+from baselith.core.plugin_updates.apply.drivers._core_steps import (
+    host_state,
+    restore,
+    switch_to,
+    tree_matches_head,
+)
 from baselith.core.plugin_updates.apply.drivers._git import (
     STDOUT_CAP,
     GitError,
     checkout_detached,
     fetch_commit,
+    git_env,
     head_sha,
     lock_sha256,
     porcelain,
@@ -145,14 +152,95 @@ def test_git_env_is_scrubbed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
         assert secret not in env
 
 
-def test_stdout_is_capped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _git_printing(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
     def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        kwargs["stdout"].write(b"x" * (STDOUT_CAP + 4096))
+        kwargs["stdout"].write(payload)
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(_git.subprocess, "run", fake_run)
+
+
+def test_output_at_the_cap_is_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _git_printing(monkeypatch, b"x" * STDOUT_CAP)
     result = subprocess_git(["log"], cwd=tmp_path, timeout=5)
     assert result.returncode == 0 and len(result.stdout) == STDOUT_CAP
+
+
+def test_output_past_the_cap_is_a_failure_not_a_prefix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _git_printing(monkeypatch, b"x" * (STDOUT_CAP + 1))
+    assert subprocess_git(["log"], cwd=tmp_path, timeout=5) == (-1, "")
+
+
+def test_a_status_too_long_to_read_is_unknown_not_clean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A megabyte of changes under an ignored path, then the one that matters:
+    # cut at the cap, the real change was never seen and the tree read clean.
+    ignored = b"".join(b" M data/%06d.bin\n" % i for i in range(70_000))
+    _git_printing(monkeypatch, ignored + b" M baselith/core/app.py\n")
+    with pytest.raises(GitError):
+        porcelain(subprocess_git, tmp_path)
+    assert host_state(subprocess_git, tmp_path, ["data"])[1] is None
+
+
+def test_read_only_commands_take_no_index_lock(repo: tuple[Path, str, str]) -> None:
+    root, _, _ = repo
+    assert git_env({})["GIT_OPTIONAL_LOCKS"] == "0"
+    lock = root / ".git" / "index.lock"
+    lock.write_text("")  # a checkout in flight holds this
+    (root / "app.py").write_text("V = 3\n")
+    assert porcelain(subprocess_git, root) == " M app.py\n"
+
+
+def test_a_checkout_that_leaves_a_file_behind_is_not_a_switch(
+    repo: tuple[Path, str, str],
+) -> None:
+    root, first, second = repo
+    pinned = root / "pinned"
+    pinned.mkdir()
+    (pinned / "model.py").write_text("OLD = 1\n")
+    _sh(root, "add", ".")
+    _sh(root, "commit", "-qm", "three")
+    third = _sh(root, "rev-parse", "HEAD")
+    (pinned / "model.py").write_text("NEW = 2\n")
+    _sh(root, "commit", "-qam", "four")
+    fourth = _sh(root, "rev-parse", "HEAD")
+    _sh(root, "checkout", "-q", "--detach", third)
+    assert switch_to(subprocess_git, root, None, fourth) is None
+    assert restore(subprocess_git, root, third)
+
+    # The directory cannot be written: git cannot replace the file in it,
+    # says so on stderr, exits 0 and moves HEAD all the same.
+    pinned.chmod(0o555)
+    try:
+        failure = switch_to(subprocess_git, root, None, fourth)
+        moved = head_sha(subprocess_git, root) == fourth
+    finally:
+        pinned.chmod(0o755)
+    if not moved:
+        pytest.skip("this git refuses the checkout outright")
+
+    assert failure is not None and failure.code == "checkout_failed"
+    assert (pinned / "model.py").read_text() == "OLD = 1\n"
+    assert not tree_matches_head(subprocess_git, root)
+    # HEAD being on the right commit is not the tree being restored either.
+    assert not restore(subprocess_git, root, fourth)
+    assert first != second
+
+
+def test_restore_reports_a_tree_that_still_differs(repo: tuple[Path, str, str]) -> None:
+    root, first, second = repo
+    assert restore(subprocess_git, root, first)
+    assert head_sha(subprocess_git, root) == first
+    (root / "app.py").write_text("half written by a killed checkout\n")
+
+    assert not restore(subprocess_git, root, first)
+    assert restore(subprocess_git, root, first, ["app.py"])  # an ignored path
+    assert not restore(subprocess_git, root, None)
 
 
 def test_a_timeout_is_minus_one(
