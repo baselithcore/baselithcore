@@ -41,8 +41,16 @@ logger = logging.getLogger(__name__)
 
 _MIGRATE_TIMEOUT = 1800.0
 _SCHEMA_INIT_TIMEOUT = 600.0
-#: The run message of a migration that failed after the checkout.
-MIGRATION_UNTOUCHED = "nothing changed on the running API; the schema may have advanced"
+#: Added to the run message of a failure after the checkout was switched. The
+#: files are back on the previous commit, but the API was not restarted: a
+#: worker that imported a module while the new files were in place keeps that
+#: version, so "nothing changed" would not be true.
+NOT_RESTARTED = (
+    "the checkout is back on the previous commit but the running API was not "
+    "restarted: restart it so every worker serves one version"
+)
+#: What a failed migration adds: the database may be ahead of the code.
+SCHEMA_MAY_HAVE_ADVANCED = "the schema may have advanced"
 
 
 def DB_MIGRATE_ARGV() -> list[str]:
@@ -57,10 +65,16 @@ def SCHEMA_INIT_ALL_ARGV() -> list[str]:
 
 @dataclass(frozen=True)
 class StepFailure:
-    """Why a step failed: the run's failure code and a path-free detail."""
+    """Why a step failed: the run's failure code and a path-free detail.
+
+    ``touched`` says the checkout's files were changed before the step failed,
+    so the running API may have imported some of them (see
+    :data:`NOT_RESTARTED`).
+    """
 
     code: str
     detail: str = ""
+    touched: bool = False
 
 
 async def verified_manifest(
@@ -169,6 +183,7 @@ def switch_to(
         return StepFailure(
             "checkout_failed",
             "the checkout left files that differ from the pinned commit",
+            touched=True,
         )
     return None
 
@@ -213,20 +228,25 @@ def migrate(
     rc = runner((argv or DB_MIGRATE_ARGV)(), env=env, timeout=_MIGRATE_TIMEOUT)
     if rc != 0:
         return StepFailure(
-            "migration_failed", f"db migrate exited {rc}; {MIGRATION_UNTOUCHED}"
+            "migration_failed",
+            f"db migrate exited {rc}; {SCHEMA_MAY_HAVE_ADVANCED}",
+            touched=True,
         )
     if schema_init:
         rc = runner(SCHEMA_INIT_ALL_ARGV(), env=env, timeout=_SCHEMA_INIT_TIMEOUT)
         if rc != 0:
             return StepFailure(
-                "migration_failed", f"schema-init exited {rc}; {MIGRATION_UNTOUCHED}"
+                "migration_failed",
+                f"schema-init exited {rc}; {SCHEMA_MAY_HAVE_ADVANCED}",
+                touched=True,
             )
     return None
 
 
 __all__ = [
     "DB_MIGRATE_ARGV",
-    "MIGRATION_UNTOUCHED",
+    "NOT_RESTARTED",
+    "SCHEMA_MAY_HAVE_ADVANCED",
     "SCHEMA_INIT_ALL_ARGV",
     "StepFailure",
     "current_head",

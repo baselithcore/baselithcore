@@ -63,6 +63,7 @@ from ..store import RunStateConflict, RunStore
 from ._core_guards import CoreRelease, core_blockers, release_is_newer
 from ._core_health import CoreExpectation, wait_core_healthy
 from ._core_steps import (
+    NOT_RESTARTED,
     StepFailure,
     current_head,
     host_state,
@@ -267,7 +268,7 @@ class CoreHostDriver:
             return await self._undo(run, switched)
         if not await asyncio.to_thread(lock_matches, self._root, release.lock_sha256):
             failure = StepFailure(
-                "lock_mismatch", "uv.lock differs from the signed hash"
+                "lock_mismatch", "uv.lock differs from the signed hash", touched=True
             )
             return await self._undo(run, failure)
         if env is not None:
@@ -279,9 +280,17 @@ class CoreHostDriver:
         return await self._activate(run, release.version)
 
     async def _undo(self, run: ApplyRun, failure: StepFailure) -> ApplyRun:
-        """Put HEAD back on ``previous_target`` without a restart (nothing stopped)."""
+        """Put HEAD back on ``previous_target`` without a restart (nothing stopped).
+
+        When the files were switched first, the message says the API was not
+        restarted (:data:`NOT_RESTARTED`): the run is ``failed``, the tree is
+        back, and the operator is told what the API may still be running.
+        """
         if await asyncio.to_thread(self._restore_locked, run.previous_target):
-            return await self._fail(run, failure.code, failure.detail)
+            detail = failure.detail
+            if failure.touched:
+                detail = f"{detail}; {NOT_RESTARTED}" if detail else NOT_RESTARTED
+            return await self._fail(run, failure.code, detail)
         return await self._rollback_failed(
             run, failure.code, failure.detail, _NO_RESTORE
         )

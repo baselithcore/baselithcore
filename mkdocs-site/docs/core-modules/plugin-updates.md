@@ -1761,8 +1761,14 @@ install. Every transition is journaled first:
 7. `baselith db migrate`, then `baselith plugin schema-init` for every enabled
    plugin (skipped when `UPDATE_APPLY_SCHEMA_INIT` is off), with the owner's
    credentials. A failure puts HEAD back without a restart and fails
-   `migration_failed`: "nothing changed on the running API; the schema may have
-   advanced".
+   `migration_failed` (or `lock_mismatch`, when the checked-out `uv.lock` is not
+   the signed one) — and says so: "the schema may have advanced; the checkout
+   is back on the previous commit but the running API was not restarted:
+   restart it so every worker serves one version". The files were switched
+   while the API kept running, so a worker may have imported a module from the
+   new commit; only a restart makes every worker serve one version again.
+   Unlike a plugin run, which switches its link last, a core run cannot claim
+   "nothing changed on the running API". Restart the API after such a run.
 8. `activating`: `UPDATE_APPLY_RESTART_COMMAND` restarts the API, then
    `health_checking` waits for the [core health verdict](#core-install-seams).
    A failed restart (`restart_failed`) or verdict (`health_failed`) moves to

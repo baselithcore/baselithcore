@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from baselith.core.plugin_updates.apply.drivers._core_steps import NOT_RESTARTED
 from baselith.core.plugin_updates.apply.models import (
     CORE_CLAIM,
     RunKind,
@@ -143,6 +144,7 @@ async def test_lock_changed_after_checkout_restores_previous_head(
     done = await env.driver.execute(env.run)
     assert (done.state, done.failure) == (RunState.FAILED, "lock_mismatch")
     assert env.git.head == OLD
+    assert NOT_RESTARTED in done.message
     assert "db migrate" not in env.log and env.runner.restarts == 0
 
 
@@ -151,6 +153,7 @@ async def test_failed_checkout_leaves_head_and_restarts_nothing(tmp_path: Path) 
     env.git.checkout_fails.add(NEW)
     done = await env.driver.execute(env.run)
     assert (done.state, done.failure) == (RunState.FAILED, "checkout_failed")
+    assert NOT_RESTARTED not in done.message  # git refused: no file was switched
     assert env.git.head == OLD and env.runner.restarts == 0
 
 
@@ -172,6 +175,9 @@ async def test_migration_failure_restores_head_and_does_not_restart(
     done = await env.driver.execute(env.run)
     assert (done.state, done.failure) == (RunState.FAILED, "migration_failed")
     assert "the schema may have advanced" in done.message
+    # The files were switched while the API kept running: it is not "untouched".
+    assert "nothing changed" not in done.message
+    assert NOT_RESTARTED in done.message
     assert env.git.head == OLD and env.runner.restarts == 0
 
 
@@ -338,6 +344,7 @@ async def test_a_checkout_that_left_files_behind_is_not_installed(
     done = await env.driver.execute(env.run)
     assert (done.state, done.failure) == (RunState.FAILED, "checkout_failed")
     assert "differ from the pinned commit" in done.message
+    assert NOT_RESTARTED in done.message
     assert env.git.head == OLD
     assert "db migrate" not in env.log and env.runner.restarts == 0
     assert env.store.active(CORE_CLAIM) is None
