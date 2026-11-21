@@ -104,6 +104,18 @@ one line to stderr, such as
 `BASELITH_CLI_DEBUG=1` adds the full exception, and also reports plugin CLIs
 (`plugins/<name>/cli.py`) that failed to register, which stay quiet otherwise.
 
+### Tenant scope under row-level security
+
+With `DB_RLS_ENABLED=true` most commands run inside
+[`system_tenant_scope()`](../advanced/multi-tenancy.md#system-tenant-scope);
+the exempt ones are listed under
+[Multi-Tenancy](../advanced/multi-tenancy.md#cli-commands-that-deliberately-run-unbound).
+Whether RLS is on is read from the storage settings, and the database pool
+module is loaded only when it is: with RLS off, dispatching a scoped command
+(`info`, `docs`, `update status`) does not import the database driver and its
+pool. Storage settings that cannot be read count as RLS off, and the first
+real database touch reports the configuration error.
+
 ---
 
 ## General

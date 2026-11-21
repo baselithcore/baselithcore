@@ -111,15 +111,17 @@ def _rls_enabled() -> bool:
 
     Resolved at dispatch time rather than at import, so ``baselith --help`` and
     the exempt invocations (:func:`is_scoped_command`) never pull in the storage
-    config or the psycopg pool module. Every *scoped* command does pay that
-    import — including ones that only read config, such as ``info`` and
-    ``docs`` — because the answer is a property of the deployment, not of the
-    command.
+    config. It is read from the storage settings themselves, the one value
+    ``baselith.core.db.connection`` copies into ``DB_RLS_ENABLED``: asking that
+    module instead imported psycopg, its pool and the HTTP middleware package
+    behind them to answer one boolean, a third of the start-up of every scoped
+    command (``info``, ``update status``, ``docs``). The pool module is now
+    loaded only when the answer is yes and a tenant has to be bound.
 
-    Degrades to ``False`` when the answer cannot be obtained: the module is
-    absent (``ImportError``), or ``baselith.core.db.connection`` raises while evaluating
-    ``get_storage_config()`` at import — a malformed ``DB_*`` environment
-    variable, for instance. That is not a fail-open hole in the tenant
+    Degrades to ``False`` when the answer cannot be obtained: the settings
+    module is absent (``ImportError``), or ``get_storage_config()`` raises — a
+    malformed ``DB_*`` environment variable, for instance. That is not a
+    fail-open hole in the tenant
     declaration: a storage config that will not parse describes no reachable
     pool, so there is nothing to bind a tenant *on*, and the first real database
     touch re-raises the same error where the operator can see it. What it does
@@ -128,7 +130,9 @@ def _rls_enabled() -> bool:
     keep answering instead of dying on a stack trace from the dispatcher.
     """
     try:
-        from baselith.core.db.connection import DB_RLS_ENABLED
+        from baselith.core.config import get_storage_config
+
+        return bool(get_storage_config().db_rls_enabled)
     except ImportError:  # pragma: no cover - depends on the installed core
         return False
     except Exception as exc:
@@ -138,7 +142,6 @@ def _rls_enabled() -> bool:
         # actually ran reports the configuration problem in its own format.
         logger.debug("cli_rls_probe_failed error=%s", exc)
         return False
-    return bool(DB_RLS_ENABLED)
 
 
 def run_command(command: str, handler: CommandHandler, args: argparse.Namespace) -> int:
