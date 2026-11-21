@@ -163,6 +163,12 @@ not call into question the lawfulness of processing that already happened
 latest record for a purpose wins, so a re-grant restores consent without
 rewriting history.
 
+The `evidence` text stays in the consent record, where an erasure reaches it.
+The `privacy.consent` audit event for a grant carries `evidence_sha256`, the
+digest of that text, instead of the text: the trail shows which evidence a
+grant rested on, and free text that may name the person does not outlive the
+erasure for as long as the trail is retained.
+
 Consent is **tenant-scoped**. Subject ids are only unique inside a tenant, so
 every record carries the `tenant_id` of the request that wrote it, and every
 read, withdrawal, export and erasure sees only the current tenant's records:

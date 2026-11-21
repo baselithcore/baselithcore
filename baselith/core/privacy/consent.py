@@ -20,6 +20,7 @@ registered alongside every other store.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -293,10 +294,18 @@ class ConsentService:
             AuditEventType.PRIVACY_CONSENT,
             resource=subject_id,
             action="grant",
+            # The proof itself stays in the consent store, where an erasure
+            # reaches it. The trail keeps a digest: it shows which evidence a
+            # grant rested on without carrying free text that may name the
+            # person for as long as the trail is retained.
             details={
                 "purpose": purpose,
                 "notice_version": notice_version,
-                "evidence": evidence,
+                "evidence_sha256": (
+                    hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+                    if evidence
+                    else ""
+                ),
             },
         )
         return record
